@@ -2,10 +2,11 @@ name = "deensubs"
 main = "src/worker.js"
 compatibility_date = "2024-12-01"
 
-[[rules]]
-type = "Text"
-globs = ["**/*.html"]
-
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "deensubs-media"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "deensubs-db"
+database_id = "3d1d4521-a145-4450-b196-60a37674dd03"
