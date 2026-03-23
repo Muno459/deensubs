@@ -40,13 +40,40 @@ async function handleAPI(path, request, env) {
 
   if (path.startsWith('/api/media/') && request.method === 'GET') {
     const key = decodeURIComponent(path.replace('/api/media/', ''));
-    const object = await env.MEDIA_BUCKET.get(key);
+    const rangeHeader = request.headers.get('Range');
+    let object;
+
+    if (rangeHeader) {
+      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+      if (match) {
+        const offset = parseInt(match[1]);
+        const end = match[2] ? parseInt(match[2]) : undefined;
+        const length = end !== undefined ? end - offset + 1 : undefined;
+        object = await env.MEDIA_BUCKET.get(key, { range: { offset, length } });
+      }
+    }
+
+    if (!object) {
+      object = await env.MEDIA_BUCKET.get(key);
+    }
+
     if (!object) {
       return new Response('Not found', { status: 404 });
     }
+
     const respHeaders = new Headers();
     object.writeHttpMetadata(respHeaders);
+    respHeaders.set('Accept-Ranges', 'bytes');
     respHeaders.set('Cache-Control', 'public, max-age=86400');
+
+    if (rangeHeader && object.range) {
+      const { offset, length } = object.range;
+      respHeaders.set('Content-Range', 'bytes ' + offset + '-' + (offset + length - 1) + '/' + object.size);
+      respHeaders.set('Content-Length', String(length));
+      return new Response(object.body, { status: 206, headers: respHeaders });
+    }
+
+    respHeaders.set('Content-Length', String(object.size));
     return new Response(object.body, { headers: respHeaders });
   }
 

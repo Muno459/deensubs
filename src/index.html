@@ -299,102 +299,100 @@
     }
     .section-title em { font-style: italic; color: var(--gold); }
 
-    .featured {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden; background: var(--surface);
-      display: grid; grid-template-columns: 1.1fr 1fr;
-      margin-bottom: 2rem;
-      transition: all 0.6s cubic-bezier(0.23,1,0.32,1);
+    /* ═══ Video Player ═══ */
+    .player-wrap {
       position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #000;
+      border: 1px solid var(--border);
+      margin-bottom: 1.5rem;
     }
-    .featured::after {
-      content: ''; position: absolute; inset: 0; border-radius: var(--radius);
-      background: radial-gradient(800px circle at var(--mx, 50%) var(--my, 50%), rgba(196,164,76,0.04), transparent 40%);
-      opacity: 0; transition: opacity 0.5s; pointer-events: none;
+    .player-wrap video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
     }
-    .featured:hover { border-color: var(--border-hover); }
-    .featured:hover::after { opacity: 1; }
-
-    .featured-thumb {
-      aspect-ratio: 16/10;
-      background: linear-gradient(135deg, #0a0a12 0%, #12121e 50%, #0e0e18 100%);
-      position: relative; overflow: hidden; cursor: pointer;
+    .player-wrap video::cue {
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      font-family: 'Outfit', system-ui, sans-serif;
+      font-size: 1rem;
+      line-height: 1.4;
     }
-    .featured-thumb::before {
-      content: ''; position: absolute; inset: 0;
-      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Crect x='25' y='25' width='70' height='70' fill='none' stroke='rgba(196,164,76,0.04)' stroke-width='0.5'/%3E%3Crect x='25' y='25' width='70' height='70' fill='none' stroke='rgba(196,164,76,0.04)' stroke-width='0.5' transform='rotate(45 60 60)'/%3E%3C/svg%3E");
-      background-size: 120px; opacity: 0.6;
-    }
-    .featured-thumb::after {
-      content: ''; position: absolute; inset: 0;
-      background: linear-gradient(135deg, transparent 40%, var(--surface) 100%);
-    }
-
-    .featured-play {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%); z-index: 2;
-      width: 64px; height: 64px; border-radius: 50%;
-      background: rgba(196,164,76,0.85);
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 8px 40px rgba(196,164,76,0.2);
-      transition: all 0.5s cubic-bezier(0.23,1,0.32,1);
+    .player-overlay {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: linear-gradient(135deg, rgba(5,5,7,0.85) 0%, rgba(10,10,18,0.7) 50%, rgba(5,5,7,0.85) 100%);
       cursor: pointer;
+      transition: opacity 0.5s ease;
+      z-index: 2;
     }
-    .featured-play::after {
-      content: ''; width: 0; height: 0;
-      border-style: solid; border-width: 11px 0 11px 18px;
-      border-color: transparent transparent transparent var(--bg);
-      margin-left: 4px;
+    .player-overlay.hidden {
+      opacity: 0; pointer-events: none;
     }
-    .featured-play::before {
-      content: ''; position: absolute; inset: -6px;
-      border-radius: 50%;
-      border: 1px solid rgba(196,164,76,0.2);
-      animation: playRing 2s ease-in-out infinite;
+    .player-overlay::before {
+      content: ''; position: absolute; inset: 0;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Crect x='25' y='25' width='70' height='70' fill='none' stroke='rgba(196,164,76,0.03)' stroke-width='0.5'/%3E%3Crect x='25' y='25' width='70' height='70' fill='none' stroke='rgba(196,164,76,0.03)' stroke-width='0.5' transform='rotate(45 60 60)'/%3E%3C/svg%3E");
+      background-size: 120px;
     }
-    @keyframes playRing {
-      0%,100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.15); opacity: 0; }
-    }
-    .featured:hover .featured-play {
-      transform: translate(-50%, -50%) scale(1.1);
-      box-shadow: 0 12px 50px rgba(196,164,76,0.3);
-    }
-
-    .featured-badge {
-      position: absolute; top: 1.25rem; left: 1.25rem; z-index: 2;
+    .player-badge {
+      position: absolute; top: 1.25rem; left: 1.25rem;
       padding: 0.3rem 0.85rem;
-      background: rgba(5,5,7,0.7);
+      background: rgba(5,5,7,0.6);
       backdrop-filter: blur(12px);
       border: 1px solid rgba(196,164,76,0.12);
       border-radius: 100px;
       font-size: 0.68rem; font-weight: 500;
       color: var(--gold); letter-spacing: 0.04em;
     }
-
-    .featured-info {
-      padding: 2.5rem;
-      display: flex; flex-direction: column; justify-content: center;
+    .player-play {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: rgba(196,164,76,0.85);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 8px 40px rgba(196,164,76,0.25);
+      transition: all 0.5s cubic-bezier(0.23,1,0.32,1);
+      position: relative;
     }
-    .featured-ar {
+    .player-play::after {
+      content: ''; width: 0; height: 0;
+      border-style: solid; border-width: 13px 0 13px 22px;
+      border-color: transparent transparent transparent var(--bg);
+      margin-left: 5px;
+    }
+    .player-play::before {
+      content: ''; position: absolute; inset: -8px;
+      border-radius: 50%;
+      border: 1px solid rgba(196,164,76,0.2);
+      animation: playRing 2s ease-in-out infinite;
+    }
+    @keyframes playRing {
+      0%,100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.2); opacity: 0; }
+    }
+    .player-overlay:hover .player-play {
+      transform: scale(1.1);
+      box-shadow: 0 12px 50px rgba(196,164,76,0.35);
+    }
+    .player-meta {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 2rem 1.75rem;
+      background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    }
+    .player-meta-ar {
       font-family: 'Amiri', serif;
-      font-size: 1.5rem; color: var(--gold);
-      direction: rtl; margin-bottom: 0.5rem;
-      text-shadow: 0 0 30px rgba(196,164,76,0.15);
+      font-size: 1.1rem; color: var(--gold);
+      direction: rtl; margin-bottom: 0.25rem;
     }
-    .featured-info h3 {
+    .player-meta h3 {
       font-family: 'Cormorant Garamond', serif;
-      font-size: 1.75rem; font-weight: 500;
-      margin-bottom: 0.35rem; line-height: 1.25;
+      font-size: 1.4rem; font-weight: 500; margin-bottom: 0.25rem;
     }
-    .featured-source {
-      color: var(--text-2); font-size: 0.82rem;
-      font-weight: 300; margin-bottom: 1rem;
-    }
-    .featured-tags {
-      display: flex; align-items: center; gap: 0.6rem;
-      margin-bottom: 1.25rem;
+    .player-meta-sub {
+      color: var(--text-2); font-size: 0.78rem; font-weight: 300;
+      display: flex; align-items: center; gap: 0.75rem;
     }
     .tag {
       display: inline-flex; align-items: center; gap: 0.3rem;
@@ -404,13 +402,6 @@
       border-radius: 100px;
       color: var(--gold); font-size: 0.68rem;
       font-weight: 500; letter-spacing: 0.02em;
-    }
-    .featured-quote {
-      color: var(--text-2); font-style: italic; font-weight: 300;
-      line-height: 1.7; border-left: 2px solid rgba(196,164,76,0.15);
-      padding-left: 1rem;
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 1rem;
     }
 
     .video-grid {
@@ -690,24 +681,24 @@
       <div class="section-label reveal">Featured</div>
       <h2 class="section-title reveal">Latest <em>Content</em></h2>
 
-      <div class="featured reveal rd1" id="featured-card">
-        <div class="featured-thumb">
-          <div class="featured-play"></div>
-          <div class="featured-badge">Masjid al-Haram</div>
-        </div>
-        <div class="featured-info">
-          <div class="featured-ar">خطبة الجمعة ١ شوّال</div>
-          <h3>1st Shawwal Jumuah Khutbah</h3>
-          <p class="featured-source">Masjid al-Haram, Makkah al-Mukarramah</p>
-          <div class="featured-tags">
-            <span class="tag">Arabic &rarr; English</span>
-            <span class="tag">AI Subtitled</span>
+      <div class="player-wrap reveal rd1">
+        <video id="player" crossorigin="anonymous" preload="metadata">
+          <source src="/api/media/videos/1st-shawwal-jumuah-khutbah.mp4" type="video/mp4">
+        </video>
+        <div class="player-overlay" id="player-overlay">
+          <div class="player-badge">Masjid al-Haram</div>
+          <div class="player-play"></div>
+          <div class="player-meta">
+            <div class="player-meta-ar">خطبة الجمعة ١ شوّال</div>
+            <h3>1st Shawwal Jumuah Khutbah</h3>
+            <div class="player-meta-sub">
+              <span>Makkah al-Mukarramah</span>
+              <span class="tag">Arabic &rarr; English</span>
+              <span class="tag">AI Subtitled</span>
+            </div>
           </div>
-          <p class="featured-quote">"Praise be to Allah, who bestowed on us blessings, both outward and inward. We praise Him, Glorified be He, and thank Him..."</p>
         </div>
       </div>
-
-      <div class="video-grid" id="video-grid"></div>
     </div>
   </section>
 
@@ -790,7 +781,7 @@
       if (!tick) { requestAnimationFrame(function() { hdr.classList.toggle('scrolled', scrollY > 50); tick = false; }); tick = true; }
     }, { passive: true });
 
-    document.querySelectorAll('.featured, .video-card, .pipe-card').forEach(function(card) {
+    document.querySelectorAll('.pipe-card').forEach(function(card) {
       card.addEventListener('mousemove', function(e) {
         var r = card.getBoundingClientRect();
         card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
@@ -822,30 +813,40 @@
       });
     }
 
-    (function loadVideos() {
-      fetch('/api/videos').then(function(r) { return r.json(); }).then(function(data) {
-        if (data.videos && data.videos.length > 0) {
-          var grid = document.getElementById('video-grid');
-          grid.innerHTML = data.videos.map(function(v, i) {
-            var name = v.key.replace('videos/', '').replace(/\.[^.]+$/, '').replace(/_/g, ' ');
-            var d = Math.min(i + 1, 4);
-            return '<div class="video-card reveal rd' + d + '">' +
-              '<div class="video-thumb"><div class="play-sm"></div></div>' +
-              '<div class="video-body"><h3>' + name + '</h3>' +
-              '<div class="video-meta"><span class="tag">AR &rarr; EN</span>' +
-              '<span>' + (v.size / 1048576).toFixed(1) + ' MB</span></div></div></div>';
-          }).join('');
-          grid.querySelectorAll('.reveal').forEach(function(el) { obs.observe(el); });
-          grid.querySelectorAll('.video-card').forEach(function(card) {
-            card.addEventListener('mousemove', function(e) {
-              var r = card.getBoundingClientRect();
-              card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
-              card.style.setProperty('--my', (e.clientY - r.top) + 'px');
-            });
-          });
-        }
-      }).catch(function() {});
-    })();
+    // ── Video Player ──
+    var player = document.getElementById('player');
+    var overlay = document.getElementById('player-overlay');
+    var subsLoaded = false;
+
+    overlay.addEventListener('click', function() {
+      if (!subsLoaded) {
+        subsLoaded = true;
+        fetch('/api/media/subs/1st-shawwal-jumuah-khutbah.srt')
+          .then(function(r) { return r.text(); })
+          .then(function(srt) {
+            var vtt = 'WEBVTT\n\n' + srt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+            var blob = new Blob([vtt], { type: 'text/vtt' });
+            var track = document.createElement('track');
+            track.kind = 'subtitles';
+            track.label = 'English';
+            track.srclang = 'en';
+            track.src = URL.createObjectURL(blob);
+            track.default = true;
+            player.appendChild(track);
+            track.track.mode = 'showing';
+          }).catch(function() {});
+      }
+      overlay.classList.add('hidden');
+      player.controls = true;
+      player.play();
+    });
+
+    player.addEventListener('pause', function() {
+      if (player.ended) {
+        overlay.classList.remove('hidden');
+        player.controls = false;
+      }
+    });
   </script>
 </body>
 </html>
