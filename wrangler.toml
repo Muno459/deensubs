@@ -1,0 +1,10 @@
+name = "deensubs"
+main = "src/worker.js"
+compatibility_date = "2024-12-01"
+
+[site]
+bucket = "./public"
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "deensubs-media"
