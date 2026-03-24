@@ -159,6 +159,27 @@ app.post('/api/videos/:slug/comments', async (c) => {
   return c.json({ comment }, 201);
 });
 
+// ── Static assets ──
+
+const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0a0a10"/><rect x="7" y="7" width="18" height="18" fill="none" stroke="#c4a44c" stroke-width="1.2"/><rect x="7" y="7" width="18" height="18" fill="none" stroke="#c4a44c" stroke-width="1.2" transform="rotate(45 16 16)"/><circle cx="16" cy="16" r="3" fill="none" stroke="#c4a44c" stroke-width="0.8"/></svg>`;
+
+app.get('/favicon.svg', (c) => new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
+
+app.get('/favicon.ico', (c) => new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
+
+app.get('/robots.txt', (c) => new Response(`User-agent: *\nAllow: /\nSitemap: ${new URL(c.req.url).origin}/sitemap.xml\n`, { headers: { 'Content-Type': 'text/plain' } }));
+
+app.get('/manifest.json', (c) => c.json({
+  name: 'DeenSubs',
+  short_name: 'DeenSubs',
+  description: 'Arabic Islamic content with English subtitles',
+  start_url: '/',
+  display: 'standalone',
+  background_color: '#050507',
+  theme_color: '#c4a44c',
+  icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml' }],
+}));
+
 // ── RSS Feed ──
 
 app.get('/feed.xml', async (c) => {

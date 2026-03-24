@@ -134,6 +134,7 @@ export function renderWatch({ video, comments, related, cues, base }) {
         <input type="range" class="vb-vr" id="vvr" min="0" max="1" step=".05" value="1" title="Volume">
         <button class="vb" id="vcc" title="Subtitles (c)">CC</button>
         <button class="vb vb-spd" id="vspd" title="Speed">1x</button>
+        <button class="vb" id="vpip" title="Picture-in-Picture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="2" y="3" width="20" height="14" rx="2"/><rect x="11" y="9" width="10" height="7" rx="1" fill="currentColor" opacity=".3"/></svg></button>
         <button class="vb" id="vfs" title="Fullscreen (f)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg></button>
       </div>
     </div>
@@ -251,10 +252,27 @@ export function renderPage(title, body, categories, activeCat) {
 <meta property="og:title" content="${e(title)} — DeenSubs"><meta property="og:type" content="website">
 <meta property="og:description" content="Arabic Islamic lectures with AI-powered English subtitles.">
 <link rel="alternate" type="application/rss+xml" title="DeenSubs" href="/feed.xml">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#c4a44c">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Amiri:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>${CSS}</style></head><body>
+<a href="#main-content" class="skip-link">Skip to content</a>
 <div class="grain"></div>
+<div class="kb-modal" id="kb-modal"><div class="kb-inner"><h2>Keyboard Shortcuts</h2>
+<div class="kb-grid">
+<div class="kb-row"><kbd>Space</kbd><span>Play / Pause</span></div>
+<div class="kb-row"><kbd>K</kbd><span>Play / Pause</span></div>
+<div class="kb-row"><kbd>J</kbd><span>Rewind 10s</span></div>
+<div class="kb-row"><kbd>L</kbd><span>Forward 10s</span></div>
+<div class="kb-row"><kbd>&larr;</kbd><span>Rewind 10s</span></div>
+<div class="kb-row"><kbd>&rarr;</kbd><span>Forward 10s</span></div>
+<div class="kb-row"><kbd>F</kbd><span>Fullscreen</span></div>
+<div class="kb-row"><kbd>M</kbd><span>Mute</span></div>
+<div class="kb-row"><kbd>C</kbd><span>Toggle captions</span></div>
+<div class="kb-row"><kbd>?</kbd><span>Show this help</span></div>
+</div><button class="kb-close" id="kb-close">Close</button></div></div>
 <nav class="nav" id="nav">
   <div class="nav-in">
     <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
@@ -269,7 +287,7 @@ export function renderPage(title, body, categories, activeCat) {
     <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}</div>
   </div>
 </div>
-<main class="wrap">${body}</main>
+<main class="wrap" id="main-content">${body}</main>
 <footer class="ft"><div class="ft-in">
   <div class="ft-brand"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span>DeenSubs</span></div>
   <span class="ft-copy">&copy; 2026 DeenSubs — Making Islamic knowledge accessible</span>
@@ -379,7 +397,18 @@ fs.onclick=function(){document.fullscreenElement?document.exitFullscreen():vp.re
 
 document.onkeydown=function(ev){if(ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA')return;
   switch(ev.key){case' ':case'k':ev.preventDefault();toggle();break;case'ArrowLeft':case'j':vid.currentTime=Math.max(0,vid.currentTime-10);break;
-  case'ArrowRight':case'l':vid.currentTime=Math.min(vid.duration,vid.currentTime+10);break;case'f':fs.click();break;case'm':vid.muted=!vid.muted;break;case'c':cc.click();break}};
+  case'ArrowRight':case'l':vid.currentTime=Math.min(vid.duration,vid.currentTime+10);break;case'f':fs.click();break;case'm':vid.muted=!vid.muted;updVol();break;case'c':cc.click();break;
+  case'?':var km=document.getElementById('kb-modal');km.classList.toggle('kb-open');break;case'Escape':document.getElementById('kb-modal').classList.remove('kb-open');break}};
+
+// PiP
+var pipBtn=document.getElementById('vpip');
+if(pipBtn&&document.pictureInPictureEnabled){pipBtn.onclick=function(){document.pictureInPictureElement?document.exitPictureInPicture():vid.requestPictureInPicture().catch(function(){})}}
+else if(pipBtn)pipBtn.style.display='none';
+
+// Keyboard modal close
+document.getElementById('kb-close').onclick=function(){document.getElementById('kb-modal').classList.remove('kb-open')};
+document.getElementById('kb-modal').onclick=function(ev){if(ev.target===this)this.classList.remove('kb-open')};
+void 0
 
 try{var sv=JSON.parse(localStorage.getItem('p_'+slug));if(sv&&sv.t>5&&sv.t<sv.d-10)vid.currentTime=sv.t}catch(e){}
 if(trl)trl.onclick=function(ev){var l=ev.target.closest('.tl');if(l){vid.currentTime=+l.dataset.s;vid.play()}};
@@ -649,6 +678,25 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.wrap{padding:1rem 1rem 3rem}}
 @media(max-width:480px){.wi-top{flex-direction:column;gap:.4rem}.wi-acts{align-self:flex-start}
 .sc-th{width:90px}.hscroll .card{min-width:220px}.hero-info h1{font-size:1.15rem}}
+
+/* ── Skip Link ── */
+.skip-link{position:absolute;top:-100%;left:1rem;padding:.5rem 1rem;background:var(--gold);color:var(--bg);border-radius:0 0 8px 8px;font-size:.8rem;font-weight:600;z-index:999;transition:top .2s}
+.skip-link:focus{top:0}
+
+/* ── Focus styles ── */
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:4px}
+button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+/* ── Keyboard Modal ── */
+.kb-modal{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s}
+.kb-modal.kb-open{opacity:1;pointer-events:auto}
+.kb-inner{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:1.5rem 2rem;max-width:380px;width:90%}
+.kb-inner h2{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;margin-bottom:1rem;color:var(--gold)}
+.kb-grid{display:flex;flex-direction:column;gap:.35rem;margin-bottom:1.25rem}
+.kb-row{display:flex;align-items:center;justify-content:space-between;font-size:.78rem;color:var(--t2)}
+.kb-row kbd{background:var(--s3);border:1px solid var(--bd);border-radius:4px;padding:.1rem .45rem;font-family:inherit;font-size:.7rem;color:var(--tx);min-width:28px;text-align:center}
+.kb-close{width:100%;padding:.45rem;background:var(--s3);border:1px solid var(--bd);border-radius:8px;color:var(--t2);font:inherit;font-size:.78rem;cursor:pointer;transition:all .2s}
+.kb-close:hover{border-color:var(--bdh);color:var(--tx)}
 
 /* ── View Transitions ── */
 @view-transition{navigation:auto}
