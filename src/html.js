@@ -301,7 +301,10 @@ export function render404() {
 }
 
 // ═══ ADMIN ═══
-export function renderAdmin({ videos, categories, key }) {
+export function renderAdmin({ videos, categories, key, editing }) {
+  const v = editing || {};
+  const isEdit = !!editing;
+  const formAction = isEdit ? `/admin/edit/${v.id}?key=${e(key)}` : `/admin/video?key=${e(key)}`;
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — DeenSubs</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui;background:#0a0a0f;color:#e0e0e0;padding:2rem;max-width:900px;margin:0 auto}
 h1{margin-bottom:1.5rem;color:#c4a44c}h2{margin:2rem 0 1rem;font-size:1.1rem}
@@ -312,27 +315,32 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#c4a44c}
 button{margin-top:1rem;padding:.6rem 1.5rem;background:#c4a44c;color:#0a0a0f;border:none;border-radius:6px;font:inherit;font-weight:600;cursor:pointer}
 button:hover{filter:brightness(1.1)}
 table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #1a1a1a}
-th{color:#888;font-weight:500}.del{color:#c44;background:none;border:1px solid #c44;padding:.2rem .6rem;border-radius:4px;font-size:.75rem;cursor:pointer;margin:0}
-.del:hover{background:#c44;color:#fff}a{color:#c4a44c}</style></head>
+th{color:#888;font-weight:500}
+.act{padding:.2rem .6rem;border-radius:4px;font-size:.75rem;cursor:pointer;margin:0;background:none;border:1px solid #444;color:#aaa}
+.act:hover{border-color:#c4a44c;color:#c4a44c}
+.del{color:#c44;border-color:#c44}.del:hover{background:#c44;color:#fff}
+.acts{display:flex;gap:.3rem}
+a{color:#c4a44c}.back{display:inline-block;margin-bottom:1rem;font-size:.85rem}</style></head>
 <body><h1>DeenSubs Admin</h1>
-<h2>Add Video</h2>
-<form method="post" action="/admin/video?key=${e(key)}">
-<label>Title *</label><input name="title" required>
-<label>Arabic Title</label><input name="title_ar" dir="rtl">
-<label>Slug * (url-friendly)</label><input name="slug" required pattern="[a-z0-9-]+">
-<label>Description</label><textarea name="description" rows="3"></textarea>
-<label>Category</label><select name="category_id">${categories.map(c=>`<option value="${c.id}">${e(c.name)}</option>`).join('')}</select>
-<label>Source (e.g., Masjid al-Haram)</label><input name="source">
-<label>Duration (seconds)</label><input name="duration" type="number">
-<label>R2 Video Key * (e.g., videos/file.mp4)</label><input name="video_key" required>
-<label>R2 Subtitle Key (e.g., subs/file.srt)</label><input name="srt_key">
-<label>R2 Thumbnail Key (e.g., thumbs/file.jpg)</label><input name="thumb_key">
-<button type="submit">Add Video</button></form>
-<h2>Videos (${videos.length})</h2>
+${isEdit?`<a href="/admin?key=${e(key)}" class="back">&larr; Back to list</a>`:''}
+<h2>${isEdit?'Edit Video':'Add Video'}</h2>
+<form method="post" action="${formAction}">
+<label>Title *</label><input name="title" required value="${e(v.title||'')}">
+<label>Arabic Title</label><input name="title_ar" dir="rtl" value="${e(v.title_ar||'')}">
+${!isEdit?`<label>Slug * (url-friendly)</label><input name="slug" required pattern="[a-z0-9-]+" value="${e(v.slug||'')}">`:'' }
+<label>Description</label><textarea name="description" rows="3">${e(v.description||'')}</textarea>
+<label>Category</label><select name="category_id">${categories.map(c=>`<option value="${c.id}"${v.category_id===c.id?' selected':''}>${e(c.name)}</option>`).join('')}</select>
+<label>Source (e.g., Masjid al-Haram)</label><input name="source" value="${e(v.source||'')}">
+<label>Duration (seconds)</label><input name="duration" type="number" value="${v.duration||''}">
+<label>R2 Video Key *</label><input name="video_key" required value="${e(v.video_key||'')}">
+<label>R2 Subtitle Key</label><input name="srt_key" value="${e(v.srt_key||'')}">
+<label>R2 Thumbnail Key</label><input name="thumb_key" value="${e(v.thumb_key||'')}">
+<button type="submit">${isEdit?'Save Changes':'Add Video'}</button></form>
+${!isEdit?`<h2>Videos (${videos.length})</h2>
 <table><tr><th>Title</th><th>Category</th><th>Views</th><th>Likes</th><th>Created</th><th></th></tr>
-${videos.map(v=>`<tr><td><a href="/watch/${e(v.slug)}">${e(v.title)}</a></td><td>${e(v.category_name||'')}</td><td>${v.views}</td><td>${v.likes}</td><td>${ago(v.created_at)}</td>
-<td><form method="post" action="/admin/delete/${v.id}?key=${e(key)}" onsubmit="return confirm('Delete?')"><button class="del">Delete</button></form></td></tr>`).join('')}
-</table></body></html>`;
+${videos.map(vi=>`<tr><td><a href="/watch/${e(vi.slug)}">${e(vi.title)}</a></td><td>${e(vi.category_name||'')}</td><td>${vi.views}</td><td>${vi.likes}</td><td>${ago(vi.created_at)}</td>
+<td><div class="acts"><a href="/admin/edit/${vi.id}?key=${e(key)}" class="act">Edit</a><form method="post" action="/admin/delete/${vi.id}?key=${e(key)}" onsubmit="return confirm('Delete?')" style="margin:0"><button class="act del">Del</button></form></div></td></tr>`).join('')}
+</table>`:''}</body></html>`;
 }
 
 // ═══ LAYOUT ═══
@@ -606,7 +614,10 @@ cf.onsubmit=function(ev){ev.preventDefault();var btn=cf.querySelector('button');
   fetch('/api/videos/'+slug+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({author:cf.author.value.trim(),content:cf.content.value.trim()})
   }).then(function(r){return r.json()}).then(function(d){if(d.comment){var div=document.createElement('div');div.className='cm cm-new';
-    div.innerHTML='<div class="cm-h"><strong>'+d.comment.author.replace(/</g,'&lt;')+'</strong><time>just now</time></div><p>'+d.comment.content.replace(/</g,'&lt;')+'</p>';
+    var aName=d.comment.author.replace(/</g,'&lt;'),initials=aName.split(' ').map(function(w){return w[0]}).join('').slice(0,2).toUpperCase();
+    var cols=['#c4a44c','#4c8ac4','#4ca476','#8a4cc4','#4cb4a4','#c44c6e','#c48a4c'],ah=0;
+    for(var ci=0;ci<aName.length;ci++)ah=((ah<<5)-ah+aName.charCodeAt(ci))|0;
+    div.innerHTML='<div class="cm-av" style="background:'+cols[Math.abs(ah)%cols.length]+'">'+initials+'</div><div class="cm-body"><div class="cm-h"><strong>'+aName+'</strong><time>just now</time></div><p>'+d.comment.content.replace(/</g,'&lt;')+'</p></div>';
     cl.insertBefore(div,cl.firstChild);cf.reset();var h=document.querySelector('.cms h2'),n=cl.children.length;h.textContent=n+' Comment'+(n!==1?'s':'')}
   }).catch(function(){}).finally(function(){btn.disabled=false})};
 })();`;
@@ -617,13 +628,16 @@ const CSS = `
 :root{--bg:#050507;--s1:#0b0b10;--s2:#111118;--s3:#191920;--bd:rgba(196,164,76,.06);--bdh:rgba(196,164,76,.14);--gold:#c4a44c;--gd:rgba(196,164,76,.06);--tx:#eae6da;--t2:#807c72;--t3:#4a4840;--r:10px}
 html{scroll-behavior:smooth}body{font-family:'Outfit',system-ui,sans-serif;background:var(--bg);color:var(--tx);line-height:1.6;-webkit-font-smoothing:antialiased}
 body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{color:inherit;text-decoration:none}
+.wrap{animation:pageIn .4s ease both}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
 .grain{position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.015;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 
 /* ── Nav ── */
 .nav{position:sticky;top:0;z-index:100;background:rgba(5,5,7,.94);backdrop-filter:blur(20px) saturate(1.2);border-bottom:1px solid var(--bd)}
 .nav-in{max-width:1320px;margin:0 auto;padding:.55rem 1.25rem;display:flex;align-items:center;gap:.85rem}
-.logo{display:flex;align-items:center;gap:.5rem;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:.5rem;flex-shrink:0;transition:opacity .2s}
+.logo:hover{opacity:.8}
 .logo-m{width:24px;height:24px;position:relative;display:flex;align-items:center;justify-content:center}
 .logo-m svg{position:absolute;inset:0}.logo-m span{font-family:'Amiri',serif;font-size:.75rem;font-weight:700;color:var(--gold);position:relative;z-index:1}
 .logo-t{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;letter-spacing:.03em}
@@ -659,7 +673,8 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .hero{margin-bottom:1.75rem}
 .hero-card{display:grid;grid-template-columns:1.4fr 1fr;border-radius:var(--r);overflow:hidden;background:var(--s1);border:1px solid var(--bd);transition:all .35s ease}
 .hero-card:hover{border-color:var(--bdh);box-shadow:0 12px 44px rgba(0,0,0,.4)}
-.hero-th{aspect-ratio:16/9;background:var(--s2);position:relative;overflow:hidden;background-size:cover;background-position:center}
+.hero-th{aspect-ratio:16/9;background:var(--s2);position:relative;overflow:hidden;background-size:cover;background-position:center;transition:transform .5s ease}
+.hero-card:hover .hero-th{transform:scale(1.03)}
 .hero-th .tsvg{position:absolute;inset:0;width:100%;height:100%}
 .hero-ov{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transition:background .3s}
 .hero-card:hover .hero-ov{background:rgba(0,0,0,.2)}
@@ -671,7 +686,7 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .hero-dur{bottom:.85rem;right:.85rem;top:auto;position:absolute}
 .hero-info{padding:1.75rem;display:flex;flex-direction:column;justify-content:center;gap:.3rem}
 .hero-ar{font-family:'Amiri',serif;font-size:1.05rem;color:var(--gold);direction:rtl}
-.hero-info h1{font-family:'Cormorant Garamond',serif;font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:600;line-height:1.25}
+.hero-info h1{font-family:'Cormorant Garamond',serif;font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:600;line-height:1.25;background:linear-gradient(135deg,var(--tx) 0%,var(--gold) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .hero-desc{color:var(--t2);font-size:.78rem;font-weight:300;line-height:1.65;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .hero-mt{display:flex;align-items:center;gap:.4rem;font-size:.68rem;color:var(--t2);flex-wrap:wrap;margin-top:.15rem}
 
@@ -693,7 +708,8 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .card:hover{border-color:var(--bdh);transform:translateY(-3px);box-shadow:0 10px 32px rgba(0,0,0,.3)}
 .card-anim{opacity:0;transform:translateY(16px);transition:opacity .5s ease,transform .5s ease,border-color .3s,box-shadow .3s}
 .card-vis{opacity:1;transform:translateY(0)}
-.card-th{aspect-ratio:16/9;background:var(--s2);position:relative;overflow:hidden;background-size:cover;background-position:center}
+.card-th{aspect-ratio:16/9;background:var(--s2);position:relative;overflow:hidden;background-size:cover;background-position:center;transition:transform .4s ease}
+.card:hover .card-th{transform:scale(1.04)}
 .card-th .tsvg{position:absolute;inset:0;width:100%;height:100%}
 .card-hover{position:absolute;inset:0;background:rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .25s}
 .card:hover .card-hover{opacity:1}
@@ -794,8 +810,8 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 /* ── Sidebar ── */
 .ws{position:sticky;top:3.5rem}
 .ws h3{font-family:'Cormorant Garamond',serif;font-size:.9rem;font-weight:600;margin-bottom:.5rem;padding-bottom:.35rem;border-bottom:1px solid var(--bd)}
-.sc{display:flex;gap:.55rem;padding:.4rem 0;transition:background .15s;border-radius:6px}
-.sc:hover{background:var(--s2)}
+.sc{display:flex;gap:.55rem;padding:.4rem .35rem;transition:all .2s;border-radius:6px;margin:0 -.35rem}
+.sc:hover{background:var(--s2);transform:translateX(2px)}
 .sc-th{width:115px;aspect-ratio:16/9;background:var(--s2);border-radius:6px;flex-shrink:0;overflow:hidden;position:relative;background-size:cover;background-position:center}
 .sc-th .tsvg{position:absolute;inset:0;width:100%;height:100%}
 .sc-i{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:.08rem}

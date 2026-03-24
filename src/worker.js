@@ -141,6 +141,29 @@ app.post('/admin/video', async (c) => {
   return c.redirect('/admin?key=' + c.req.query('key'));
 });
 
+app.get('/admin/edit/:id', async (c) => {
+  if (!checkAdmin(c)) return c.text('Unauthorized', 401);
+  const db = c.env.DB;
+  const video = await db.prepare('SELECT * FROM videos WHERE id = ?').bind(parseInt(c.req.param('id'))).first();
+  if (!video) return c.text('Not found', 404);
+  const cats = (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  return c.html(renderAdmin({ videos: [], categories: cats, key: c.req.query('key'), editing: video }));
+});
+
+app.post('/admin/edit/:id', async (c) => {
+  if (!checkAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
+  const body = await c.req.parseBody();
+  await c.env.DB.prepare(
+    'UPDATE videos SET title=?, title_ar=?, description=?, category_id=?, source=?, duration=?, video_key=?, srt_key=?, thumb_key=? WHERE id=?'
+  ).bind(
+    body.title, body.title_ar || null, body.description || null,
+    parseInt(body.category_id) || null, body.source || null, parseInt(body.duration) || 0,
+    body.video_key, body.srt_key || null, body.thumb_key || null,
+    parseInt(c.req.param('id'))
+  ).run();
+  return c.redirect('/admin?key=' + c.req.query('key'));
+});
+
 app.post('/admin/delete/:id', async (c) => {
   if (!checkAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
   await c.env.DB.prepare('DELETE FROM videos WHERE id = ?').bind(parseInt(c.req.param('id'))).run();
