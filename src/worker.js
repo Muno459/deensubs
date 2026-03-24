@@ -66,7 +66,8 @@ app.get('/watch/:slug', async (c) => {
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
     parseSRT(c.env, video.srt_key),
   ]);
-  return c.html(renderPage(video.title, renderWatch({ video, comments: comments.results, related: related.results, cues }), cats.results, video.category_slug));
+  const base = new URL(c.req.url).origin;
+  return c.html(renderPage(video.title, renderWatch({ video, comments: comments.results, related: related.results, cues, base }), cats.results, video.category_slug));
 });
 
 app.get('/category/:slug', async (c) => {
@@ -156,6 +157,45 @@ app.post('/api/videos/:slug/comments', async (c) => {
   const r = await db.prepare('INSERT INTO comments (video_id, author, content) VALUES (?, ?, ?)').bind(video.id, author, content).run();
   const comment = await db.prepare('SELECT * FROM comments WHERE id = ?').bind(r.meta.last_row_id).first();
   return c.json({ comment }, 201);
+});
+
+// ── RSS Feed ──
+
+app.get('/feed.xml', async (c) => {
+  const videos = (await c.env.DB.prepare(`SELECT ${VC} ${VJ} ORDER BY v.created_at DESC LIMIT 50`).all()).results;
+  const base = new URL(c.req.url).origin;
+  const items = videos.map(v => `<item>
+<title>${e(v.title)}</title>
+<link>${base}/watch/${v.slug}</link>
+<description>${e(v.description || '')}</description>
+<pubDate>${new Date(v.created_at + 'Z').toUTCString()}</pubDate>
+<guid>${base}/watch/${v.slug}</guid>
+${v.thumb_key ? `<enclosure url="${base}/api/media/${v.thumb_key}" type="image/jpeg"/>` : ''}
+</item>`).join('\n');
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel><title>DeenSubs</title><link>${base}</link>
+<description>Arabic Islamic lectures with AI-powered English subtitles</description>
+<language>en</language>
+<atom:link href="${base}/feed.xml" rel="self" type="application/rss+xml"/>
+${items}</channel></rss>`, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' } });
+});
+
+// ── Sitemap ──
+
+app.get('/sitemap.xml', async (c) => {
+  const db = c.env.DB;
+  const [videos, cats] = await Promise.all([
+    db.prepare('SELECT slug, created_at FROM videos ORDER BY created_at DESC').all(),
+    db.prepare('SELECT slug FROM categories ORDER BY name').all(),
+  ]);
+  const base = new URL(c.req.url).origin;
+  const urls = [`<url><loc>${base}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`];
+  cats.results.forEach(c => urls.push(`<url><loc>${base}/category/${c.slug}</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`));
+  videos.results.forEach(v => urls.push(`<url><loc>${base}/watch/${v.slug}</loc><lastmod>${v.created_at?.split(' ')[0] || ''}</lastmod><priority>0.9</priority></url>`));
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('\n')}</urlset>`,
+    { headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' } });
 });
 
 // ── R2 Media ──
