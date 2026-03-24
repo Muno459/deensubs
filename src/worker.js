@@ -177,6 +177,11 @@ app.post('/admin/delete/:id', async (c) => {
 
 // ── API ──
 
+app.get('/api/videos', async (c) => {
+  const videos = (await c.env.DB.prepare(`SELECT ${VC} ${VJ} ORDER BY v.created_at DESC LIMIT 100`).all()).results;
+  return c.json({ videos });
+});
+
 app.post('/api/videos/:slug/like', async (c) => {
   const slug = c.req.param('slug');
   await c.env.DB.prepare('UPDATE videos SET likes = likes + 1 WHERE slug = ?').bind(slug).run();
