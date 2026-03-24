@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, renderAdmin, render404 } from './html';
+import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, renderAdmin, render404, renderAbout, renderBookmarks } from './html';
 
 const app = new Hono();
 
@@ -97,6 +97,17 @@ app.get('/search', async (c) => {
     }
   }
   return c.html(renderPage(q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
+});
+
+app.get('/about', async (c) => {
+  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const stats = await c.env.DB.prepare('SELECT COUNT(*) as count, SUM(views) as views FROM videos').first();
+  return c.html(renderPage('About', renderAbout({ stats }), cats));
+});
+
+app.get('/bookmarks', async (c) => {
+  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  return c.html(renderPage('Bookmarks', renderBookmarks(), cats));
 });
 
 // ── Admin ──

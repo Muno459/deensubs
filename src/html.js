@@ -21,14 +21,17 @@ function tsvg(title,color,w,h) {
 }
 
 // ── Video Card ──
+function isNew(d) { return d && (Date.now() - new Date(d+'Z').getTime()) < 7*86400000; }
+
 function vcard(v,opts) {
   opts=opts||{};
-  const th=thu(v),col=v.category_color||'#c4a44c';
+  const th=thu(v),col=v.category_color||'#c4a44c',fresh=isNew(v.created_at);
   return `<a href="/watch/${e(v.slug)}" class="card${opts.anim?' card-anim':''}">
 <div class="card-th"${th?` data-bg="${e(th)}"`:''}>
   ${!th?tsvg(v.title,col):''}
   <div class="card-hover"><div class="card-pi"></div></div>
   ${v.duration?`<span class="dur">${ft(v.duration)}</span>`:''}
+  ${fresh?'<span class="badge-new">NEW</span>':''}
 </div>
 <div class="card-bd">
   <h3>${e(v.title)}</h3>
@@ -195,7 +198,16 @@ export function renderWatch({ video, comments, related, cues, base }) {
 <script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__TITLE__',e(video.title).replace(/'/g,"\\\'")).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',video.source?e(video.source):'')}</script>`;
 }
 
-function commentHTML(c) { return `<div class="cm"><div class="cm-h"><strong>${e(c.author)}</strong><time>${ago(c.created_at)}</time></div><p>${e(c.content)}</p></div>`; }
+function avatarColor(name) {
+  let h=0;for(let i=0;i<name.length;i++)h=((h<<5)-h+name.charCodeAt(i))|0;
+  const hues=['#c4a44c','#4c8ac4','#4ca476','#8a4cc4','#4cb4a4','#c44c6e','#c48a4c'];
+  return hues[Math.abs(h)%hues.length];
+}
+function commentHTML(c) {
+  const initials = e(c.author).split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  const col = avatarColor(c.author);
+  return `<div class="cm"><div class="cm-av" style="background:${col}">${initials}</div><div class="cm-body"><div class="cm-h"><strong>${e(c.author)}</strong><time>${ago(c.created_at)}</time></div><p>${e(c.content)}</p></div></div>`;
+}
 
 // ═══ CATEGORY ═══
 export function renderCategory({ category, videos, sort }) {
@@ -211,6 +223,74 @@ export function renderSearch({ query, videos }) {
   return `<section class="sec">
 <div class="sec-hd"><h1>${query?'Results for &ldquo;'+e(query)+'&rdquo;':'Search'}</h1><span class="cat-ct">${videos.length} result${videos.length!==1?'s':''}</span></div>
 <div class="grid">${videos.length?videos.map(v=>vcard(v)).join(''):`<p class="emp">${query?'No results found. Try different keywords.':'Enter a search term above.'}</p>`}</div></section>`;
+}
+
+// ═══ ABOUT ═══
+export function renderAbout({ stats }) {
+  return `
+<div class="about-page">
+  <div class="about-hero">
+    <svg class="about-geo" viewBox="0 0 200 200" fill="none" width="100" height="100"><rect x="40" y="40" width="120" height="120" stroke="rgba(196,164,76,.15)" stroke-width="1" transform="rotate(45 100 100)"/><rect x="40" y="40" width="120" height="120" stroke="rgba(196,164,76,.15)" stroke-width="1"/><circle cx="100" cy="100" r="25" stroke="rgba(196,164,76,.1)" stroke-width="1"/><circle cx="100" cy="100" r="8" fill="rgba(196,164,76,.08)"/></svg>
+    <h1>About <span>DeenSubs</span></h1>
+    <p class="about-lead">Bridging the language gap between Arabic Islamic scholarship and English-speaking communities worldwide.</p>
+  </div>
+  <div class="about-grid">
+    <div class="about-card">
+      <h3>Mission</h3>
+      <p>DeenSubs makes the words of Islamic scholars accessible to everyone. We use cutting-edge AI to transcribe Arabic lectures and translate them into English, preserving the depth and beauty of the original content.</p>
+    </div>
+    <div class="about-card">
+      <h3>Technology</h3>
+      <p>Powered by ElevenLabs Scribe v2 for Arabic speech recognition and AI for translation. Deployed on Cloudflare's global edge network for fast, reliable access from anywhere in the world.</p>
+    </div>
+    <div class="about-card">
+      <h3>Content</h3>
+      <p>We source content from trusted scholars and masajid including Masjid al-Haram and Masjid an-Nabawi. Every subtitle is reviewed for accuracy in both language and Islamic terminology.</p>
+    </div>
+  </div>
+  ${stats ? `<div class="about-stats">
+    <div class="about-stat"><span class="about-stat-n">${stats.count || 0}</span><span class="about-stat-l">Videos</span></div>
+    <div class="about-stat"><span class="about-stat-n">${stats.views || 0}</span><span class="about-stat-l">Total Views</span></div>
+    <div class="about-stat"><span class="about-stat-n">7</span><span class="about-stat-l">Categories</span></div>
+  </div>` : ''}
+  <div class="about-ayah">
+    <p class="about-ayah-ar">وَمَا أَرْسَلْنَاكَ إِلَّا رَحْمَةً لِّلْعَالَمِينَ</p>
+    <p class="about-ayah-en">"And We have not sent you except as a mercy to the worlds." — Quran 21:107</p>
+  </div>
+</div>`;
+}
+
+// ═══ BOOKMARKS ═══
+export function renderBookmarks() {
+  return `
+<section class="sec">
+  <div class="sec-hd"><h1>Saved Videos</h1></div>
+  <div class="grid" id="bk-grid">
+    <div class="skel-grid">${'<div class="skel-card"><div class="skel-th skel-shimmer"></div><div class="skel-bd"><div class="skel-line skel-shimmer"></div><div class="skel-line skel-line-s skel-shimmer"></div></div></div>'.repeat(4)}</div>
+  </div>
+</section>
+<script>
+(function(){
+  var bks=JSON.parse(localStorage.getItem('ds_bk')||'[]');
+  var grid=document.getElementById('bk-grid');
+  if(!bks.length){grid.innerHTML='<p class="emp">No saved videos yet. Bookmark videos while watching to see them here.</p>';return}
+  fetch('/api/videos').then(function(r){return r.json()}).then(function(d){
+    var map={};d.videos.forEach(function(v){map[v.slug]=v});
+    var found=bks.map(function(s){return map[s]}).filter(Boolean);
+    if(!found.length){grid.innerHTML='<p class="emp">No saved videos found.</p>';return}
+    grid.innerHTML=found.map(function(v){
+      return '<a href="/watch/'+v.slug+'" class="card"><div class="card-th"'+(v.thumb_key?' data-bg="/api/media/'+v.thumb_key+'"':'')+'>'
+        +(v.duration?'<span class="dur">'+Math.floor(v.duration/60)+':'+String(Math.floor(v.duration%60)).padStart(2,'0')+'</span>':'')
+        +'</div><div class="card-bd"><h3>'+v.title.replace(/</g,'&lt;')+'</h3>'
+        +'<div class="card-mt"><span>'+(v.source||'').replace(/</g,'&lt;')+'</span></div></div></a>';
+    }).join('');
+    // Lazy load
+    grid.querySelectorAll('[data-bg]').forEach(function(el){
+      el.style.backgroundImage="url('"+el.dataset.bg+"')";el.style.backgroundSize='cover';el.style.backgroundPosition='center';
+    });
+  }).catch(function(){grid.innerHTML='<p class="emp">Failed to load bookmarks.</p>'});
+})();
+</script>`;
 }
 
 // ═══ 404 ═══
@@ -292,20 +372,22 @@ export function renderPage(title, body, categories, activeCat) {
     <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
     <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
     <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search..." aria-label="Search" autocomplete="off"></form>
+    <a href="/bookmarks" class="nav-icon" title="Saved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg></a>
     <button class="nav-hb" id="hb" aria-label="Menu"><span></span><span></span><span></span></button>
   </div>
 </nav>
 <div class="mob-menu" id="mob">
   <div class="mob-in">
     <form action="/search" method="get" class="mob-sf"><input type="search" name="q" placeholder="Search..." autocomplete="off"></form>
-    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}</div>
+    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
+    <div class="mob-div"></div><a href="/bookmarks">Saved Videos</a><a href="/about">About</a></div>
   </div>
 </div>
 <main class="wrap" id="main-content">${body}</main>
 <footer class="ft"><div class="ft-in">
   <div class="ft-brand"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span>DeenSubs</span></div>
   <span class="ft-copy">&copy; 2026 DeenSubs — Making Islamic knowledge accessible</span>
-  <div class="ft-links"><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener">GitHub</a></div>
+  <div class="ft-links"><a href="/about">About</a><a href="/bookmarks">Saved</a><a href="/feed.xml">RSS</a><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener">GitHub</a></div>
 </div></footer>
 <script>
 document.getElementById('hb').onclick=function(){document.getElementById('mob').classList.toggle('open');document.body.classList.toggle('no-scroll')};
@@ -809,6 +891,51 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .btt{position:fixed;bottom:1.5rem;right:1.5rem;width:36px;height:36px;border-radius:50%;background:var(--s2);border:1px solid var(--bd);color:var(--t2);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;pointer-events:none}
 .btt-show{opacity:1;transform:translateY(0);pointer-events:auto}
 .btt:hover{border-color:var(--bdh);color:var(--gold)}
+
+/* ── New badge ── */
+.badge-new{position:absolute;top:.4rem;left:.4rem;padding:.1rem .35rem;background:#c44c4c;border-radius:4px;font-size:.55rem;font-weight:700;color:#fff;letter-spacing:.04em;z-index:2}
+
+/* ── Comment avatars ── */
+.cm{display:flex;gap:.65rem;padding:.75rem 0;border-bottom:1px solid var(--bd)}
+.cm:last-child{border-bottom:none}
+.cm-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700;color:var(--bg);flex-shrink:0;margin-top:.1rem}
+.cm-body{flex:1;min-width:0}
+
+/* ── Nav bookmark icon ── */
+.nav-icon{color:var(--t3);display:flex;align-items:center;transition:color .2s;flex-shrink:0}
+.nav-icon:hover{color:var(--gold)}
+
+/* ── Mobile menu divider ── */
+.mob-div{height:1px;background:var(--bd);margin:.5rem 0}
+
+/* ── About page ── */
+.about-page{max-width:700px;margin:0 auto;padding:2rem 0}
+.about-hero{text-align:center;margin-bottom:2.5rem}
+.about-geo{margin-bottom:1rem;opacity:.5}
+.about-hero h1{font-family:'Cormorant Garamond',serif;font-size:clamp(1.8rem,4vw,2.5rem);font-weight:300;margin-bottom:.75rem}
+.about-hero h1 span{font-weight:700;color:var(--gold)}
+.about-lead{color:var(--t2);font-size:.9rem;line-height:1.7;max-width:500px;margin:0 auto}
+.about-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:2.5rem}
+.about-card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem}
+.about-card h3{font-family:'Cormorant Garamond',serif;font-size:1rem;font-weight:600;color:var(--gold);margin-bottom:.4rem}
+.about-card p{color:var(--t2);font-size:.78rem;line-height:1.65}
+.about-stats{display:flex;justify-content:center;gap:3rem;margin-bottom:2.5rem}
+.about-stat{text-align:center}
+.about-stat-n{display:block;font-family:'Cormorant Garamond',serif;font-size:2rem;font-weight:300;color:var(--gold)}
+.about-stat-l{font-size:.65rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em}
+.about-ayah{text-align:center;padding:2rem;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r)}
+.about-ayah-ar{font-family:'Amiri',serif;font-size:1.3rem;color:var(--gold);direction:rtl;margin-bottom:.5rem}
+.about-ayah-en{color:var(--t2);font-size:.82rem;font-style:italic}
+
+/* ── Skeleton loading ── */
+.skel-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:.85rem}
+.skel-card{border-radius:var(--r);overflow:hidden;background:var(--s1);border:1px solid var(--bd)}
+.skel-th{aspect-ratio:16/9}
+.skel-bd{padding:.7rem .85rem .85rem}
+.skel-line{height:12px;border-radius:4px;margin-bottom:.4rem;width:80%}
+.skel-line-s{width:50%}
+.skel-shimmer{background:linear-gradient(90deg,var(--s2) 25%,var(--s3) 50%,var(--s2) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
 
 /* ── Comment timestamp links ── */
 .cm-ts{color:var(--gold);cursor:pointer;font-weight:500;transition:opacity .2s}
