@@ -126,9 +126,16 @@ export function renderWatch({ video, comments, related, cues, base }) {
     <div class="vp" id="vp">
       <video id="vid" crossorigin="anonymous" preload="metadata"${th?` poster="${e(th)}"`:''}><source src="/api/media/${e(video.video_key)}" type="video/mp4"></video>
       <div class="vp-spinner" id="vp-spin"></div>
+      <button class="vp-mini-close" id="vp-mini-x">&times;</button>
       <div class="vp-seek-ind vp-seek-l" id="seek-l"><svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg><span>10s</span></div>
       <div class="vp-seek-ind vp-seek-r" id="seek-r"><svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M11.5 8c2.65 0 5.05.99 6.9 2.6L22 7v9h-9l3.62-3.62C15.23 11.22 13.46 10.5 11.5 10.5c-3.54 0-6.55 2.31-7.6 5.5L1.53 15.22C2.92 11.03 6.85 8 11.5 8z"/></svg><span>10s</span></div>
       <div class="vp-big" id="vp-big"><div class="vp-bigb"></div></div>
+      <div class="vp-end" id="vp-end">
+        <div class="vp-end-inner">
+          <button class="vp-end-replay" id="vp-replay"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg><span>Replay</span></button>
+          <div class="vp-end-next" id="vp-end-next"></div>
+        </div>
+      </div>
       <div class="vp-bar" id="vp-bar">
         <button class="vb" id="vpp" title="Play (k)"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path id="ppi" d="M8 5v14l11-7z"/></svg></button>
         <div class="vp-sk" id="vsk"><div class="vp-bf" id="vbf"></div><div class="vp-pg" id="vpg"><div class="vp-dot"></div></div></div>
@@ -137,6 +144,7 @@ export function renderWatch({ video, comments, related, cues, base }) {
         <input type="range" class="vb-vr" id="vvr" min="0" max="1" step=".05" value="1" title="Volume">
         <button class="vb" id="vcc" title="Subtitles (c)">CC</button>
         <button class="vb vb-spd" id="vspd" title="Speed">1x</button>
+        <button class="vb" id="vthtr" title="Theater mode (t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="2" y="4" width="20" height="16" rx="2"/></svg></button>
         <button class="vb" id="vpip" title="Picture-in-Picture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="2" y="3" width="20" height="14" rx="2"/><rect x="11" y="9" width="10" height="7" rx="1" fill="currentColor" opacity=".3"/></svg></button>
         <button class="vb" id="vfs" title="Fullscreen (f)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg></button>
       </div>
@@ -276,6 +284,7 @@ export function renderPage(title, body, categories, activeCat) {
 <div class="kb-row"><kbd>F</kbd><span>Fullscreen</span></div>
 <div class="kb-row"><kbd>M</kbd><span>Mute</span></div>
 <div class="kb-row"><kbd>C</kbd><span>Toggle captions</span></div>
+<div class="kb-row"><kbd>T</kbd><span>Theater mode</span></div>
 <div class="kb-row"><kbd>?</kbd><span>Show this help</span></div>
 </div><button class="kb-close" id="kb-close">Close</button></div></div>
 <nav class="nav" id="nav">
@@ -355,9 +364,7 @@ function toast(m){var t=document.getElementById('toast');t.textContent=m;t.class
 function toggle(){vid.paused?vid.play():vid.pause()}
 
 pp.onclick=toggle;big.onclick=function(){big.style.display='none';vid.play()};vid.onclick=toggle;
-vid.onplay=function(){ppi.setAttribute('d','M6 4h4v16H6zM14 4h4v16h-4z');big.style.display='none';vp.classList.add('playing')};
 vid.onpause=function(){ppi.setAttribute('d','M8 5v14l11-7z');vp.classList.remove('playing')};
-vid.onended=function(){big.style.display='';vp.classList.remove('playing')};
 
 vid.ontimeupdate=function(){
   if(!vid.duration)return;
@@ -402,8 +409,42 @@ fs.onclick=function(){document.fullscreenElement?document.exitFullscreen():vp.re
 
 document.onkeydown=function(ev){if(ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA')return;
   switch(ev.key){case' ':case'k':ev.preventDefault();toggle();break;case'ArrowLeft':case'j':vid.currentTime=Math.max(0,vid.currentTime-10);break;
-  case'ArrowRight':case'l':vid.currentTime=Math.min(vid.duration,vid.currentTime+10);break;case'f':fs.click();break;case'm':vid.muted=!vid.muted;updVol();break;case'c':cc.click();break;
+  case'ArrowRight':case'l':vid.currentTime=Math.min(vid.duration,vid.currentTime+10);break;case'f':fs.click();break;case't':thtrBtn.click();break;case'm':vid.muted=!vid.muted;updVol();break;case'c':cc.click();break;
   case'?':var km=document.getElementById('kb-modal');km.classList.toggle('kb-open');break;case'Escape':document.getElementById('kb-modal').classList.remove('kb-open');break}};
+
+// Theater mode
+var thtrBtn=document.getElementById('vthtr'),wl=document.querySelector('.wl');
+thtrBtn.onclick=function(){wl.classList.toggle('theater');thtrBtn.classList.toggle('vb-on')};
+
+// Mini player on scroll
+var vpRect=null,isMini=false,miniX=document.getElementById('vp-mini-x');
+function checkMini(){
+  if(!vid.paused&&!document.fullscreenElement){
+    if(!vpRect)vpRect=vp.parentElement.getBoundingClientRect();
+    var scrolledPast=window.scrollY>vpRect.bottom+100;
+    if(scrolledPast&&!isMini){isMini=true;vp.classList.add('vp-mini')}
+    else if(!scrolledPast&&isMini){isMini=false;vp.classList.remove('vp-mini')}
+  }else if(isMini){isMini=false;vp.classList.remove('vp-mini')}
+}
+window.addEventListener('scroll',checkMini,{passive:true});
+vid.onplay=function(){ppi.setAttribute('d','M6 4h4v16H6zM14 4h4v16h-4z');big.style.display='none';vp.classList.add('playing');vpRect=vp.parentElement.getBoundingClientRect();
+  document.getElementById('vp-end').classList.remove('vp-end-on')};
+miniX.onclick=function(ev){ev.stopPropagation();vid.pause();isMini=false;vp.classList.remove('vp-mini')};
+
+// End screen
+var endScreen=document.getElementById('vp-end'),endNext=document.getElementById('vp-end-next');
+var relCards=document.querySelectorAll('.sc');
+if(relCards.length){
+  var endHtml='';
+  for(var ri=0;ri<Math.min(relCards.length,3);ri++){
+    var rc=relCards[ri],rth=rc.querySelector('.sc-th'),rh=rc.querySelector('h4');
+    var bgStyle=rth?rth.getAttribute('style')||'':'';
+    endHtml+='<a href="'+rc.href+'" class="vp-end-card"><div class="vp-end-card-th" '+bgStyle+'></div><h5>'+(rh?rh.textContent:'')+'</h5></a>';
+  }
+  endNext.innerHTML=endHtml;
+}
+vid.addEventListener('ended',function(){endScreen.classList.add('vp-end-on');if(isMini){isMini=false;vp.classList.remove('vp-mini')}});
+document.getElementById('vp-replay').onclick=function(){endScreen.classList.remove('vp-end-on');vid.currentTime=0;vid.play()};
 
 // Buffering spinner
 var spin=document.getElementById('vp-spin');
@@ -475,11 +516,7 @@ document.getElementById('sh-btn').onclick=function(){
   if(vid.currentTime>5)url+='?t='+Math.floor(vid.currentTime);
   navigator.clipboard.writeText(url).then(function(){toast(vid.currentTime>5?'Link with timestamp copied':'Link copied')}).catch(function(){})};
 
-// Autoplay next related video
-vid.addEventListener('ended',function(){
-  var next=document.querySelector('.sc');
-  if(next){toast('Playing next...');setTimeout(function(){location.href=next.href},2000)}
-});
+// (end screen handles video end now)
 
 // Comments
 var cf=document.getElementById('cf'),cl=document.getElementById('cl');
@@ -720,6 +757,32 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.wrap{padding:1rem 1rem 3rem}}
 @media(max-width:480px){.wi-top{flex-direction:column;gap:.4rem}.wi-acts{align-self:flex-start}
 .sc-th{width:90px}.hscroll .card{min-width:220px}.hero-info h1{font-size:1.15rem}}
+
+/* ── Theater mode ── */
+.wl.theater{grid-template-columns:1fr;max-width:none}
+.wl.theater .vp{border-radius:0;margin:0 -1.25rem;aspect-ratio:21/9;max-height:80vh}
+.wl.theater .ws{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.75rem}
+.wl.theater .ws h3{grid-column:1/-1}
+.wl.theater .sc{flex-direction:column}.wl.theater .sc-th{width:100%}
+
+/* ── Mini player ── */
+.vp-mini{position:fixed!important;bottom:1.5rem;right:1.5rem;width:320px;z-index:150;border-radius:8px!important;box-shadow:0 8px 32px rgba(0,0,0,.6);aspect-ratio:16/9!important;transition:none}
+.vp-mini .vp-bar{padding:.5rem .5rem .3rem}
+.vp-mini .vp-tm,.vp-mini .vb-vr,.vp-mini #vvol,.vp-mini #vcc,.vp-mini #vspd,.vp-mini #vpip,.vp-mini #vthtr{display:none}
+.vp-mini-close{position:absolute;top:.4rem;right:.4rem;z-index:6;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.7);border:none;color:#fff;font-size:.7rem;cursor:pointer;display:none;align-items:center;justify-content:center}
+.vp-mini .vp-mini-close{display:flex}
+
+/* ── End screen ── */
+.vp-end{position:absolute;inset:0;background:rgba(0,0,0,.85);z-index:5;display:none;align-items:center;justify-content:center}
+.vp-end.vp-end-on{display:flex}
+.vp-end-inner{display:flex;align-items:center;gap:2rem;max-width:90%}
+.vp-end-replay{display:flex;flex-direction:column;align-items:center;gap:.4rem;background:none;border:2px solid rgba(255,255,255,.2);border-radius:12px;padding:1.25rem 1.5rem;color:rgba(255,255,255,.8);cursor:pointer;transition:all .2s;font:inherit;font-size:.75rem}
+.vp-end-replay:hover{border-color:var(--gold);color:var(--gold)}
+.vp-end-next{display:flex;gap:.75rem;overflow:hidden}
+.vp-end-card{display:block;width:160px;flex-shrink:0;border-radius:8px;overflow:hidden;background:var(--s2);transition:transform .2s}
+.vp-end-card:hover{transform:scale(1.04)}
+.vp-end-card-th{aspect-ratio:16/9;background:var(--s3);background-size:cover;background-position:center;position:relative}
+.vp-end-card h5{padding:.4rem .5rem;font-size:.65rem;font-weight:500;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 
 /* ── Spinner ── */
 .vp-spinner{position:absolute;top:50%;left:50%;width:36px;height:36px;margin:-18px 0 0 -18px;border:3px solid rgba(255,255,255,.1);border-top-color:var(--gold);border-radius:50%;z-index:5;opacity:0;pointer-events:none;animation:spin .8s linear infinite}
