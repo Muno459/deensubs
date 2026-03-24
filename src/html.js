@@ -125,6 +125,9 @@ export function renderWatch({ video, comments, related, cues, base }) {
   <div class="wm">
     <div class="vp" id="vp">
       <video id="vid" crossorigin="anonymous" preload="metadata"${th?` poster="${e(th)}"`:''}><source src="/api/media/${e(video.video_key)}" type="video/mp4"></video>
+      <div class="vp-spinner" id="vp-spin"></div>
+      <div class="vp-seek-ind vp-seek-l" id="seek-l"><svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg><span>10s</span></div>
+      <div class="vp-seek-ind vp-seek-r" id="seek-r"><svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M11.5 8c2.65 0 5.05.99 6.9 2.6L22 7v9h-9l3.62-3.62C15.23 11.22 13.46 10.5 11.5 10.5c-3.54 0-6.55 2.31-7.6 5.5L1.53 15.22C2.92 11.03 6.85 8 11.5 8z"/></svg><span>10s</span></div>
       <div class="vp-big" id="vp-big"><div class="vp-bigb"></div></div>
       <div class="vp-bar" id="vp-bar">
         <button class="vb" id="vpp" title="Play (k)"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path id="ppi" d="M8 5v14l11-7z"/></svg></button>
@@ -168,7 +171,7 @@ export function renderWatch({ video, comments, related, cues, base }) {
       <h2>${comments.length} Comment${comments.length!==1?'s':''}</h2>
       <form id="cf" class="cf" data-slug="${e(video.slug)}">
         <div class="cf-r"><input name="author" placeholder="Your name" maxlength="100" required autocomplete="off"><button type="submit">Post</button></div>
-        <textarea name="content" placeholder="Share your thoughts..." maxlength="2000" rows="2" required></textarea>
+        <div class="cf-ta-wrap"><textarea name="content" placeholder="Share your thoughts..." maxlength="2000" rows="2" required id="cf-ta"></textarea><span class="cf-counter" id="cf-ct">2000</span></div>
       </form>
       <div id="cl" class="cl">${comments.map(commentHTML).join('')}</div>
     </div>
@@ -178,6 +181,8 @@ export function renderWatch({ video, comments, related, cues, base }) {
     ${related.length?related.map(scard).join(''):'<p class="emp-s">More content soon.</p>'}
   </aside>
 </div>
+<div class="scroll-prog" id="scroll-prog"></div>
+<button class="btt" id="btt" title="Back to top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M18 15l-6-6-6 6"/></svg></button>
 <div class="toast" id="toast"></div>
 <script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__TITLE__',e(video.title).replace(/'/g,"\\\'")).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',video.source?e(video.source):'')}</script>`;
 }
@@ -399,6 +404,43 @@ document.onkeydown=function(ev){if(ev.target.tagName==='INPUT'||ev.target.tagNam
   switch(ev.key){case' ':case'k':ev.preventDefault();toggle();break;case'ArrowLeft':case'j':vid.currentTime=Math.max(0,vid.currentTime-10);break;
   case'ArrowRight':case'l':vid.currentTime=Math.min(vid.duration,vid.currentTime+10);break;case'f':fs.click();break;case'm':vid.muted=!vid.muted;updVol();break;case'c':cc.click();break;
   case'?':var km=document.getElementById('kb-modal');km.classList.toggle('kb-open');break;case'Escape':document.getElementById('kb-modal').classList.remove('kb-open');break}};
+
+// Buffering spinner
+var spin=document.getElementById('vp-spin');
+vid.onwaiting=function(){spin.classList.add('vp-spin-on')};
+vid.onplaying=function(){spin.classList.remove('vp-spin-on')};
+vid.oncanplay=function(){spin.classList.remove('vp-spin-on')};
+
+// Double-tap to seek
+var tapTimer=null,tapSide='';
+vp.addEventListener('dblclick',function(ev){
+  if(ev.target.closest('.vp-bar')||ev.target.closest('.vp-big'))return;
+  var rect=vp.getBoundingClientRect(),x=ev.clientX-rect.left,half=rect.width/2;
+  if(x<half){vid.currentTime=Math.max(0,vid.currentTime-10);var sl=document.getElementById('seek-l');sl.classList.add('vp-seek-show');setTimeout(function(){sl.classList.remove('vp-seek-show')},600)}
+  else{vid.currentTime=Math.min(vid.duration,vid.currentTime+10);var sr=document.getElementById('seek-r');sr.classList.add('vp-seek-show');setTimeout(function(){sr.classList.remove('vp-seek-show')},600)}
+});
+
+// Comment char counter
+var cfTa=document.getElementById('cf-ta'),cfCt=document.getElementById('cf-ct');
+if(cfTa&&cfCt){cfTa.oninput=function(){var rem=2000-cfTa.value.length;cfCt.textContent=rem;cfCt.classList.toggle('cf-ct-warn',rem<200)}}
+
+// Scroll progress + back to top
+var scrollProg=document.getElementById('scroll-prog'),bttBtn=document.getElementById('btt');
+window.addEventListener('scroll',function(){
+  var h=document.documentElement.scrollHeight-window.innerHeight;
+  if(h>0&&scrollProg)scrollProg.style.width=(window.scrollY/h*100)+'%';
+  if(bttBtn)bttBtn.classList.toggle('btt-show',window.scrollY>600);
+},{passive:true});
+if(bttBtn)bttBtn.onclick=function(){window.scrollTo({top:0,behavior:'smooth'})};
+
+// Linkify timestamps in comments
+document.querySelectorAll('.cm p').forEach(function(p){
+  p.innerHTML=p.innerHTML.replace(/(\d{1,2}):(\d{2})(?::(\d{2}))?/g,function(match,a,b,c){
+    var secs=c?parseInt(a)*3600+parseInt(b)*60+parseInt(c):parseInt(a)*60+parseInt(b);
+    return '<a class="cm-ts" data-t="'+secs+'">'+match+'</a>';
+  });
+});
+document.querySelectorAll('.cm-ts').forEach(function(a){a.onclick=function(){vid.currentTime=+a.dataset.t;vid.play();window.scrollTo({top:0,behavior:'smooth'})}});
 
 // PiP
 var pipBtn=document.getElementById('vpip');
@@ -678,6 +720,36 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.wrap{padding:1rem 1rem 3rem}}
 @media(max-width:480px){.wi-top{flex-direction:column;gap:.4rem}.wi-acts{align-self:flex-start}
 .sc-th{width:90px}.hscroll .card{min-width:220px}.hero-info h1{font-size:1.15rem}}
+
+/* ── Spinner ── */
+.vp-spinner{position:absolute;top:50%;left:50%;width:36px;height:36px;margin:-18px 0 0 -18px;border:3px solid rgba(255,255,255,.1);border-top-color:var(--gold);border-radius:50%;z-index:5;opacity:0;pointer-events:none;animation:spin .8s linear infinite}
+.vp-spin-on{opacity:1}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Double-tap seek indicator ── */
+.vp-seek-ind{position:absolute;top:50%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;align-items:center;gap:.15rem;color:rgba(255,255,255,.9);opacity:0;pointer-events:none;transition:opacity .15s}
+.vp-seek-l{left:15%}.vp-seek-r{right:15%}
+.vp-seek-ind span{font-size:.7rem;font-weight:500}
+.vp-seek-show{opacity:1;animation:seekPop .5s ease}
+@keyframes seekPop{0%{transform:translateY(-50%) scale(.7);opacity:0}30%{transform:translateY(-50%) scale(1.1);opacity:1}100%{transform:translateY(-50%) scale(1);opacity:0}}
+
+/* ── Comment counter ── */
+.cf-ta-wrap{position:relative}
+.cf-ta-wrap textarea{width:100%}
+.cf-counter{position:absolute;bottom:.4rem;right:.6rem;font-size:.6rem;color:var(--t3);pointer-events:none;transition:color .2s}
+.cf-ct-warn{color:#c44c4c}
+
+/* ── Scroll progress ── */
+.scroll-prog{position:fixed;top:0;left:0;height:2px;background:var(--gold);z-index:200;width:0;transition:width .1s linear}
+
+/* ── Back to top ── */
+.btt{position:fixed;bottom:1.5rem;right:1.5rem;width:36px;height:36px;border-radius:50%;background:var(--s2);border:1px solid var(--bd);color:var(--t2);display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;pointer-events:none}
+.btt-show{opacity:1;transform:translateY(0);pointer-events:auto}
+.btt:hover{border-color:var(--bdh);color:var(--gold)}
+
+/* ── Comment timestamp links ── */
+.cm-ts{color:var(--gold);cursor:pointer;font-weight:500;transition:opacity .2s}
+.cm-ts:hover{opacity:.7}
 
 /* ── Skip Link ── */
 .skip-link{position:absolute;top:-100%;left:1rem;padding:.5rem 1rem;background:var(--gold);color:var(--bg);border-radius:0 0 8px 8px;font-size:.8rem;font-weight:600;z-index:999;transition:top .2s}
