@@ -24,6 +24,7 @@ CREATE TABLE videos (
   srt_key TEXT,
   thumb_key TEXT,
   views INTEGER DEFAULT 0,
+  likes INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -47,6 +48,7 @@ END;
 
 CREATE INDEX idx_videos_category ON videos(category_id);
 CREATE INDEX idx_videos_created ON videos(created_at DESC);
+CREATE INDEX idx_videos_views ON videos(views DESC);
 CREATE INDEX idx_comments_video ON comments(video_id);
 
 INSERT INTO categories (name, name_ar, slug, color) VALUES

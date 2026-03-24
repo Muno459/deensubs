@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
-import { renderPage, renderHome, renderWatch, renderCategory, renderSearch } from './html';
+import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, renderAdmin, render404 } from './html';
 
 const app = new Hono();
 
-const VIDEO_COLS = 'v.*, c.name as category_name, c.slug as category_slug, c.color as category_color';
-const VIDEO_JOIN = 'FROM videos v LEFT JOIN categories c ON v.category_id = c.id';
+const VC = 'v.*, c.name as category_name, c.slug as category_slug, c.color as category_color';
+const VJ = 'FROM videos v LEFT JOIN categories c ON v.category_id = c.id';
 
 // ── SRT Parser ──
 
@@ -25,51 +25,62 @@ async function parseSRT(env, srtKey) {
         text: lines.slice(2).join(' '),
       };
     }).filter(Boolean);
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 // ── Pages ──
 
 app.get('/', async (c) => {
   const db = c.env.DB;
-  const [cats, featured, recent] = await Promise.all([
+  const [cats, all, popular] = await Promise.all([
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
-    db.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.created_at DESC LIMIT 1`).first(),
-    db.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.created_at DESC LIMIT 24`).all(),
+    db.prepare(`SELECT ${VC} ${VJ} ORDER BY v.created_at DESC LIMIT 30`).all(),
+    db.prepare(`SELECT ${VC} ${VJ} ORDER BY v.views DESC LIMIT 8`).all(),
   ]);
-  return c.html(renderPage('Home', renderHome({ featured, recent: recent.results, categories: cats.results }), cats.results));
+  const videos = all.results;
+  const byCategory = {};
+  videos.forEach(v => {
+    const s = v.category_slug || 'other';
+    if (!byCategory[s]) byCategory[s] = [];
+    byCategory[s].push(v);
+  });
+  return c.html(renderPage('Home', renderHome({
+    featured: videos[0] || null,
+    videos,
+    popular: popular.results,
+    categories: cats.results,
+    byCategory,
+  }), cats.results));
 });
 
 app.get('/watch/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = c.env.DB;
-
-  const video = await db.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE v.slug = ?`).bind(slug).first();
-  if (!video) return c.text('Not found', 404);
+  const video = await db.prepare(`SELECT ${VC} ${VJ} WHERE v.slug = ?`).bind(slug).first();
+  if (!video) return c.html(renderPage('Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
 
   const [, comments, related, cats, cues] = await Promise.all([
     db.prepare('UPDATE videos SET views = views + 1 WHERE slug = ?').bind(slug).run(),
-    db.prepare('SELECT * FROM comments WHERE video_id = ? ORDER BY created_at DESC LIMIT 100').bind(video.id).all(),
-    db.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 10`).bind(video.id, video.category_id).all(),
+    db.prepare('SELECT * FROM comments WHERE video_id = ? ORDER BY created_at DESC LIMIT 200').bind(video.id).all(),
+    db.prepare(`SELECT ${VC} ${VJ} WHERE v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 12`).bind(video.id, video.category_id).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
     parseSRT(c.env, video.srt_key),
   ]);
-
   return c.html(renderPage(video.title, renderWatch({ video, comments: comments.results, related: related.results, cues }), cats.results, video.category_slug));
 });
 
 app.get('/category/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = c.env.DB;
+  const sort = c.req.query('sort') || 'newest';
+  const orderBy = sort === 'popular' ? 'v.views DESC' : 'v.created_at DESC';
   const [category, videos, cats] = await Promise.all([
     db.prepare('SELECT * FROM categories WHERE slug = ?').bind(slug).first(),
-    db.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE c.slug = ? ORDER BY v.created_at DESC`).bind(slug).all(),
+    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = ? ORDER BY ${orderBy}`).bind(slug).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  if (!category) return c.text('Not found', 404);
-  return c.html(renderPage(category.name, renderCategory({ category, videos: videos.results }), cats.results, slug));
+  if (!category) return c.html(renderPage('Not Found', render404(), cats.results), 404);
+  return c.html(renderPage(category.name, renderCategory({ category, videos: videos.results, sort }), cats.results, slug));
 });
 
 app.get('/search', async (c) => {
@@ -79,19 +90,59 @@ app.get('/search', async (c) => {
   let videos = [];
   if (q) {
     try {
-      videos = (await db.prepare(
-        `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE v.id IN (SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?) ORDER BY v.created_at DESC LIMIT 50`
-      ).bind(q + '*').all()).results;
+      videos = (await db.prepare(`SELECT ${VC} ${VJ} WHERE v.id IN (SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?) ORDER BY v.created_at DESC LIMIT 50`).bind(q + '*').all()).results;
     } catch {
-      videos = (await db.prepare(
-        `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE v.title LIKE ? OR v.description LIKE ? OR v.source LIKE ? ORDER BY v.created_at DESC LIMIT 50`
-      ).bind('%' + q + '%', '%' + q + '%', '%' + q + '%').all()).results;
+      videos = (await db.prepare(`SELECT ${VC} ${VJ} WHERE v.title LIKE ? OR v.description LIKE ? OR v.source LIKE ? ORDER BY v.created_at DESC LIMIT 50`).bind('%' + q + '%', '%' + q + '%', '%' + q + '%').all()).results;
     }
   }
   return c.html(renderPage(q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
+// ── Admin ──
+
+function checkAdmin(c) {
+  const key = c.req.query('key');
+  return key && c.env.ADMIN_KEY && key === c.env.ADMIN_KEY;
+}
+
+app.get('/admin', async (c) => {
+  if (!checkAdmin(c)) return c.text('Unauthorized', 401);
+  const db = c.env.DB;
+  const [videos, cats] = await Promise.all([
+    db.prepare(`SELECT ${VC} ${VJ} ORDER BY v.created_at DESC`).all(),
+    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+  ]);
+  return c.html(renderAdmin({ videos: videos.results, categories: cats.results, key: c.req.query('key') }));
+});
+
+app.post('/admin/video', async (c) => {
+  if (!checkAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
+  const body = await c.req.parseBody();
+  const db = c.env.DB;
+  await db.prepare(
+    'INSERT INTO videos (title, title_ar, slug, description, category_id, source, duration, video_key, srt_key, thumb_key) VALUES (?,?,?,?,?,?,?,?,?,?)'
+  ).bind(
+    body.title, body.title_ar || null, body.slug, body.description || null,
+    parseInt(body.category_id) || null, body.source || null, parseInt(body.duration) || 0,
+    body.video_key, body.srt_key || null, body.thumb_key || null
+  ).run();
+  return c.redirect('/admin?key=' + c.req.query('key'));
+});
+
+app.post('/admin/delete/:id', async (c) => {
+  if (!checkAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
+  await c.env.DB.prepare('DELETE FROM videos WHERE id = ?').bind(parseInt(c.req.param('id'))).run();
+  return c.redirect('/admin?key=' + c.req.query('key'));
+});
+
 // ── API ──
+
+app.post('/api/videos/:slug/like', async (c) => {
+  const slug = c.req.param('slug');
+  await c.env.DB.prepare('UPDATE videos SET likes = likes + 1 WHERE slug = ?').bind(slug).run();
+  const video = await c.env.DB.prepare('SELECT likes FROM videos WHERE slug = ?').bind(slug).first();
+  return c.json({ likes: video?.likes || 0 });
+});
 
 app.post('/api/videos/:slug/comments', async (c) => {
   const slug = c.req.param('slug');
@@ -101,9 +152,7 @@ app.post('/api/videos/:slug/comments', async (c) => {
   const body = await c.req.json();
   const author = (body.author || '').trim();
   const content = (body.content || '').trim();
-  if (!author || !content || author.length > 100 || content.length > 2000) {
-    return c.json({ error: 'Invalid' }, 400);
-  }
+  if (!author || !content || author.length > 100 || content.length > 2000) return c.json({ error: 'Invalid' }, 400);
   const r = await db.prepare('INSERT INTO comments (video_id, author, content) VALUES (?, ?, ?)').bind(video.id, author, content).run();
   const comment = await db.prepare('SELECT * FROM comments WHERE id = ?').bind(r.meta.last_row_id).first();
   return c.json({ comment }, 201);
@@ -115,7 +164,6 @@ app.get('/api/media/*', async (c) => {
   const key = c.req.path.replace('/api/media/', '');
   const rangeH = c.req.header('Range');
   let obj;
-
   if (rangeH) {
     const m = rangeH.match(/bytes=(\d+)-(\d*)/);
     if (m) {
@@ -126,12 +174,10 @@ app.get('/api/media/*', async (c) => {
   }
   if (!obj) obj = await c.env.MEDIA_BUCKET.get(key);
   if (!obj) return c.text('Not found', 404);
-
   const h = new Headers();
   obj.writeHttpMetadata(h);
   h.set('Accept-Ranges', 'bytes');
   h.set('Cache-Control', 'public, max-age=86400');
-
   if (rangeH && obj.range) {
     const { offset, length } = obj.range;
     h.set('Content-Range', `bytes ${offset}-${offset + length - 1}/${obj.size}`);
@@ -140,6 +186,13 @@ app.get('/api/media/*', async (c) => {
   }
   h.set('Content-Length', String(obj.size));
   return new Response(obj.body, { headers: h });
+});
+
+// ── 404 ──
+
+app.notFound(async (c) => {
+  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  return c.html(renderPage('Not Found', render404(), cats), 404);
 });
 
 export default app;
