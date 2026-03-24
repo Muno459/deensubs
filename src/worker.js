@@ -67,7 +67,12 @@ app.get('/watch/:slug', async (c) => {
     parseSRT(c.env, video.srt_key),
   ]);
   const base = new URL(c.req.url).origin;
-  return c.html(renderPage(video.title, renderWatch({ video, comments: comments.results, related: related.results, cues, base }), cats.results, video.category_slug));
+  const meta = {
+    description: video.description || `Watch ${video.title} with English subtitles on DeenSubs.`,
+    type: 'video.other',
+    image: video.thumb_key ? base + '/api/media/' + video.thumb_key : null,
+  };
+  return c.html(renderPage(video.title, renderWatch({ video, comments: comments.results, related: related.results, cues, base }), cats.results, video.category_slug, meta));
 });
 
 app.get('/category/:slug', async (c) => {

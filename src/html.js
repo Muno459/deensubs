@@ -123,6 +123,7 @@ export function renderWatch({ video, comments, related, cues, base }) {
     duration:video.duration?'PT'+Math.floor(video.duration/60)+'M'+Math.floor(video.duration%60)+'S':'',
   });
   return `
+${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
 <script type="application/ld+json">${jsonLd}</script>
 <div class="wl">
   <div class="wm">
@@ -344,20 +345,25 @@ ${videos.map(vi=>`<tr><td><a href="/watch/${e(vi.slug)}">${e(vi.title)}</a></td>
 }
 
 // ═══ LAYOUT ═══
-export function renderPage(title, body, categories, activeCat) {
+export function renderPage(title, body, categories, activeCat, meta) {
+  meta = meta || {};
+  const desc = meta.description || 'Arabic Islamic lectures with accurate English subtitles, powered by AI.';
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="view-transition" content="same-origin">
 <title>${e(title)} — DeenSubs</title>
-<meta name="description" content="Arabic Islamic lectures with accurate English subtitles, powered by AI.">
-<meta property="og:title" content="${e(title)} — DeenSubs"><meta property="og:type" content="website">
-<meta property="og:description" content="Arabic Islamic lectures with AI-powered English subtitles.">
+<meta name="description" content="${e(desc)}">
+<meta property="og:title" content="${e(title)} — DeenSubs"><meta property="og:type" content="${meta.type || 'website'}">
+<meta property="og:description" content="${e(desc)}">
+${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${e(meta.image)}">` : ''}
 <link rel="alternate" type="application/rss+xml" title="DeenSubs" href="/feed.xml">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#c4a44c">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Amiri:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="dns-prefetch" href="https://fonts.gstatic.com">
 <style>${CSS}</style></head><body>
 <a href="#main-content" class="skip-link">Skip to content</a>
 <div class="grain"></div>
@@ -379,7 +385,7 @@ export function renderPage(title, body, categories, activeCat) {
   <div class="nav-in">
     <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
     <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
-    <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search..." aria-label="Search" autocomplete="off"></form>
+    <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search videos..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
     <a href="/bookmarks" class="nav-icon" title="Saved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg></a>
     <button class="nav-hb" id="hb" aria-label="Menu"><span></span><span></span><span></span></button>
   </div>
@@ -400,6 +406,7 @@ export function renderPage(title, body, categories, activeCat) {
 <script>
 document.getElementById('hb').onclick=function(){document.getElementById('mob').classList.toggle('open');document.body.classList.toggle('no-scroll')};
 document.getElementById('mob').onclick=function(e){if(e.target===this){this.classList.remove('open');document.body.classList.remove('no-scroll')}};
+document.addEventListener('keydown',function(e){if(e.key==='/'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA'){e.preventDefault();var si=document.querySelector('.nav-sf input');if(si)si.focus()}});
 </script>
 </body></html>`;
 }
@@ -619,7 +626,8 @@ cf.onsubmit=function(ev){ev.preventDefault();var btn=cf.querySelector('button');
     for(var ci=0;ci<aName.length;ci++)ah=((ah<<5)-ah+aName.charCodeAt(ci))|0;
     div.innerHTML='<div class="cm-av" style="background:'+cols[Math.abs(ah)%cols.length]+'">'+initials+'</div><div class="cm-body"><div class="cm-h"><strong>'+aName+'</strong><time>just now</time></div><p>'+d.comment.content.replace(/</g,'&lt;')+'</p></div>';
     cl.insertBefore(div,cl.firstChild);cf.reset();var h=document.querySelector('.cms h2'),n=cl.children.length;h.textContent=n+' Comment'+(n!==1?'s':'')}
-  }).catch(function(){}).finally(function(){btn.disabled=false})};
+  }).catch(function(){toast('Failed to post comment. Try again.')}).finally(function(){btn.disabled=false});
+  if(cfCt)cfCt.textContent='2000'};
 })();`;
 
 // ═══ CSS ═══
@@ -651,6 +659,8 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .nav-sf input{background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:.3rem .6rem .3rem 2rem;color:var(--tx);font:inherit;font-size:.75rem;width:160px;transition:border-color .2s,width .3s}
 .nav-sf input:focus{outline:none;border-color:var(--gold);width:220px}
 .nav-sf input::placeholder{color:var(--t3)}
+.nav-sf input:focus+.nav-kbd{display:none}
+.nav-kbd{position:absolute;right:.5rem;background:var(--s3);border:1px solid var(--bd);border-radius:4px;padding:0 .3rem;font:inherit;font-size:.6rem;color:var(--t3);pointer-events:none;line-height:1.6}
 .nav-hb{display:none;background:none;border:none;cursor:pointer;padding:.4rem;flex-shrink:0}
 .nav-hb span{display:block;width:16px;height:1.5px;background:var(--t2);margin:3px 0;transition:all .3s;border-radius:1px}
 
