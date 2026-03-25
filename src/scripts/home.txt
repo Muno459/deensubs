@@ -1,0 +1,22 @@
+(function(){
+var slot=document.getElementById('cw-slot');
+try{
+  var keys=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k.startsWith('p_'))keys.push(k)}
+  var items=keys.map(function(k){try{var d=JSON.parse(localStorage.getItem(k));if(d&&d.t>10&&d.d&&d.t<d.d-30&&d.title)return{slug:k.slice(2),t:d.t,d:d.d,ts:d.ts||0,title:d.title,thumb:d.thumb||'',source:d.source||''};return null}catch(e){return null}}).filter(Boolean).sort(function(a,b){return b.ts-a.ts}).slice(0,6);
+  if(items.length>0){
+    var html='<section class="sec sec-cw"><div class="sec-hd"><h2>Continue Watching</h2></div><div class="hscroll">';
+    items.forEach(function(it){
+      var pct=Math.round(it.t/it.d*100);
+      html+='<a href="/watch/'+it.slug+'" class="card card-cw">'
+        +'<div class="card-th"'+(it.thumb?' style="background-image:url(\''+it.thumb+'\')"':'')+'>'
+        +'<div class="cw-prog" style="width:'+pct+'%"></div></div>'
+        +'<div class="card-bd"><h3>'+it.title.replace(/</g,'&lt;')+'</h3>'
+        +'<div class="card-mt"><span>'+it.source.replace(/</g,'&lt;')+'</span></div></div></a>';
+    });
+    html+='</div></section>';
+    slot.innerHTML=html;
+  }
+}catch(e){}
+
+// (lazy load + card stagger handled by global script)
+})();

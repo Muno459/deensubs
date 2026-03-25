@@ -1,0 +1,10 @@
+document.getElementById('hb').onclick=function(){document.getElementById('mob').classList.toggle('open');document.body.classList.toggle('no-scroll')};
+document.getElementById('mob').onclick=function(e){if(e.target===this){this.classList.remove('open');document.body.classList.remove('no-scroll')}};
+document.addEventListener('keydown',function(e){if(e.key==='/'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA'){e.preventDefault();var si=document.querySelector('.nav-sf input');if(si)si.focus()}});
+// Global lazy load + card reveal
+(function(){
+  var lo=new IntersectionObserver(function(en){en.forEach(function(e){if(e.isIntersecting){var bg=e.target.dataset.bg;if(bg){e.target.style.backgroundImage="url('"+bg+"')";e.target.style.backgroundSize="cover";e.target.style.backgroundPosition="center"}lo.unobserve(e.target)}})},{rootMargin:'200px'});
+  document.querySelectorAll('[data-bg]').forEach(function(el){lo.observe(el)});
+  var co=new IntersectionObserver(function(en){en.forEach(function(e){if(e.isIntersecting){e.target.classList.add('card-vis');co.unobserve(e.target)}})},{threshold:.05,rootMargin:'0px 0px -20px 0px'});
+  document.querySelectorAll('.card-anim').forEach(function(c){co.observe(c)});
+})();

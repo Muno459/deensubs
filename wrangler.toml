@@ -1,6 +1,11 @@
 name = "deensubs"
-main = "src/worker.js"
+main = "src/index.js"
 compatibility_date = "2024-12-01"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.css", "**/*.txt"]
+fallthrough = false
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
