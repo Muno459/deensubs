@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, renderAdmin, render404, renderAbout, renderBookmarks } from './html';
+import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, renderAdmin, render404, renderAbout, renderBookmarks, renderSymposium } from './html';
 
 const app = new Hono();
 
@@ -104,6 +104,15 @@ app.get('/search', async (c) => {
   return c.html(renderPage(q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
+app.get('/symposium', async (c) => {
+  const db = c.env.DB;
+  const [videos, cats] = await Promise.all([
+    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = 'symposium' ORDER BY v.id`).all(),
+    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+  ]);
+  return c.html(renderPage('Fatwa in the Haramain — Symposium', renderSymposium({ videos: videos.results }), cats.results));
+});
+
 app.get('/about', async (c) => {
   const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
   const stats = await c.env.DB.prepare('SELECT COUNT(*) as count, SUM(views) as views FROM videos').first();
@@ -201,6 +210,23 @@ app.post('/api/videos/:slug/comments', async (c) => {
   const r = await db.prepare('INSERT INTO comments (video_id, author, content) VALUES (?, ?, ?)').bind(video.id, author, content).run();
   const comment = await db.prepare('SELECT * FROM comments WHERE id = ?').bind(r.meta.last_row_id).first();
   return c.json({ comment }, 201);
+});
+
+// ── VTT conversion (SRT → WebVTT for native players) ──
+
+app.get('/api/vtt/*', async (c) => {
+  const key = c.req.path.replace('/api/vtt/', '');
+  const obj = await c.env.MEDIA_BUCKET.get(key);
+  if (!obj) return c.text('Not found', 404);
+  const srt = await obj.text();
+  const vtt = 'WEBVTT\n\n' + srt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+  return new Response(vtt, {
+    headers: {
+      'Content-Type': 'text/vtt; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400',
+    },
+  });
 });
 
 // ── Static assets ──

@@ -125,12 +125,16 @@ export function renderWatch({ video, comments, related, cues, base }) {
     duration:video.duration?'PT'+Math.floor(video.duration/60)+'M'+Math.floor(video.duration%60)+'S':'',
   });
   return `
-${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
+${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
 <script type="application/ld+json">${jsonLd}</script>
 <div class="wl">
   <div class="wm">
     <div class="vp" id="vp">
-      <video id="vid" crossorigin="anonymous" preload="metadata"${th?` poster="${e(th)}"`:''}><source src="${cdn(video.video_key)}" type="video/mp4"></video>
+      <video id="vid" crossorigin="anonymous" preload="metadata"${th?` poster="${e(th)}"`:''}>
+        <source src="${cdn(video.video_key)}" type="video/mp4">
+        ${video.srt_key?`<track kind="captions" src="${cdn('vtt/'+video.srt_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="en" label="English" default>`:''}
+        ${video.srt_ar_key?`<track kind="captions" src="${cdn('vtt/'+video.srt_ar_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="ar" label="العربية">`:''}
+      </video>
       <div class="vp-spinner" id="vp-spin"></div>
       <button class="vp-mini-close" id="vp-mini-x">&times;</button>
       <div class="vp-seek-ind vp-seek-l" id="seek-l"><svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg><span>10s</span></div>
@@ -233,6 +237,50 @@ export function renderSearch({ query, videos }) {
   return `<section class="sec">
 <div class="sec-hd"><h1>${query?'Results for &ldquo;'+e(query)+'&rdquo;':'Search'}</h1><span class="cat-ct">${videos.length} result${videos.length!==1?'s':''}</span></div>
 <div class="grid">${videos.length?videos.map(v=>vcard(v)).join(''):`<p class="emp">${query?'No results found. Try different keywords.':'Enter a search term above.'}</p>`}</div></section>`;
+}
+
+// ═══ SYMPOSIUM ═══
+export function renderSymposium({ videos }) {
+  return `
+<div class="symp">
+  <div class="symp-hero">
+    <div class="symp-geo">
+      <svg viewBox="0 0 400 200" fill="none" width="300"><rect x="120" y="20" width="160" height="160" stroke="rgba(196,164,76,.08)" stroke-width="1" transform="rotate(45 200 100)"/><rect x="120" y="20" width="160" height="160" stroke="rgba(196,164,76,.08)" stroke-width="1"/><circle cx="200" cy="100" r="40" stroke="rgba(196,164,76,.06)" stroke-width=".8"/><circle cx="200" cy="100" r="12" fill="rgba(196,164,76,.04)"/></svg>
+    </div>
+    <div class="symp-badge">Symposium</div>
+    <h1 class="symp-title">الفتوى في الحرمين الشريفين على ضوء المنهج النبوي</h1>
+    <h2 class="symp-title-en">Fatwa in the Two Holy Mosques<br>in Light of the Prophetic Methodology</h2>
+    <p class="symp-desc">A scholarly symposium featuring senior scholars discussing the principles, methodology, history, and guidelines of issuing fatwas in the sacred precincts of the Two Holy Mosques — from the Prophetic era through the Rightly Guided Caliphs to the present day.</p>
+    <div class="symp-stats">
+      <div class="symp-stat"><span>${videos.length}</span>Sessions</div>
+      <div class="symp-stat"><span>${Math.round(videos.reduce((a,v)=>a+v.duration,0)/60)}</span>Minutes</div>
+      <div class="symp-stat"><span>${videos.filter(v=>v.srt_key).length}</span>Subtitled</div>
+    </div>
+  </div>
+  <div class="symp-sessions">
+    <h3>Sessions</h3>
+    <div class="symp-list">
+      ${videos.map((v,i) => {
+        const th = thu(v);
+        return `<a href="/watch/${e(v.slug)}" class="symp-card card-anim">
+          <div class="symp-num">${String(i+1).padStart(2,'0')}</div>
+          <div class="symp-card-th"${th?` style="background-image:url('${e(th)}');background-size:cover;background-position:center"`:''}>
+            ${!th?tsvg(v.title,'#a4844c',200,113):''}
+            ${v.duration?`<span class="dur">${ft(v.duration)}</span>`:''}
+          </div>
+          <div class="symp-card-info">
+            ${v.title_ar?`<div class="symp-card-ar">${e(v.title_ar)}</div>`:''}
+            <h4>${e(v.title)}</h4>
+            <span class="symp-card-src">${e(v.source||'')}</span>
+            <div class="symp-card-tags">
+              ${v.srt_key?'<span class="tag tag-s">CC</span>':'<span class="tag" style="--tc:var(--t3)">Pending</span>'}
+            </div>
+          </div>
+        </a>`;
+      }).join('')}
+    </div>
+  </div>
+</div>`;
 }
 
 // ═══ ABOUT ═══
@@ -514,24 +562,21 @@ function loadSubs(lang){
   document.querySelectorAll('.vb-lang-opt').forEach(function(b){b.classList.toggle('vb-lang-on',b.dataset.lang===lang)});
   var key=lang==='ar'?srtAr:srt;
   if(!key)return;
-  if(subCache[lang]){subCues=subCache[lang];addNativeTrack(lang,key);return}
+  if(subCache[lang]){subCues=subCache[lang];addNativeTrack(lang);return}
   fetch('https://cdn.deensubs.com/'+key).then(function(r){return r.text()}).then(function(s){
-    subCache[lang]=parseSrt(s);subCues=subCache[lang];addNativeTrack(lang,s);
+    subCache[lang]=parseSrt(s);subCues=subCache[lang];addNativeTrack(lang);
   }).catch(function(){});
 }
-function addNativeTrack(lang,rawSrt){
-  // Remove old tracks
-  while(vid.querySelector('track'))vid.querySelector('track').remove();
-  var vtt='WEBVTT\\n\\n'+(typeof rawSrt==='string'&&rawSrt.indexOf('-->')>-1?rawSrt:rawSrt).replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2');
-  var blob=new Blob([vtt],{type:'text/vtt'});var t=document.createElement('track');
-  t.kind='subtitles';t.label=lang==='ar'?'Arabic':'English';t.srclang=lang;
-  t.src=URL.createObjectURL(blob);t.default=true;vid.appendChild(t);
-  setTimeout(function(){if(t.track)t.track.mode='showing'},100);
+function addNativeTrack(lang){
+  var tracks=vid.textTracks;
+  for(var i=0;i<tracks.length;i++){
+    tracks[i].mode=(tracks[i].language===lang)?'showing':'hidden';
+  }
 }
 if(srt)loadSubs('en');
 // Language menu clicks
 document.querySelectorAll('.vb-lang-opt').forEach(function(b){
-  b.onclick=function(ev){ev.stopPropagation();loadSubs(b.dataset.lang)}
+  b.onclick=function(ev){ev.stopPropagation();loadSubs(b.dataset.lang);langWrap.classList.remove('vb-lang-open')}
 });
 
 // Volume
@@ -547,7 +592,9 @@ function updVol(){var v=vid.muted?0:vid.volume;vvr.value=vid.muted?0:vid.volume;
 var urlT=new URLSearchParams(location.search).get('t');
 if(urlT){vid.currentTime=parseFloat(urlT);setTimeout(function(){vid.play()},300)}
 
-cc.onclick=function(){if(ccOn)loadSubs('off');else loadSubs(curLang==='off'?'en':curLang)};
+var langWrap=document.querySelector('.vb-lang-wrap');
+cc.onclick=function(ev){ev.stopPropagation();langWrap.classList.toggle('vb-lang-open')};
+document.addEventListener('click',function(){langWrap.classList.remove('vb-lang-open')});
 var spds=[.5,.75,1,1.25,1.5,2],si=2;
 spd.onclick=function(){si=(si+1)%spds.length;vid.playbackRate=spds[si];spd.textContent=spds[si]+'x'};
 fs.onclick=function(){document.fullscreenElement?document.exitFullscreen():vp.requestFullscreen().catch(function(){})};
@@ -583,7 +630,8 @@ if(relCards.length){
   var endHtml='';
   for(var ri=0;ri<Math.min(relCards.length,3);ri++){
     var rc=relCards[ri],rth=rc.querySelector('.sc-th'),rh=rc.querySelector('h4');
-    var bgStyle=rth?rth.getAttribute('style')||'':'';
+    var bg=rth?(rth.dataset.bg||''):'';
+    var bgStyle=bg?'style="background-image:url('+bg+');background-size:cover;background-position:center"':'';
     endHtml+='<a href="'+rc.href+'" class="vp-end-card"><div class="vp-end-card-th" '+bgStyle+'></div><h5>'+(rh?rh.textContent:'')+'</h5></a>';
   }
   endNext.innerHTML=endHtml;
@@ -813,8 +861,8 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .vb:hover{color:#fff}.vb.vb-on{color:var(--gold)}
 .vb-spd{font-weight:600;font-size:.65rem;min-width:22px}
 .vb-lang-wrap{position:relative}
-.vb-lang-menu{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:rgba(15,15,20,.95);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:.3rem;margin-bottom:.4rem;display:none;flex-direction:column;gap:.1rem;min-width:90px;backdrop-filter:blur(12px)}
-.vb-lang-wrap:hover .vb-lang-menu,.vb-lang-menu:hover{display:flex}
+.vb-lang-menu{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:rgba(15,15,20,.95);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:.3rem;margin-bottom:0;padding-bottom:.7rem;display:none;flex-direction:column;gap:.1rem;min-width:90px;backdrop-filter:blur(12px)}
+.vb-lang-wrap.vb-lang-open .vb-lang-menu{display:flex}
 .vb-lang-opt{background:none;border:none;color:rgba(255,255,255,.7);font:inherit;font-size:.7rem;padding:.3rem .6rem;border-radius:5px;cursor:pointer;text-align:left;transition:all .15s;white-space:nowrap}
 .vb-lang-opt:hover{background:rgba(255,255,255,.1);color:#fff}
 .vb-lang-on{color:var(--gold)}
@@ -1045,6 +1093,34 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .kb-row kbd{background:var(--s3);border:1px solid var(--bd);border-radius:4px;padding:.1rem .45rem;font-family:inherit;font-size:.7rem;color:var(--tx);min-width:28px;text-align:center}
 .kb-close{width:100%;padding:.45rem;background:var(--s3);border:1px solid var(--bd);border-radius:8px;color:var(--t2);font:inherit;font-size:.78rem;cursor:pointer;transition:all .2s}
 .kb-close:hover{border-color:var(--bdh);color:var(--tx)}
+
+/* ── Symposium ── */
+.symp{max-width:900px;margin:0 auto}
+.symp-hero{text-align:center;padding:2.5rem 1rem 2rem;position:relative;overflow:hidden}
+.symp-geo{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:.5;pointer-events:none}
+.symp-badge{display:inline-block;padding:.2rem .7rem;background:rgba(164,132,76,.08);border:1px solid rgba(164,132,76,.12);border-radius:100px;font-size:.65rem;font-weight:600;color:#a4844c;letter-spacing:.08em;text-transform:uppercase;margin-bottom:1rem;position:relative}
+.symp-title{font-family:'Amiri',serif;font-size:clamp(1.4rem,3vw,2rem);color:var(--gold);direction:rtl;margin-bottom:.5rem;position:relative}
+.symp-title-en{font-family:'Cormorant Garamond',serif;font-size:clamp(1.1rem,2.5vw,1.6rem);font-weight:400;line-height:1.3;margin-bottom:1rem;position:relative;background:linear-gradient(135deg,var(--tx),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.symp-desc{color:var(--t2);font-size:.82rem;line-height:1.7;max-width:600px;margin:0 auto 1.5rem;position:relative}
+.symp-stats{display:flex;justify-content:center;gap:2.5rem;position:relative}
+.symp-stat{text-align:center}
+.symp-stat span{display:block;font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:300;color:var(--gold)}
+.symp-stat{font-size:.6rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em}
+.symp-sessions{margin-top:2rem}
+.symp-sessions h3{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid var(--bd)}
+.symp-list{display:flex;flex-direction:column;gap:.6rem}
+.symp-card{display:flex;align-items:center;gap:1rem;padding:.75rem;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);transition:all .3s ease}
+.symp-card:hover{border-color:var(--bdh);transform:translateX(4px);box-shadow:0 6px 24px rgba(0,0,0,.25)}
+.symp-num{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:300;color:var(--gold);opacity:.3;min-width:32px;text-align:center;flex-shrink:0}
+.symp-card:hover .symp-num{opacity:.6}
+.symp-card-th{width:160px;aspect-ratio:16/9;background:var(--s2);border-radius:8px;flex-shrink:0;overflow:hidden;position:relative}
+.symp-card-th .tsvg{position:absolute;inset:0;width:100%;height:100%}
+.symp-card-info{flex:1;min-width:0}
+.symp-card-ar{font-family:'Amiri',serif;font-size:.82rem;color:var(--gold);direction:rtl;margin-bottom:.15rem;opacity:.7}
+.symp-card-info h4{font-size:.85rem;font-weight:500;line-height:1.3;margin-bottom:.2rem}
+.symp-card-src{font-size:.68rem;color:var(--t3);display:block;margin-bottom:.3rem}
+.symp-card-tags{display:flex;gap:.25rem}
+@media(max-width:640px){.symp-card{flex-wrap:wrap}.symp-num{display:none}.symp-card-th{width:100%}.symp-stats{gap:1.5rem}}
 
 /* ── View Transitions ── */
 @view-transition{navigation:auto}
