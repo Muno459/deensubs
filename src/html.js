@@ -454,15 +454,25 @@ export function renderBookmarks() {
 export function renderScholars({ scholars }) {
   return `
 <div class="sch-page">
-  <div class="sch-hero"><h1>Scholars</h1><p>The scholars whose knowledge we make accessible.</p></div>
+  <div class="sch-hero">
+    <div class="sch-hero-ornament"><svg viewBox="0 0 200 200" fill="none" width="80"><rect x="50" y="50" width="100" height="100" stroke="rgba(164,132,76,.1)" stroke-width="1" transform="rotate(45 100 100)"/><rect x="50" y="50" width="100" height="100" stroke="rgba(164,132,76,.1)" stroke-width="1"/><circle cx="100" cy="100" r="20" stroke="rgba(164,132,76,.06)" stroke-width="1"/></svg></div>
+    <h1>Our Scholars</h1>
+    <p>The scholars whose knowledge we make accessible to the English-speaking world.</p>
+  </div>
   <div class="sch-grid">
     ${scholars.map(s => `<a href="/scholar/${e(s.slug)}" class="sch-card card-anim">
-      <div class="sch-av">${e(s.name).split(' ').pop().charAt(0)}</div>
-      <div class="sch-card-info">
+      <div class="sch-card-img">
+        ${s.photo?`<img src="${cdn(s.photo)}" alt="${e(s.name)}">`:`<div class="sch-card-initial">${e(s.name).split(' ').pop().charAt(0)}</div>`}
+        <div class="sch-card-gradient"></div>
+      </div>
+      <div class="sch-card-body">
         ${s.name_ar?`<div class="sch-card-ar">${e(s.name_ar)}</div>`:''}
         <h3>${e(s.name)}</h3>
         ${s.title?`<p class="sch-card-title">${e(s.title)}</p>`:''}
-        <div class="sch-card-stats"><span>${s.video_count||0} videos</span><span>${fv(s.total_views||0)}</span></div>
+        <div class="sch-card-stats">
+          <div class="sch-card-stat"><span>${s.video_count||0}</span> videos</div>
+          <div class="sch-card-stat"><span>${s.total_views||0}</span> views</div>
+        </div>
       </div>
     </a>`).join('')}
   </div>
@@ -473,16 +483,19 @@ export function renderScholars({ scholars }) {
 export function renderScholar({ scholar, videos }) {
   return `
 <div class="sch-profile">
-  <div class="sch-profile-hero">
-    <div class="sch-profile-av">${e(scholar.name).split(' ').pop().charAt(0)}</div>
-    <div class="sch-profile-info">
-      ${scholar.name_ar?`<div class="sch-profile-ar">${e(scholar.name_ar)}</div>`:''}
+  <div class="sch-pro-hero">
+    <div class="sch-pro-portrait">
+      ${scholar.photo?`<img src="${cdn(scholar.photo)}" alt="${e(scholar.name)}">`:`<div class="sch-pro-initial">${e(scholar.name).split(' ').pop().charAt(0)}</div>`}
+    </div>
+    <div class="sch-pro-info">
+      ${scholar.name_ar?`<div class="sch-pro-ar">${e(scholar.name_ar)}</div>`:''}
       <h1>${e(scholar.name)}</h1>
-      ${scholar.title?`<p class="sch-profile-title">${e(scholar.title)}</p>`:''}
-      ${scholar.bio?`<p class="sch-profile-bio">${e(scholar.bio)}</p>`:''}
-      <div class="sch-profile-stats">
-        <div class="sch-pstat"><span>${videos.length}</span>Videos</div>
-        <div class="sch-pstat"><span>${fv(videos.reduce((a,v)=>a+(v.views||0),0)).replace(' views','')}</span>Views</div>
+      ${scholar.title?`<div class="sch-pro-title">${e(scholar.title)}</div>`:''}
+      ${scholar.bio?`<p class="sch-pro-bio">${e(scholar.bio)}</p>`:''}
+      <div class="sch-pro-stats">
+        <div class="sch-pro-stat"><span>${videos.length}</span>Videos</div>
+        <div class="sch-pro-stat"><span>${videos.reduce((a,v)=>a+(v.views||0),0)}</span>Views</div>
+        <div class="sch-pro-stat"><span>${videos.filter(v=>v.srt_key).length}</span>Subtitled</div>
       </div>
     </div>
   </div>
@@ -647,14 +660,13 @@ document.addEventListener('keydown',function(e){if(e.key==='/'&&e.target.tagName
   document.querySelectorAll('.card-anim').forEach(function(c){co.observe(c)});
 })();
 ${!user?`
-  // Google One Tap
-  var otScript=document.createElement('script');otScript.src='https://accounts.google.com/gsi/client';otScript.async=true;
-  otScript.onload=function(){google.accounts.id.initialize({client_id:'1009654832009-9k61ld72vu7l6ml8n6v93vpgn9opfffb.apps.googleusercontent.com',callback:function(r){
-    fetch('/auth/onetap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:r.credential})}).then(function(res){if(res.ok)location.reload()})
-  },auto_select:true});google.accounts.id.prompt()};
-  document.head.appendChild(otScript);
+// Google One Tap (isolated)
+try{var otScript=document.createElement('script');otScript.src='https://accounts.google.com/gsi/client';otScript.async=true;
+otScript.onload=function(){try{google.accounts.id.initialize({client_id:'1009654832009-9k61ld72vu7l6ml8n6v93vpgn9opfffb.apps.googleusercontent.com',callback:function(r){
+fetch('/auth/onetap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:r.credential})}).then(function(res){if(res.ok)location.reload()})}
+,auto_select:true});google.accounts.id.prompt()}catch(e){}};
+document.head.appendChild(otScript)}catch(e){}
 `:''}
-})();
 </script>
 </body></html>`;
 }
@@ -1030,8 +1042,8 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 /* ── Card ── */
 .card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;transition:all .3s ease;display:block}
 .card:hover{border-color:var(--bdh);transform:translateY(-3px);box-shadow:0 10px 32px rgba(0,0,0,.3)}
-.card-anim{opacity:0;transform:translateY(16px);transition:opacity .5s ease,transform .5s ease,border-color .3s,box-shadow .3s}
-.card-vis{opacity:1;transform:translateY(0)}
+.card-anim{animation:cardIn .5s ease both}
+@keyframes cardIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 .card-th{aspect-ratio:16/9;background:var(--s2);position:relative;overflow:hidden;background-size:cover;background-position:center;transition:transform .4s ease}
 .card:hover .card-th{transform:scale(1.04)}
 .card-th .tsvg{position:absolute;inset:0;width:100%;height:100%}
@@ -1314,34 +1326,45 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .kb-close{width:100%;padding:.45rem;background:var(--s3);border:1px solid var(--bd);border-radius:8px;color:var(--t2);font:inherit;font-size:.78rem;cursor:pointer;transition:all .2s}
 .kb-close:hover{border-color:var(--bdh);color:var(--tx)}
 
-/* ── Scholar pages ── */
-.sch-page{max-width:800px;margin:0 auto}
-.sch-hero{text-align:center;padding:2rem 0 1.5rem}
-.sch-hero h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:600;margin-bottom:.3rem}
-.sch-hero p{color:var(--t2);font-size:.85rem}
-.sch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem;margin-top:1rem}
-.sch-card{display:flex;align-items:center;gap:1rem;padding:1.1rem;background:var(--s1);border:1px solid var(--bd);border-radius:12px;transition:all .3s ease}
-.sch-card:hover{border-color:var(--bdh);transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,0,0,.25)}
-.sch-av{width:48px;height:48px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:1.2rem;font-weight:700;flex-shrink:0}
-.sch-card-info{flex:1;min-width:0}
-.sch-card-ar{font-family:'Amiri',serif;font-size:.85rem;color:var(--gold);direction:rtl;opacity:.6}
-.sch-card-info h3{font-size:.9rem;font-weight:500;margin-bottom:.15rem}
-.sch-card-title{font-size:.68rem;color:var(--t3);margin-bottom:.3rem}
-.sch-card-stats{display:flex;gap:.75rem;font-size:.65rem;color:var(--t3)}
+/* ── Scholars Page ── */
+.sch-page{max-width:900px;margin:0 auto}
+.sch-hero{text-align:center;padding:2.5rem 0 1.5rem;position:relative}
+.sch-hero-ornament{margin-bottom:.75rem;opacity:.5}
+.sch-hero h1{font-family:'Cormorant Garamond',serif;font-size:clamp(1.6rem,3vw,2.2rem);font-weight:300;margin-bottom:.4rem}
+.sch-hero h1 span{font-weight:700;color:var(--gold)}
+.sch-hero p{color:var(--t3);font-size:.82rem;max-width:400px;margin:0 auto}
 
-/* Scholar profile */
+/* Scholar Cards - Vertical Portraits */
+.sch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1.25rem;margin-top:1.5rem}
+.sch-card{background:var(--s1);border:1px solid var(--bd);border-radius:16px;overflow:hidden;transition:all .4s cubic-bezier(.23,1,.32,1);display:flex;flex-direction:column}
+.sch-card:hover{border-color:var(--bdh);transform:translateY(-6px);box-shadow:0 16px 48px rgba(0,0,0,.35),0 0 0 1px rgba(164,132,76,.06)}
+.sch-card-img{aspect-ratio:3/4;background:var(--s2);position:relative;overflow:hidden}
+.sch-card-img img{width:100%;height:100%;object-fit:cover;transition:transform .5s cubic-bezier(.23,1,.32,1),filter .5s}
+.sch-card:hover .sch-card-img img{transform:scale(1.04)}
+.sch-card-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:4rem;font-weight:700;color:rgba(164,132,76,.15);background:linear-gradient(135deg,var(--s2),var(--s3))}
+.sch-card-gradient{position:absolute;bottom:0;left:0;right:0;height:50%;background:linear-gradient(to top,var(--s1),transparent);pointer-events:none}
+.sch-card-body{padding:1.1rem 1.25rem 1.35rem;display:flex;flex-direction:column;gap:.2rem}
+.sch-card-ar{font-family:'Amiri',serif;font-size:.95rem;color:var(--gold);direction:rtl;opacity:.7}
+.sch-card-body h3{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;line-height:1.25}
+.sch-card-title{font-size:.7rem;color:var(--t3);line-height:1.4}
+.sch-card-stats{display:flex;gap:1rem;margin-top:.4rem;font-size:.65rem;color:var(--t3)}
+.sch-card-stat span{color:var(--gold);font-weight:600}
+
+/* Scholar Profile */
 .sch-profile{max-width:1000px;margin:0 auto}
-.sch-profile-hero{display:flex;gap:1.5rem;align-items:flex-start;padding:2rem 0;border-bottom:1px solid var(--bd);margin-bottom:1.5rem}
-.sch-profile-av{width:72px;height:72px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:1.8rem;font-weight:700;flex-shrink:0}
-.sch-profile-info{flex:1}
-.sch-profile-ar{font-family:'Amiri',serif;font-size:1.1rem;color:var(--gold);direction:rtl;margin-bottom:.15rem}
-.sch-profile-info h1{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;margin-bottom:.2rem}
-.sch-profile-title{font-size:.78rem;color:var(--gold);margin-bottom:.5rem;opacity:.7}
-.sch-profile-bio{font-size:.8rem;color:var(--t2);line-height:1.7;margin-bottom:.75rem}
-.sch-profile-stats{display:flex;gap:2rem}
-.sch-pstat{text-align:center}
-.sch-pstat span{display:block;font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;color:var(--gold)}
-.sch-pstat{font-size:.6rem;color:var(--t3);text-transform:uppercase;letter-spacing:.08em}
+.sch-pro-hero{display:flex;gap:2rem;align-items:flex-start;padding:1.5rem 0 2rem;border-bottom:1px solid var(--bd);margin-bottom:1.5rem}
+.sch-pro-portrait{width:180px;flex-shrink:0;border-radius:14px;overflow:hidden;aspect-ratio:3/4;background:var(--s2)}
+.sch-pro-portrait img{width:100%;height:100%;object-fit:cover}
+.sch-pro-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:4rem;font-weight:700;color:rgba(164,132,76,.15);background:linear-gradient(135deg,var(--s2),var(--s3))}
+.sch-pro-info{flex:1;padding-top:.5rem}
+.sch-pro-ar{font-family:'Amiri',serif;font-size:1.2rem;color:var(--gold);direction:rtl;margin-bottom:.15rem;text-shadow:0 0 30px rgba(164,132,76,.1)}
+.sch-pro-info h1{font-family:'Cormorant Garamond',serif;font-size:clamp(1.4rem,2.5vw,1.8rem);font-weight:600;line-height:1.2;margin-bottom:.25rem}
+.sch-pro-title{font-size:.78rem;color:var(--gold);margin-bottom:.65rem;opacity:.65}
+.sch-pro-bio{font-size:.82rem;color:var(--t2);line-height:1.75;margin-bottom:1rem}
+.sch-pro-stats{display:flex;gap:2rem}
+.sch-pro-stat{text-align:center}
+.sch-pro-stat span{display:block;font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:600;color:var(--gold);line-height:1}
+.sch-pro-stat{font-size:.58rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em}
 
 /* Watch page scholar link */
 .wi-scholar{color:var(--gold);transition:opacity .2s;font-weight:500}
@@ -1350,7 +1373,8 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 /* History done badge */
 .hist-done{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;background:rgba(76,164,76,.85);display:flex;align-items:center;justify-content:center;color:#fff;z-index:2}
 
-@media(max-width:640px){.sch-profile-hero{flex-direction:column;align-items:center;text-align:center}.sch-profile-stats{justify-content:center}}
+@media(max-width:768px){.sch-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}}
+@media(max-width:640px){.sch-pro-hero{flex-direction:column;align-items:center;text-align:center}.sch-pro-portrait{width:140px}.sch-pro-stats{justify-content:center}}
 
 /* ── Download Modal ── */
 .dl-modal{position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.65);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s}
