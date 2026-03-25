@@ -13,6 +13,32 @@ const app = new Hono();
 // Inject user into all requests
 app.use('*', authMiddleware);
 
+// Analytics tracking (non-blocking, don't slow down responses)
+app.use('*', async (c, next) => {
+  await next();
+  // Track page views after response (non-blocking)
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith('/api/') || path.startsWith('/auth/') || path.includes('.')) return;
+  const user = c.get('user');
+  try {
+    const slug = path.match(/\/watch\/([^/]+)/)?.[1] || null;
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare(
+        'INSERT INTO analytics (type, path, slug, user_id, ip, country, user_agent, referer) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(
+        slug ? 'watch' : 'pageview',
+        path,
+        slug,
+        user?.id || null,
+        c.req.header('CF-Connecting-IP') || '',
+        c.req.header('CF-IPCountry') || '',
+        (c.req.header('User-Agent') || '').slice(0, 200),
+        (c.req.header('Referer') || '').slice(0, 500)
+      ).run()
+    );
+  } catch {}
+});
+
 // Mount route groups
 app.route('/', feeds);
 app.route('/', api);

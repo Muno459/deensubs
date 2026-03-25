@@ -98,6 +98,8 @@ pages.get('/search', async (c) => {
       videos = (await db.prepare(`SELECT ${VC} ${VJ} WHERE v.title LIKE ? OR v.description LIKE ? OR v.source LIKE ? ORDER BY v.created_at DESC LIMIT 50`).bind('%' + q + '%', '%' + q + '%', '%' + q + '%').all()).results;
     }
   }
+  // Log search query
+  if (q) { try { const user = c.get('user'); c.executionCtx.waitUntil(c.env.DB.prepare('INSERT INTO search_logs (query, results, user_id) VALUES (?, ?, ?)').bind(q, videos.length, user?.id || null).run()); } catch {} }
   return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
