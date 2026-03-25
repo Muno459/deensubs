@@ -22,7 +22,6 @@ ${featured ? `
       </div>
     </div>
     <div class="hero-info">
-      ${featured.title_ar ? `<div class="hero-ar">${e(featured.title_ar)}</div>` : ''}
       <h1>${e(featured.title)}</h1>
       ${featured.description ? `<p class="hero-desc">${e(featured.description)}</p>` : ''}
       <div class="hero-mt">
@@ -50,7 +49,7 @@ ${popular.length > 1 ? section('Popular', '', popular, { scroll: true }) : ''}
 
 ${catsWithContent.map(c => {
   const cv = byCategory[c.slug];
-  return section(c.name, c.name_ar, cv.slice(0, 6), { link: '/category/' + c.slug });
+  return section(c.name, '', cv.slice(0, 6), { link: '/category/' + c.slug });
 }).join('')}
 
 ${section('All Videos', '', videos)}

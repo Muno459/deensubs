@@ -19,7 +19,6 @@ export function renderCategory({ category, videos, sort }) {
   <div class="cat-hero">
     <div class="cat-hero-top">
       <div>
-        <span class="cat-hero-ar">${e(category.name_ar)}</span>
         <h1 class="cat-hero-title">${e(category.name)}</h1>
         ${desc ? `<p class="cat-hero-desc">${desc}</p>` : ''}
       </div>

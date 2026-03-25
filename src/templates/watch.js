@@ -62,7 +62,6 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
     <div class="wi">
       <div class="wi-top">
         <div class="wi-tl">
-          ${video.title_ar?`<div class="wi-ar">${e(video.title_ar)}</div>`:''}
           <h1>${e(video.title)}</h1>
         </div>
         <div class="wi-acts">

@@ -17,7 +17,6 @@ export function vcard(v, opts) {
 </div>
 <div class="card-bd">
   <h3>${e(v.title)}</h3>
-  ${v.title_ar ? `<div class="card-ar">${e(v.title_ar)}</div>` : ''}
   <div class="card-mt">
     ${v.source ? `<span>${e(v.source)}</span>` : ''}
     <span>${fv(v.views)}</span>

@@ -11,6 +11,7 @@ import { renderAbout } from '../templates/about.js';
 import { renderBookmarks } from '../templates/bookmarks.js';
 import { renderHistory } from '../templates/history.js';
 import { render404 } from '../templates/error.js';
+import { renderSymposium } from '../templates/symposium.js';
 
 const pages = new Hono();
 
@@ -99,7 +100,14 @@ pages.get('/search', async (c) => {
   return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
-// symposium disabled for now
+pages.get('/symposium', async (c) => {
+  const db = c.env.DB;
+  const [videos, cats] = await Promise.all([
+    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = 'symposium' ORDER BY v.id`).all(),
+    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+  ]);
+  return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos: videos.results }), cats.results));
+});
 
 pages.get('/scholars', async (c) => {
   const db = c.env.DB;

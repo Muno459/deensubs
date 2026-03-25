@@ -16,7 +16,6 @@ export function renderScholars({ scholars }) {
         <div class="sch-card-gradient"></div>
       </div>
       <div class="sch-card-body">
-        ${s.name_ar ? `<div class="sch-card-ar">${e(s.name_ar)}</div>` : ''}
         <h3>${e(s.name)}</h3>
         ${s.title ? `<p class="sch-card-title">${e(s.title)}</p>` : ''}
         <div class="sch-card-stats">
@@ -47,7 +46,6 @@ export function renderScholar({ scholar, videos }) {
     ${!hasHero && hasPhoto ? `<div class="sp-hero-av-large"><img src="${cdn(scholar.photo)}" alt="${e(scholar.name)}"></div>` : ''}
     ${!hasHero && !hasPhoto ? `<div class="sp-hero-av-large"><div class="sp-hero-initial">${e(scholar.name).split(' ').pop().charAt(0)}</div></div>` : ''}
     <div class="sp-hero-content${hasHero ? ' sp-hero-offset' : ''}">
-      ${scholar.name_ar ? `<div class="sp-hero-ar">${e(scholar.name_ar)}</div>` : ''}
       <h1 class="sp-hero-name">${e(scholar.name)}</h1>
       ${scholar.title ? `<div class="sp-hero-title">${e(scholar.title)}</div>` : ''}
       ${scholar.bio ? `<p class="sp-hero-bio">${e(scholar.bio)}</p>` : ''}
