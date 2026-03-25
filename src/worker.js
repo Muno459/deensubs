@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, renderAdmin, render404, renderAbout, renderBookmarks, renderSymposium } from './html';
+import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, renderAdmin, render404, renderAbout, renderBookmarks, renderSymposium, renderScholar, renderScholars, renderHistory } from './html';
 
 const app = new Hono();
 
@@ -34,8 +34,8 @@ app.get('/', async (c) => {
   const db = c.env.DB;
   const [cats, all, popular] = await Promise.all([
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
-    db.prepare(`SELECT ${VC} ${VJ} ORDER BY v.created_at DESC LIMIT 30`).all(),
-    db.prepare(`SELECT ${VC} ${VJ} ORDER BY v.views DESC LIMIT 8`).all(),
+    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.created_at DESC LIMIT 30`).all(),
+    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.views DESC LIMIT 8`).all(),
   ]);
   const videos = all.results;
   const byCategory = {};
@@ -56,7 +56,7 @@ app.get('/', async (c) => {
 app.get('/watch/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = c.env.DB;
-  const video = await db.prepare(`SELECT ${VC} ${VJ} WHERE v.slug = ?`).bind(slug).first();
+  const video = await db.prepare(`SELECT ${VC}, s.slug as scholar_slug, s.name as scholar_name, s.title as scholar_title ${VJ} LEFT JOIN scholars s ON v.scholar_id = s.id WHERE v.slug = ?`).bind(slug).first();
   if (!video) return c.html(renderPage('Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
 
   const [, comments, related, cats, cues] = await Promise.all([
@@ -104,13 +104,32 @@ app.get('/search', async (c) => {
   return c.html(renderPage(q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
-app.get('/symposium', async (c) => {
+// app.get('/symposium', ... ) — disabled for now
+
+app.get('/scholars', async (c) => {
   const db = c.env.DB;
-  const [videos, cats] = await Promise.all([
-    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = 'symposium' ORDER BY v.id`).all(),
+  const [scholars, cats] = await Promise.all([
+    db.prepare('SELECT s.*, (SELECT COUNT(*) FROM videos v WHERE v.scholar_id = s.id) as video_count, (SELECT SUM(views) FROM videos v WHERE v.scholar_id = s.id) as total_views FROM scholars s ORDER BY s.name').all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  return c.html(renderPage('Fatwa in the Haramain — Symposium', renderSymposium({ videos: videos.results }), cats.results));
+  return c.html(renderPage('Scholars', renderScholars({ scholars: scholars.results }), cats.results));
+});
+
+app.get('/scholar/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  const db = c.env.DB;
+  const scholar = await db.prepare('SELECT * FROM scholars WHERE slug = ?').bind(slug).first();
+  if (!scholar) return c.html(renderPage('Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
+  const [videos, cats] = await Promise.all([
+    db.prepare(`SELECT ${VC} ${VJ} WHERE v.scholar_id = ? ORDER BY v.created_at DESC`).bind(scholar.id).all(),
+    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+  ]);
+  return c.html(renderPage(scholar.name, renderScholar({ scholar, videos: videos.results }), cats.results));
+});
+
+app.get('/history', async (c) => {
+  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  return c.html(renderPage('Watch History', renderHistory(), cats));
 });
 
 app.get('/about', async (c) => {

@@ -131,7 +131,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
 <div class="wl">
   <div class="wm">
     <div class="vp" id="vp">
-      <video id="vid" preload="metadata" playsinline${th?` poster="${e(th)}"`:''}>
+      <video id="vid" preload="auto" playsinline${th?` poster="${e(th)}"`:''}>
         <source src="${cdn(video.video_key)}" type="video/mp4">
         ${video.srt_key?`<track kind="captions" src="/api/vtt/${e(video.srt_key)}" srclang="en" label="English" default>`:''}
         ${video.srt_ar_key?`<track kind="captions" src="/api/vtt/${e(video.srt_ar_key)}" srclang="ar" label="العربية">`:''}
@@ -145,7 +145,10 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
       <div class="vp-end" id="vp-end">
         <div class="vp-end-inner">
           <button class="vp-end-replay" id="vp-replay"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg><span>Replay</span></button>
-          <div class="vp-end-next" id="vp-end-next"></div>
+          <div class="vp-end-next">${related.slice(0,3).map(r => {
+            const rth = thu(r);
+            return `<a href="/watch/${e(r.slug)}" class="vp-end-card"><div class="vp-end-card-th"${rth?` style="background-image:url('${e(rth)}');background-size:cover;background-position:center"`:''}></div><h5>${e(r.title)}</h5></a>`;
+          }).join('')}</div>
         </div>
       </div>
       <div class="vp-bar" id="vp-bar">
@@ -180,7 +183,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
           <button class="wa" id="dl-btn" title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span></button>
         </div>
       </div>
-      <div class="wi-mt">${video.source?`<span>${e(video.source)}</span>`:''}
+      <div class="wi-mt">${video.scholar_slug?`<a href="/scholar/${e(video.scholar_slug)}" class="wi-scholar">${e(video.source||video.scholar_name)}</a>`:video.source?`<span>${e(video.source)}</span>`:''}
         <span>${fv(video.views)}</span><span>${ago(video.created_at)}</span></div>
       <div class="wi-tgs">
         ${video.category_name?`<a href="/category/${e(video.category_slug)}" class="tag" style="--tc:${e(video.category_color)}">${e(video.category_name)}</a>`:''}
@@ -268,12 +271,12 @@ export function renderSymposium({ videos }) {
       </svg>
     </div>
     <div class="sy-hero-content">
-      <div class="sy-badge"><span class="sy-badge-dot"></span>Scholarly Symposium</div>
+      <div class="sy-badge"><span class="sy-badge-dot"></span>Symposium Highlights</div>
       <div class="sy-ornament">❖</div>
       <h1 class="sy-title-ar">الفتوى في الحرمين الشريفين<br>على ضوء المنهج النبوي</h1>
       <div class="sy-divider"><span></span><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><rect x="5" y="5" width="14" height="14" stroke="rgba(164,132,76,.4)" stroke-width="1" transform="rotate(45 12 12)"/></svg><span></span></div>
       <h2 class="sy-title-en">Fatwa in the Two Holy Mosques<br>in Light of the Prophetic Methodology</h2>
-      <p class="sy-desc">A scholarly symposium bringing together senior scholars to examine the foundations, methodology, and application of religious rulings within the sacred precincts of Masjid al-Haram and Masjid an-Nabawi — tracing the tradition from the Prophetic era through the Rightly Guided Caliphs to the present day.</p>
+      <p class="sy-desc">Key highlights from a scholarly symposium featuring senior scholars on the principles, methodology, and application of fatwa in the Two Holy Mosques. Each clip is carefully selected and translated for maximum clarity and accessibility — bringing the essence of each scholar's contribution to an English-speaking audience.</p>
     </div>
   </div>
 
@@ -282,7 +285,7 @@ export function renderSymposium({ videos }) {
     <div class="sy-stat">
       <div class="sy-stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
       <div class="sy-stat-val">${videos.length}</div>
-      <div class="sy-stat-lbl">Sessions</div>
+      <div class="sy-stat-lbl">Clips</div>
     </div>
     <div class="sy-stat">
       <div class="sy-stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
@@ -325,7 +328,7 @@ export function renderSymposium({ videos }) {
 
   <!-- Sessions -->
   <div class="sy-sessions">
-    <div class="sy-sec-hd"><div class="sy-sec-line"></div><h3>Sessions</h3><div class="sy-sec-line"></div></div>
+    <div class="sy-sec-hd"><div class="sy-sec-line"></div><h3>Highlights</h3><div class="sy-sec-line"></div></div>
 
     <div class="sy-timeline">
       ${videos.map((v,i) => {
@@ -447,6 +450,79 @@ export function renderBookmarks() {
 </script>`;
 }
 
+// ═══ SCHOLARS LIST ═══
+export function renderScholars({ scholars }) {
+  return `
+<div class="sch-page">
+  <div class="sch-hero"><h1>Scholars</h1><p>The scholars whose knowledge we make accessible.</p></div>
+  <div class="sch-grid">
+    ${scholars.map(s => `<a href="/scholar/${e(s.slug)}" class="sch-card card-anim">
+      <div class="sch-av">${e(s.name).split(' ').pop().charAt(0)}</div>
+      <div class="sch-card-info">
+        ${s.name_ar?`<div class="sch-card-ar">${e(s.name_ar)}</div>`:''}
+        <h3>${e(s.name)}</h3>
+        ${s.title?`<p class="sch-card-title">${e(s.title)}</p>`:''}
+        <div class="sch-card-stats"><span>${s.video_count||0} videos</span><span>${fv(s.total_views||0)}</span></div>
+      </div>
+    </a>`).join('')}
+  </div>
+</div>`;
+}
+
+// ═══ SCHOLAR PAGE ═══
+export function renderScholar({ scholar, videos }) {
+  return `
+<div class="sch-profile">
+  <div class="sch-profile-hero">
+    <div class="sch-profile-av">${e(scholar.name).split(' ').pop().charAt(0)}</div>
+    <div class="sch-profile-info">
+      ${scholar.name_ar?`<div class="sch-profile-ar">${e(scholar.name_ar)}</div>`:''}
+      <h1>${e(scholar.name)}</h1>
+      ${scholar.title?`<p class="sch-profile-title">${e(scholar.title)}</p>`:''}
+      ${scholar.bio?`<p class="sch-profile-bio">${e(scholar.bio)}</p>`:''}
+      <div class="sch-profile-stats">
+        <div class="sch-pstat"><span>${videos.length}</span>Videos</div>
+        <div class="sch-pstat"><span>${fv(videos.reduce((a,v)=>a+(v.views||0),0)).replace(' views','')}</span>Views</div>
+      </div>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="sec-hd"><h2>All Videos</h2></div>
+    <div class="grid">${videos.map(v=>vcard(v,{anim:true})).join('')}</div>
+  </div>
+</div>`;
+}
+
+// ═══ HISTORY ═══
+export function renderHistory() {
+  return `
+<section class="sec">
+  <div class="sec-hd"><h1>Watch History</h1></div>
+  <div class="grid" id="hist-grid">
+    <div class="skel-grid">${'<div class="skel-card"><div class="skel-th skel-shimmer"></div><div class="skel-bd"><div class="skel-line skel-shimmer"></div><div class="skel-line skel-line-s skel-shimmer"></div></div></div>'.repeat(4)}</div>
+  </div>
+</section>
+<script>
+(function(){
+  var grid=document.getElementById('hist-grid');
+  var keys=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k.startsWith('p_'))keys.push(k)}
+  var items=keys.map(function(k){try{var d=JSON.parse(localStorage.getItem(k));if(d&&d.title)return{slug:k.slice(2),t:d.t||0,d:d.d||0,ts:d.ts||0,title:d.title,thumb:d.thumb||'',source:d.source||''};return null}catch(e){return null}}).filter(Boolean).sort(function(a,b){return b.ts-a.ts});
+  if(!items.length){grid.innerHTML='<p class="emp">No watch history yet. Videos you watch will appear here.</p>';return}
+  grid.innerHTML=items.map(function(it){
+    var pct=it.d?Math.round(it.t/it.d*100):0;
+    var done=pct>95;
+    return '<a href="/watch/'+it.slug+'" class="card">'
+      +'<div class="card-th"'+(it.thumb?' style="background-image:url(\\''+it.thumb+'\\');background-size:cover;background-position:center"':'')+'>'
+      +'<div class="cw-prog" style="width:'+pct+'%"></div>'
+      +(done?'<div class="hist-done"><svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>':'')
+      +'</div><div class="card-bd"><h3>'+it.title.replace(/</g,'&lt;')+'</h3>'
+      +'<div class="card-mt"><span>'+it.source.replace(/</g,'&lt;')+'</span>'
+      +'<span>'+(done?'Watched':Math.round(it.t/60)+'m watched')+'</span></div></div></a>';
+  }).join('');
+})();
+</script>`;
+}
+
 // ═══ 404 ═══
 export function render404() {
   return `<div class="e404">
@@ -514,6 +590,7 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#c4a44c">
+<link rel="preconnect" href="https://cdn.deensubs.com"><link rel="dns-prefetch" href="https://cdn.deensubs.com">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Amiri:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="dns-prefetch" href="https://fonts.gstatic.com">
@@ -537,8 +614,9 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <nav class="nav" id="nav">
   <div class="nav-in">
     <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
-    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
+    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.filter(c=>c.slug!=='symposium').map(c=>`<a href="/category/${e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
     <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search videos..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
+    <a href="/scholars" class="nav-icon" title="Scholars"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></a>
     <a href="/bookmarks" class="nav-icon" title="Saved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg></a>
     <button class="nav-hb" id="hb" aria-label="Menu"><span></span><span></span><span></span></button>
   </div>
@@ -546,15 +624,15 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <div class="mob-menu" id="mob">
   <div class="mob-in">
     <form action="/search" method="get" class="mob-sf"><input type="search" name="q" placeholder="Search..." autocomplete="off"></form>
-    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
-    <div class="mob-div"></div><a href="/bookmarks">Saved Videos</a><a href="/about">About</a></div>
+    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.filter(c=>c.slug!=='symposium').map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
+    <div class="mob-div"></div><a href="/scholars">Scholars</a><a href="/history">History</a><a href="/bookmarks">Saved</a><a href="/about">About</a></div>
   </div>
 </div>
 <main class="wrap" id="main-content">${body}</main>
 <footer class="ft"><div class="ft-in">
   <div class="ft-brand"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span>DeenSubs</span></div>
   <span class="ft-copy">&copy; 2026 DeenSubs — Making Islamic knowledge accessible</span>
-  <div class="ft-links"><a href="/about">About</a><a href="/bookmarks">Saved</a><a href="/feed.xml">RSS</a><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener">GitHub</a></div>
+  <div class="ft-links"><a href="/scholars">Scholars</a><a href="/history">History</a><a href="/bookmarks">Saved</a><a href="/about">About</a><a href="/feed.xml">RSS</a><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener">GitHub</a></div>
 </div></footer>
 <script>
 document.getElementById('hb').onclick=function(){document.getElementById('mob').classList.toggle('open');document.body.classList.toggle('no-scroll')};
@@ -677,7 +755,8 @@ document.querySelectorAll('.vb-lang-opt').forEach(function(b){
 
 // Volume
 var vvol=document.getElementById('vvol'),vvr=document.getElementById('vvr'),voli=document.getElementById('voli');
-vvr.oninput=function(){vid.volume=+vvr.value;vid.muted=false;updVol()};
+vvr.oninput=function(){vid.volume=+vvr.value;vid.muted=false;updVol();
+  try{var p=JSON.parse(localStorage.getItem('ds_prefs')||'{}');p.volume=vid.volume;localStorage.setItem('ds_prefs',JSON.stringify(p))}catch(ex){}};
 vvol.onclick=function(){vid.muted=!vid.muted;if(!vid.muted&&vid.volume===0){vid.volume=1;vvr.value=1}updVol()};
 function updVol(){var v=vid.muted?0:vid.volume;vvr.value=vid.muted?0:vid.volume;
   voli.innerHTML=v===0?'<path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="1.5"/><line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="1.5"/>'
@@ -692,7 +771,13 @@ var langWrap=document.querySelector('.vb-lang-wrap');
 cc.onclick=function(ev){ev.stopPropagation();langWrap.classList.toggle('vb-lang-open')};
 document.addEventListener('click',function(){langWrap.classList.remove('vb-lang-open')});
 var spds=[.5,.75,1,1.25,1.5,2],si=2;
-spd.onclick=function(){si=(si+1)%spds.length;vid.playbackRate=spds[si];spd.textContent=spds[si]+'x'};
+// Restore playback prefs
+try{var prefs=JSON.parse(localStorage.getItem('ds_prefs')||'{}');
+if(prefs.speed){si=spds.indexOf(prefs.speed);if(si===-1)si=2;vid.playbackRate=spds[si];spd.textContent=spds[si]+'x'}
+if(prefs.volume!==undefined){vid.volume=prefs.volume;vvr.value=prefs.volume}
+}catch(ex){}
+spd.onclick=function(){si=(si+1)%spds.length;vid.playbackRate=spds[si];spd.textContent=spds[si]+'x';
+  try{var p=JSON.parse(localStorage.getItem('ds_prefs')||'{}');p.speed=spds[si];localStorage.setItem('ds_prefs',JSON.stringify(p))}catch(ex){}};
 fs.onclick=function(){
   if(document.fullscreenElement||document.webkitFullscreenElement){
     (document.exitFullscreen||document.webkitExitFullscreen).call(document);
@@ -729,17 +814,7 @@ miniX.onclick=function(ev){ev.stopPropagation();vid.pause();isMini=false;vp.clas
 
 // End screen
 var endScreen=document.getElementById('vp-end'),endNext=document.getElementById('vp-end-next');
-var relCards=document.querySelectorAll('.sc');
-if(relCards.length){
-  var endHtml='';
-  for(var ri=0;ri<Math.min(relCards.length,3);ri++){
-    var rc=relCards[ri],rth=rc.querySelector('.sc-th'),rh=rc.querySelector('h4');
-    var bg=rth?(rth.dataset.bg||''):'';
-    var bgStyle=bg?'style="background-image:url('+bg+');background-size:cover;background-position:center"':'';
-    endHtml+='<a href="'+rc.href+'" class="vp-end-card"><div class="vp-end-card-th" '+bgStyle+'></div><h5>'+(rh?rh.textContent:'')+'</h5></a>';
-  }
-  endNext.innerHTML=endHtml;
-}
+// end screen cards rendered server-side
 vid.addEventListener('ended',function(){endScreen.classList.add('vp-end-on');if(isMini){isMini=false;vp.classList.remove('vp-mini')}});
 document.getElementById('vp-replay').onclick=function(){endScreen.classList.remove('vp-end-on');vid.currentTime=0;vid.play()};
 
@@ -807,6 +882,25 @@ function updBk(){var s=bks.indexOf(slug)!==-1;bkBtn.classList.toggle('wa-on',s);
 updBk();bkBtn.onclick=function(){var i=bks.indexOf(slug);if(i===-1)bks.push(slug);else bks.splice(i,1);localStorage.setItem('ds_bk',JSON.stringify(bks));updBk();toast(i===-1?'Bookmarked':'Removed')};
 
 // Share
+// Prefetch next video when 80% watched
+var prefetched=false;
+vid.addEventListener('timeupdate',function(){
+  if(!prefetched&&vid.duration&&vid.currentTime/vid.duration>0.8){
+    prefetched=true;
+    var next=document.querySelector('.sc');
+    if(next){var link=document.createElement('link');link.rel='prefetch';link.href=next.href;document.head.appendChild(link)}
+  }
+});
+
+// Preload related videos on hover
+document.querySelectorAll('.sc').forEach(function(card){
+  var preloaded=false;
+  card.addEventListener('mouseenter',function(){
+    if(preloaded)return;preloaded=true;
+    var link=document.createElement('link');link.rel='prefetch';link.href=card.href;document.head.appendChild(link);
+  });
+});
+
 // Download modal
 document.getElementById('dl-btn').onclick=function(){document.getElementById('dl-modal').classList.add('dl-open')};
 document.getElementById('dl-close').onclick=function(){document.getElementById('dl-modal').classList.remove('dl-open')};
@@ -1104,10 +1198,10 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .vp-end-replay{display:flex;flex-direction:column;align-items:center;gap:.4rem;background:none;border:2px solid rgba(255,255,255,.2);border-radius:12px;padding:1.25rem 1.5rem;color:rgba(255,255,255,.8);cursor:pointer;transition:all .2s;font:inherit;font-size:.75rem}
 .vp-end-replay:hover{border-color:var(--gold);color:var(--gold)}
 .vp-end-next{display:flex;gap:.75rem;overflow:hidden}
-.vp-end-card{display:block;width:160px;flex-shrink:0;border-radius:8px;overflow:hidden;background:var(--s2);transition:transform .2s}
 .vp-end-card:hover{transform:scale(1.04)}
 .vp-end-card-th{aspect-ratio:16/9;background:var(--s3);background-size:cover;background-position:center;position:relative}
-.vp-end-card h5{padding:.4rem .5rem;font-size:.65rem;font-weight:500;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.vp-end-card{display:flex;flex-direction:column;width:160px;flex-shrink:0;border-radius:8px;overflow:hidden;background:var(--s2);transition:transform .2s}
+.vp-end-card h5{padding:.35rem .5rem;font-size:.58rem;font-weight:500;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── Spinner ── */
 .vp-spinner{position:absolute;top:50%;left:50%;width:36px;height:36px;margin:-18px 0 0 -18px;border:3px solid rgba(255,255,255,.1);border-top-color:var(--gold);border-radius:50%;z-index:5;opacity:0;pointer-events:none;animation:spin .8s linear infinite}
@@ -1202,6 +1296,44 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .kb-row kbd{background:var(--s3);border:1px solid var(--bd);border-radius:4px;padding:.1rem .45rem;font-family:inherit;font-size:.7rem;color:var(--tx);min-width:28px;text-align:center}
 .kb-close{width:100%;padding:.45rem;background:var(--s3);border:1px solid var(--bd);border-radius:8px;color:var(--t2);font:inherit;font-size:.78rem;cursor:pointer;transition:all .2s}
 .kb-close:hover{border-color:var(--bdh);color:var(--tx)}
+
+/* ── Scholar pages ── */
+.sch-page{max-width:800px;margin:0 auto}
+.sch-hero{text-align:center;padding:2rem 0 1.5rem}
+.sch-hero h1{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:600;margin-bottom:.3rem}
+.sch-hero p{color:var(--t2);font-size:.85rem}
+.sch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem;margin-top:1rem}
+.sch-card{display:flex;align-items:center;gap:1rem;padding:1.1rem;background:var(--s1);border:1px solid var(--bd);border-radius:12px;transition:all .3s ease}
+.sch-card:hover{border-color:var(--bdh);transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,0,0,.25)}
+.sch-av{width:48px;height:48px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:1.2rem;font-weight:700;flex-shrink:0}
+.sch-card-info{flex:1;min-width:0}
+.sch-card-ar{font-family:'Amiri',serif;font-size:.85rem;color:var(--gold);direction:rtl;opacity:.6}
+.sch-card-info h3{font-size:.9rem;font-weight:500;margin-bottom:.15rem}
+.sch-card-title{font-size:.68rem;color:var(--t3);margin-bottom:.3rem}
+.sch-card-stats{display:flex;gap:.75rem;font-size:.65rem;color:var(--t3)}
+
+/* Scholar profile */
+.sch-profile{max-width:1000px;margin:0 auto}
+.sch-profile-hero{display:flex;gap:1.5rem;align-items:flex-start;padding:2rem 0;border-bottom:1px solid var(--bd);margin-bottom:1.5rem}
+.sch-profile-av{width:72px;height:72px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:1.8rem;font-weight:700;flex-shrink:0}
+.sch-profile-info{flex:1}
+.sch-profile-ar{font-family:'Amiri',serif;font-size:1.1rem;color:var(--gold);direction:rtl;margin-bottom:.15rem}
+.sch-profile-info h1{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;margin-bottom:.2rem}
+.sch-profile-title{font-size:.78rem;color:var(--gold);margin-bottom:.5rem;opacity:.7}
+.sch-profile-bio{font-size:.8rem;color:var(--t2);line-height:1.7;margin-bottom:.75rem}
+.sch-profile-stats{display:flex;gap:2rem}
+.sch-pstat{text-align:center}
+.sch-pstat span{display:block;font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;color:var(--gold)}
+.sch-pstat{font-size:.6rem;color:var(--t3);text-transform:uppercase;letter-spacing:.08em}
+
+/* Watch page scholar link */
+.wi-scholar{color:var(--gold);transition:opacity .2s;font-weight:500}
+.wi-scholar:hover{opacity:.7}
+
+/* History done badge */
+.hist-done{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;background:rgba(76,164,76,.85);display:flex;align-items:center;justify-content:center;color:#fff;z-index:2}
+
+@media(max-width:640px){.sch-profile-hero{flex-direction:column;align-items:center;text-align:center}.sch-profile-stats{justify-content:center}}
 
 /* ── Download Modal ── */
 .dl-modal{position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.65);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s}
