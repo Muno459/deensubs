@@ -498,7 +498,16 @@ function renderSub(){
   else subEl.innerHTML='';
 }
 if(srt){fetch('https://cdn.deensubs.com/'+srt).then(function(r){return r.text()}).then(function(s){
-  subCues=parseSrt(s)}).catch(function(){})}
+  subCues=parseSrt(s);
+  // Also add native track for iOS native player
+  var vtt='WEBVTT\\n\\n'+s.replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2');
+  var blob=new Blob([vtt],{type:'text/vtt'});
+  var track=document.createElement('track');
+  track.kind='subtitles';track.label='English';track.srclang='en';
+  track.src=URL.createObjectURL(blob);track.default=true;
+  vid.appendChild(track);
+  setTimeout(function(){if(track.track)track.track.mode='showing'},100);
+}).catch(function(){})}
 
 // Volume
 var vvol=document.getElementById('vvol'),vvr=document.getElementById('vvr'),voli=document.getElementById('voli');
@@ -513,7 +522,8 @@ function updVol(){var v=vid.muted?0:vid.volume;vvr.value=vid.muted?0:vid.volume;
 var urlT=new URLSearchParams(location.search).get('t');
 if(urlT){vid.currentTime=parseFloat(urlT);setTimeout(function(){vid.play()},300)}
 
-cc.onclick=function(){ccOn=!ccOn;cc.classList.toggle('vb-on',ccOn);if(!ccOn)subEl.innerHTML=''};
+cc.onclick=function(){ccOn=!ccOn;cc.classList.toggle('vb-on',ccOn);if(!ccOn)subEl.innerHTML='';
+  var tracks=vid.textTracks;if(tracks.length)tracks[0].mode=ccOn?'showing':'hidden'};
 var spds=[.5,.75,1,1.25,1.5,2],si=2;
 spd.onclick=function(){si=(si+1)%spds.length;vid.playbackRate=spds[si];spd.textContent=spds[si]+'x'};
 fs.onclick=function(){document.fullscreenElement?document.exitFullscreen():vp.requestFullscreen().catch(function(){})};
@@ -761,7 +771,7 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 /* ── Player ── */
 .vp{position:relative;background:#000;border-radius:var(--r);overflow:hidden;aspect-ratio:16/9}
 .vp video{display:block;width:100%;height:100%;object-fit:contain}
-.vp video::cue{visibility:hidden;font-size:0}
+.vp video::cue{background:rgba(0,0,0,.85);color:#fff;font-family:'Outfit',sans-serif;font-size:1rem;line-height:1.4}
 .vp-sub{position:absolute;bottom:3.5rem;left:50%;transform:translateX(-50%);z-index:5;text-align:center;pointer-events:none;max-width:85%;transition:opacity .15s}
 .vp-sub span{display:inline;background:rgba(0,0,0,.85);color:#fff;font-family:'Outfit',sans-serif;font-size:clamp(.8rem,2vw,.95rem);font-weight:400;line-height:1.5;padding:.25rem .6rem;border-radius:4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .vp:fullscreen .vp-sub{bottom:5rem}
