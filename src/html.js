@@ -634,7 +634,7 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <nav class="nav" id="nav">
   <div class="nav-in">
     <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
-    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.filter(c=>c.slug!=='symposium').map(c=>`<a href="/category/${e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
+    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
     <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search videos..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
     ${user?`<div class="nav-user"><a href="/auth/logout" class="nav-user-btn" title="Sign out"><img src="${e(user.avatar)}" class="nav-user-av" alt="">${e(user.name.split(' ')[0])}</a></div>`:`<a href="/auth/google" class="nav-login">Sign in</a>`}
     <a href="/scholars" class="nav-icon" title="Scholars"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></a>
@@ -645,7 +645,7 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <div class="mob-menu" id="mob">
   <div class="mob-in">
     <form action="/search" method="get" class="mob-sf"><input type="search" name="q" placeholder="Search..." autocomplete="off"></form>
-    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.filter(c=>c.slug!=='symposium').map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
+    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
     <div class="mob-div"></div><a href="/scholars">Scholars</a><a href="/history">History</a><a href="/bookmarks">Saved</a><a href="/about">About</a></div>
   </div>
 </div>
@@ -1363,7 +1363,7 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .sp-hero-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
 .sp-hero-geo{width:100%;max-width:500px;opacity:.6}
 .sp-hero-img{padding-right:280px}
-.sp-hero-portrait{position:absolute;right:0;bottom:0;width:300px;pointer-events:none}
+.sp-hero-portrait{position:absolute;right:0;top:0;bottom:0;width:300px;pointer-events:none;overflow:hidden}
 .sp-hero-portrait img{width:100%;display:block;filter:drop-shadow(-10px 0 40px rgba(0,0,0,.4))}
 .sp-hero-content{position:relative;z-index:1}
 .sp-hero-ar{font-family:'Amiri',serif;font-size:clamp(1.2rem,2.5vw,1.6rem);color:var(--gold);direction:rtl;margin-bottom:.2rem;text-shadow:0 0 40px rgba(164,132,76,.15)}
