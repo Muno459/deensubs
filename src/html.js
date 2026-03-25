@@ -301,13 +301,31 @@ export function renderSymposium({ videos }) {
     </div>
   </div>
 
+  <!-- About -->
+  <div class="sy-about">
+    <div class="sy-sec-hd"><div class="sy-sec-line"></div><h3>About This Symposium</h3><div class="sy-sec-line"></div></div>
+    <div class="sy-about-grid">
+      <div class="sy-about-card">
+        <div class="sy-about-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><path d="M3 7l7-5 7 5v8a1 1 0 01-1 1H4a1 1 0 01-1-1V7z"/><path d="M8 16V10h4v6"/></svg></div>
+        <h4>The Two Holy Mosques</h4>
+        <p>Masjid al-Haram in Makkah and Masjid an-Nabawi in Madinah hold the highest status in Islam. This symposium examines how fatwa serves to preserve and uphold their sacred mission.</p>
+      </div>
+      <div class="sy-about-card">
+        <div class="sy-about-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
+        <h4>Prophetic Methodology</h4>
+        <p>Every session traces the chain of fatwa methodology back to the Prophet ﷺ and his Companions, ensuring religious rulings remain grounded in authentic sources and scholarly consensus.</p>
+      </div>
+      <div class="sy-about-card">
+        <div class="sy-about-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <h4>Senior Scholars</h4>
+        <p>Featuring members of the Council of Senior Scholars, imams of the Haramain, and leading academics — each bringing decades of specialized knowledge in Islamic jurisprudence.</p>
+      </div>
+    </div>
+  </div>
+
   <!-- Sessions -->
   <div class="sy-sessions">
-    <div class="sy-sec-hd">
-      <div class="sy-sec-line"></div>
-      <h3>Sessions</h3>
-      <div class="sy-sec-line"></div>
-    </div>
+    <div class="sy-sec-hd"><div class="sy-sec-line"></div><h3>Sessions</h3><div class="sy-sec-line"></div></div>
 
     <div class="sy-timeline">
       ${videos.map((v,i) => {
@@ -315,7 +333,7 @@ export function renderSymposium({ videos }) {
         return `<a href="/watch/${e(v.slug)}" class="sy-card card-anim">
         <div class="sy-card-num"><span>${String(i+1).padStart(2,'0')}</span></div>
         <div class="sy-card-main">
-          <div class="sy-card-th"${th?` style="background-image:url('${e(th)}');background-size:cover;background-position:center"`:''}>
+          <div class="sy-card-th"${th?` data-bg="${e(th)}"`:''}>
             ${!th?tsvg(v.title,'#a4844c',240,135):''}
             <div class="sy-card-play"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M8 5v14l11-7z"/></svg></div>
             ${v.duration?`<span class="dur">${ft(v.duration)}</span>`:''}
@@ -324,6 +342,7 @@ export function renderSymposium({ videos }) {
             ${v.title_ar?`<div class="sy-card-ar">${e(v.title_ar)}</div>`:''}
             <h4>${e(v.title)}</h4>
             <div class="sy-card-speaker"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${e(v.source||'')}</div>
+            ${v.description?`<p class="sy-card-desc">${e(v.description)}</p>`:''}
             <div class="sy-card-foot">
               <div class="sy-card-tags">
                 ${v.srt_key?'<span class="sy-tag sy-tag-en">English</span>':''}
@@ -336,6 +355,17 @@ export function renderSymposium({ videos }) {
         </div>
       </a>`;
       }).join('')}
+    </div>
+  </div>
+
+  <!-- Scholars -->
+  <div class="sy-scholars">
+    <div class="sy-sec-hd"><div class="sy-sec-line"></div><h3>Featured Scholars</h3><div class="sy-sec-line"></div></div>
+    <div class="sy-scholars-grid">
+      ${videos.map(v => `<div class="sy-scholar">
+        <div class="sy-scholar-av">${(v.source||'').split(' ').pop().charAt(0)}</div>
+        <div class="sy-scholar-name">${e(v.source||'')}</div>
+      </div>`).join('')}
     </div>
   </div>
 
@@ -507,7 +537,7 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <nav class="nav" id="nav">
   <div class="nav-in">
     <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
-    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
+    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
     <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search videos..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
     <a href="/bookmarks" class="nav-icon" title="Saved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg></a>
     <button class="nav-hb" id="hb" aria-label="Menu"><span></span><span></span><span></span></button>
@@ -516,7 +546,7 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <div class="mob-menu" id="mob">
   <div class="mob-in">
     <form action="/search" method="get" class="mob-sf"><input type="search" name="q" placeholder="Search..." autocomplete="off"></form>
-    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
+    <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
     <div class="mob-div"></div><a href="/bookmarks">Saved Videos</a><a href="/about">About</a></div>
   </div>
 </div>
@@ -1252,6 +1282,24 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .sy-tag-ar{background:rgba(76,138,196,.08);color:#4c8ac4}
 .sy-tag-pending{background:var(--s3);color:var(--t3)}
 .sy-card-dur{font-size:.68rem;color:var(--t3)}
+.sy-card-desc{font-size:.72rem;color:var(--t3);line-height:1.6;margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* About cards */
+.sy-about{margin:1rem 0}
+.sy-about-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem}
+.sy-about-card{padding:1.25rem;background:var(--s1);border:1px solid var(--bd);border-radius:12px;transition:border-color .3s}
+.sy-about-card:hover{border-color:var(--bdh)}
+.sy-about-icon{color:rgba(164,132,76,.4);margin-bottom:.6rem}
+.sy-about-card h4{font-family:'Cormorant Garamond',serif;font-size:.9rem;font-weight:600;margin-bottom:.35rem;color:var(--gold)}
+.sy-about-card p{font-size:.72rem;color:var(--t3);line-height:1.65}
+
+/* Scholars */
+.sy-scholars{margin:2rem 0}
+.sy-scholars-grid{display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center}
+.sy-scholar{display:flex;align-items:center;gap:.5rem;padding:.45rem .85rem;background:var(--s1);border:1px solid var(--bd);border-radius:100px;transition:border-color .3s}
+.sy-scholar:hover{border-color:var(--bdh)}
+.sy-scholar-av{width:28px;height:28px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:.75rem;font-weight:700;flex-shrink:0}
+.sy-scholar-name{font-size:.72rem;color:var(--t2);white-space:nowrap}
 
 /* Quote */
 .sy-quote{text-align:center;padding:2.5rem 1.5rem;margin-top:2.5rem;background:var(--s1);border:1px solid var(--bd);border-radius:14px;position:relative}
@@ -1264,6 +1312,7 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
   .sy-stats{grid-template-columns:repeat(2,1fr)}
   .sy-card-main{flex-direction:column}.sy-card-th{width:100%}
   .sy-timeline{padding-left:0}.sy-timeline::before{display:none}.sy-card-num{display:none}
+  .sy-about-grid{grid-template-columns:1fr}
 }
 @media(max-width:480px){.sy-hero{padding:2.5rem 1rem 1.5rem}}
 
