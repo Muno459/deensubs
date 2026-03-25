@@ -149,7 +149,13 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
         <span class="vp-tm" id="vtm">0:00 / 0:00</span>
         <button class="vb" id="vvol" title="Mute (m)"><svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path id="voli" d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
         <input type="range" class="vb-vr" id="vvr" min="0" max="1" step=".05" value="1" title="Volume">
-        <button class="vb" id="vcc" title="Subtitles (c)">CC</button>
+        <div class="vb-lang-wrap"><button class="vb" id="vcc" title="Subtitles (c)">CC</button>
+          <div class="vb-lang-menu" id="lang-menu">
+            <button class="vb-lang-opt" data-lang="off">Off</button>
+            ${video.srt_key?'<button class="vb-lang-opt vb-lang-on" data-lang="en">English</button>':''}
+            ${video.srt_ar_key?'<button class="vb-lang-opt" data-lang="ar">العربية</button>':''}
+          </div>
+        </div>
         <button class="vb vb-spd" id="vspd" title="Speed">1x</button>
         <button class="vb" id="vthtr" title="Theater mode (t)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="2" y="4" width="20" height="16" rx="2"/></svg></button>
         <button class="vb" id="vpip" title="Picture-in-Picture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="2" y="3" width="20" height="14" rx="2"/><rect x="11" y="9" width="10" height="7" rx="1" fill="currentColor" opacity=".3"/></svg></button>
@@ -199,7 +205,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
 <div class="scroll-prog" id="scroll-prog"></div>
 <button class="btt" id="btt" title="Back to top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M18 15l-6-6-6 6"/></svg></button>
 <div class="toast" id="toast"></div>
-<script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__TITLE__',e(video.title).replace(/'/g,"\\\'")).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',video.source?e(video.source):'')}</script>`;
+<script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__SRT_AR__',video.srt_ar_key?e(video.srt_ar_key):'').replace('__TITLE__',e(video.title).replace(/'/g,"\\\'")).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',video.source?e(video.source):'')}</script>`;
 }
 
 function avatarColor(name) {
@@ -452,7 +458,7 @@ const WATCH_JS = `
 var vid=document.getElementById('vid'),vp=document.getElementById('vp'),bar=document.getElementById('vp-bar'),big=document.getElementById('vp-big'),
 pp=document.getElementById('vpp'),ppi=document.getElementById('ppi'),sk=document.getElementById('vsk'),pg=document.getElementById('vpg'),
 bf=document.getElementById('vbf'),tm=document.getElementById('vtm'),cc=document.getElementById('vcc'),spd=document.getElementById('vspd'),
-fs=document.getElementById('vfs'),trl=document.getElementById('trl'),slug='__SLUG__',srt='__SRT__',
+fs=document.getElementById('vfs'),trl=document.getElementById('trl'),slug='__SLUG__',srt='__SRT__',srtAr='__SRT_AR__',
 vTitle='__TITLE__',vThumb='__THUMB__',vSrc='__SOURCE__';
 
 function ftt(s){if(!s||isNaN(s))return'0:00';var m=Math.floor(s/60),sec=Math.floor(s%60),h=Math.floor(m/60);return h>0?h+':'+String(m%60).padStart(2,'0')+':'+String(sec).padStart(2,'0'):m+':'+String(sec).padStart(2,'0')}
@@ -497,17 +503,36 @@ function renderSub(){
   if(found)subEl.innerHTML='<span>'+found.replace(/</g,'&lt;')+'</span>';
   else subEl.innerHTML='';
 }
-if(srt){fetch('https://cdn.deensubs.com/'+srt).then(function(r){return r.text()}).then(function(s){
-  subCues=parseSrt(s);
-  // Also add native track for iOS native player
-  var vtt='WEBVTT\\n\\n'+s.replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2');
-  var blob=new Blob([vtt],{type:'text/vtt'});
-  var track=document.createElement('track');
-  track.kind='subtitles';track.label='English';track.srclang='en';
-  track.src=URL.createObjectURL(blob);track.default=true;
-  vid.appendChild(track);
-  setTimeout(function(){if(track.track)track.track.mode='showing'},100);
-}).catch(function(){})}
+// Subtitle loading with language support
+var subCache={},curLang='en';
+function loadSubs(lang){
+  curLang=lang;
+  if(lang==='off'){ccOn=false;subCues=[];subEl.innerHTML='';cc.classList.remove('vb-on');
+    document.querySelectorAll('.vb-lang-opt').forEach(function(b){b.classList.toggle('vb-lang-on',b.dataset.lang==='off')});
+    var tracks=vid.textTracks;for(var i=0;i<tracks.length;i++)tracks[i].mode='hidden';return}
+  ccOn=true;cc.classList.add('vb-on');
+  document.querySelectorAll('.vb-lang-opt').forEach(function(b){b.classList.toggle('vb-lang-on',b.dataset.lang===lang)});
+  var key=lang==='ar'?srtAr:srt;
+  if(!key)return;
+  if(subCache[lang]){subCues=subCache[lang];addNativeTrack(lang,key);return}
+  fetch('https://cdn.deensubs.com/'+key).then(function(r){return r.text()}).then(function(s){
+    subCache[lang]=parseSrt(s);subCues=subCache[lang];addNativeTrack(lang,s);
+  }).catch(function(){});
+}
+function addNativeTrack(lang,rawSrt){
+  // Remove old tracks
+  while(vid.querySelector('track'))vid.querySelector('track').remove();
+  var vtt='WEBVTT\\n\\n'+(typeof rawSrt==='string'&&rawSrt.indexOf('-->')>-1?rawSrt:rawSrt).replace(/(\\d{2}:\\d{2}:\\d{2}),(\\d{3})/g,'$1.$2');
+  var blob=new Blob([vtt],{type:'text/vtt'});var t=document.createElement('track');
+  t.kind='subtitles';t.label=lang==='ar'?'Arabic':'English';t.srclang=lang;
+  t.src=URL.createObjectURL(blob);t.default=true;vid.appendChild(t);
+  setTimeout(function(){if(t.track)t.track.mode='showing'},100);
+}
+if(srt)loadSubs('en');
+// Language menu clicks
+document.querySelectorAll('.vb-lang-opt').forEach(function(b){
+  b.onclick=function(ev){ev.stopPropagation();loadSubs(b.dataset.lang)}
+});
 
 // Volume
 var vvol=document.getElementById('vvol'),vvr=document.getElementById('vvr'),voli=document.getElementById('voli');
@@ -522,8 +547,7 @@ function updVol(){var v=vid.muted?0:vid.volume;vvr.value=vid.muted?0:vid.volume;
 var urlT=new URLSearchParams(location.search).get('t');
 if(urlT){vid.currentTime=parseFloat(urlT);setTimeout(function(){vid.play()},300)}
 
-cc.onclick=function(){ccOn=!ccOn;cc.classList.toggle('vb-on',ccOn);if(!ccOn)subEl.innerHTML='';
-  var tracks=vid.textTracks;if(tracks.length)tracks[0].mode=ccOn?'showing':'hidden'};
+cc.onclick=function(){if(ccOn)loadSubs('off');else loadSubs(curLang==='off'?'en':curLang)};
 var spds=[.5,.75,1,1.25,1.5,2],si=2;
 spd.onclick=function(){si=(si+1)%spds.length;vid.playbackRate=spds[si];spd.textContent=spds[si]+'x'};
 fs.onclick=function(){document.fullscreenElement?document.exitFullscreen():vp.requestFullscreen().catch(function(){})};
@@ -771,7 +795,7 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 /* ── Player ── */
 .vp{position:relative;background:#000;border-radius:var(--r);overflow:hidden;aspect-ratio:16/9}
 .vp video{display:block;width:100%;height:100%;object-fit:contain}
-.vp video::cue{background:rgba(0,0,0,.85);color:#fff;font-family:'Outfit',sans-serif;font-size:1rem;line-height:1.4}
+.vp video::cue{color:transparent;background:transparent;opacity:0}
 .vp-sub{position:absolute;bottom:3.5rem;left:50%;transform:translateX(-50%);z-index:5;text-align:center;pointer-events:none;max-width:85%;transition:opacity .15s}
 .vp-sub span{display:inline;background:rgba(0,0,0,.85);color:#fff;font-family:'Outfit',sans-serif;font-size:clamp(.8rem,2vw,.95rem);font-weight:400;line-height:1.5;padding:.25rem .6rem;border-radius:4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .vp:fullscreen .vp-sub{bottom:5rem}
@@ -788,6 +812,12 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .vb{background:none;border:none;color:rgba(255,255,255,.8);cursor:pointer;font-size:.7rem;padding:.15rem;display:flex;align-items:center;transition:color .15s}
 .vb:hover{color:#fff}.vb.vb-on{color:var(--gold)}
 .vb-spd{font-weight:600;font-size:.65rem;min-width:22px}
+.vb-lang-wrap{position:relative}
+.vb-lang-menu{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:rgba(15,15,20,.95);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:.3rem;margin-bottom:.4rem;display:none;flex-direction:column;gap:.1rem;min-width:90px;backdrop-filter:blur(12px)}
+.vb-lang-wrap:hover .vb-lang-menu,.vb-lang-menu:hover{display:flex}
+.vb-lang-opt{background:none;border:none;color:rgba(255,255,255,.7);font:inherit;font-size:.7rem;padding:.3rem .6rem;border-radius:5px;cursor:pointer;text-align:left;transition:all .15s;white-space:nowrap}
+.vb-lang-opt:hover{background:rgba(255,255,255,.1);color:#fff}
+.vb-lang-on{color:var(--gold)}
 .vb-vr{width:60px;height:4px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.15);border-radius:2px;cursor:pointer;outline:none}
 .vb-vr::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--gold);cursor:pointer}
 .vb-vr::-moz-range-thumb{width:10px;height:10px;border-radius:50%;background:var(--gold);border:none;cursor:pointer}
