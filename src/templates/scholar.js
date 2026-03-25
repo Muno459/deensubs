@@ -12,16 +12,16 @@ export function renderScholars({ scholars }) {
   <div class="sch-grid">
     ${scholars.map(s => `<a href="/scholar/${e(s.slug)}" class="sch-card card-anim">
       <div class="sch-card-img">
-        ${s.photo?`<img src="${cdn(s.photo)}" alt="${e(s.name)}">`:`<div class="sch-card-initial">${e(s.name).split(' ').pop().charAt(0)}</div>`}
+        ${s.photo ? `<img src="${cdn(s.photo)}" alt="${e(s.name)}">` : `<div class="sch-card-initial">${e(s.name).split(' ').pop().charAt(0)}</div>`}
         <div class="sch-card-gradient"></div>
       </div>
       <div class="sch-card-body">
-        ${s.name_ar?`<div class="sch-card-ar">${e(s.name_ar)}</div>`:''}
+        ${s.name_ar ? `<div class="sch-card-ar">${e(s.name_ar)}</div>` : ''}
         <h3>${e(s.name)}</h3>
-        ${s.title?`<p class="sch-card-title">${e(s.title)}</p>`:''}
+        ${s.title ? `<p class="sch-card-title">${e(s.title)}</p>` : ''}
         <div class="sch-card-stats">
-          <div class="sch-card-stat"><span>${s.video_count||0}</span> videos</div>
-          <div class="sch-card-stat"><span>${s.total_views||0}</span> views</div>
+          <div class="sch-card-stat"><span>${s.video_count || 0}</span> videos</div>
+          <div class="sch-card-stat"><span>${s.total_views || 0}</span> views</div>
         </div>
       </div>
     </a>`).join('')}
@@ -31,9 +31,10 @@ export function renderScholars({ scholars }) {
 
 export function renderScholar({ scholar, videos }) {
   const hasHero = !!scholar.photo_hero;
+  const hasPhoto = !!scholar.photo;
   return `
 <div class="sch-profile">
-  <div class="sp-hero${hasHero?' sp-hero-img':''}">
+  <div class="sp-hero${hasHero ? ' sp-hero-img' : ''}">
     <div class="sp-hero-bg">
       <svg viewBox="0 0 600 300" fill="none" class="sp-hero-geo">
         <circle cx="300" cy="150" r="140" stroke="rgba(164,132,76,.05)" stroke-width=".7"/>
@@ -42,22 +43,25 @@ export function renderScholar({ scholar, videos }) {
         <circle cx="300" cy="150" r="50" stroke="rgba(164,132,76,.04)" stroke-width=".5"/>
       </svg>
     </div>
-    ${hasHero?`<div class="sp-hero-portrait"><img src="${cdn(scholar.photo_hero)}" alt="${e(scholar.name)}"></div>`:''}
-    <div class="sp-hero-content${hasHero?' sp-hero-content-offset':''}">
-      ${scholar.name_ar?`<div class="sp-hero-ar">${e(scholar.name_ar)}</div>`:''}
+    ${hasHero ? `<div class="sp-hero-portrait"><img src="${cdn(scholar.photo_hero)}" alt="${e(scholar.name)}"></div>` : ''}
+    ${!hasHero && hasPhoto ? `<div class="sp-hero-av-large"><img src="${cdn(scholar.photo)}" alt="${e(scholar.name)}"></div>` : ''}
+    ${!hasHero && !hasPhoto ? `<div class="sp-hero-av-large"><div class="sp-hero-initial">${e(scholar.name).split(' ').pop().charAt(0)}</div></div>` : ''}
+    <div class="sp-hero-content${hasHero ? ' sp-hero-offset' : ''}">
+      ${scholar.name_ar ? `<div class="sp-hero-ar">${e(scholar.name_ar)}</div>` : ''}
       <h1 class="sp-hero-name">${e(scholar.name)}</h1>
-      ${scholar.title?`<div class="sp-hero-title">${e(scholar.title)}</div>`:''}
+      ${scholar.title ? `<div class="sp-hero-title">${e(scholar.title)}</div>` : ''}
+      ${scholar.bio ? `<p class="sp-hero-bio">${e(scholar.bio)}</p>` : ''}
       <div class="sp-hero-stats">
         <div class="sp-stat"><span>${videos.length}</span>Videos</div>
-        <div class="sp-stat"><span>${videos.reduce((a,v)=>a+(v.views||0),0)}</span>Views</div>
-        <div class="sp-stat"><span>${videos.filter(v=>v.srt_key).length}</span>Subtitled</div>
+        <div class="sp-stat"><span>${videos.reduce((a, v) => a + (v.views || 0), 0)}</span>Views</div>
+        <div class="sp-stat"><span>${videos.filter(v => v.srt_key).length}</span>Subtitled</div>
       </div>
     </div>
   </div>
-  ${scholar.bio?`<div class="sp-bio"><p>${e(scholar.bio)}</p></div>`:''}
+
   <div class="sec">
-    <div class="sec-hd"><h2>All Videos</h2></div>
-    <div class="grid">${videos.map(v=>vcard(v,{anim:true})).join('')}</div>
+    <div class="sec-hd"><h2>Videos by ${e(scholar.name)}</h2></div>
+    <div class="grid">${videos.map(v => vcard(v, { anim: true })).join('')}</div>
   </div>
 </div>`;
 }
