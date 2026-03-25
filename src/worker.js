@@ -140,14 +140,7 @@ app.get('/search', async (c) => {
   return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
-app.get('/symposium', async (c) => {
-  const db = c.env.DB;
-  const [videos, cats] = await Promise.all([
-    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = 'symposium' ORDER BY v.id`).all(),
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
-  ]);
-  return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos: videos.results }), cats.results));
-});
+// symposium disabled for now
 
 app.get('/scholars', async (c) => {
   const db = c.env.DB;
