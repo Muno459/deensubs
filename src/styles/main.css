@@ -372,6 +372,8 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .prof-cm p{font-size:.8rem;color:var(--t2);line-height:1.5}
 .prof-empty{color:var(--t3);font-size:.82rem}
 .prof-settings{display:flex;gap:.5rem}
+.prof-admin-btn{padding:.4rem 1rem;background:var(--gd);border:1px solid rgba(196,164,76,.12);border-radius:8px;color:var(--gold);font-size:.75rem;font-weight:500;transition:all .2s}
+.prof-admin-btn:hover{background:rgba(196,164,76,.12);border-color:var(--gold)}
 .prof-logout{padding:.4rem 1rem;background:var(--s2);border:1px solid var(--bd);border-radius:8px;color:var(--t2);font-size:.75rem;transition:all .2s}
 .prof-logout:hover{border-color:#c44;color:#c44}
 

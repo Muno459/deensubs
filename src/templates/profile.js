@@ -35,6 +35,7 @@ export function renderProfile({ user, comments, stats }) {
   <div class="prof-section">
     <h2>Settings</h2>
     <div class="prof-settings">
+      ${user.role === 'admin' ? '<a href="/admin" class="prof-admin-btn">Admin Dashboard</a>' : ''}
       <a href="/auth/logout" class="prof-logout">Sign Out</a>
     </div>
   </div>

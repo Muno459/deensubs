@@ -22,8 +22,6 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
     <div class="vp" id="vp">
       <video id="vid" preload="auto" playsinline${th?` poster="${e(th)}"`:''}>
         <source src="${cdn(video.video_key)}" type="video/mp4">
-        ${video.srt_key?`<track kind="captions" src="/api/vtt/${e(video.srt_key)}" srclang="en" label="English" default>`:''}
-        ${video.srt_ar_key?`<track kind="captions" src="/api/vtt/${e(video.srt_ar_key)}" srclang="ar" label="العربية">`:''}
       </video>
       <div class="vp-spinner" id="vp-spin"></div>
       <button class="vp-mini-close" id="vp-mini-x">&times;</button>

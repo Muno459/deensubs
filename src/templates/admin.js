@@ -1,5 +1,87 @@
 import { e, ago, fv } from '../lib/helpers.js';
 
+/* ── Country code → emoji flag ── */
+function flag(cc) {
+  if (!cc || cc.length !== 2) return '';
+  const a = cc.toUpperCase();
+  return String.fromCodePoint(...[...a].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+}
+
+/* ── Simplified SVG world map paths (major regions) ── */
+function worldMapSVG(countries) {
+  const regions = {
+    US: 'M55,135 L130,135 135,155 115,170 60,165Z',
+    CA: 'M55,85 L165,80 170,125 55,130Z',
+    MX: 'M60,165 L115,170 100,195 65,190Z',
+    BR: 'M155,210 L195,185 210,220 190,265 155,250Z',
+    AR: 'M155,260 L175,255 175,310 155,305Z',
+    CL: 'M145,260 L155,260 155,310 145,305Z',
+    CO: 'M130,190 L155,185 155,210 135,210Z',
+    GB: 'M430,100 L440,95 445,110 435,115Z',
+    FR: 'M435,120 L460,115 465,140 440,140Z',
+    DE: 'M455,100 L480,98 482,125 458,125Z',
+    ES: 'M420,135 L448,132 450,155 425,155Z',
+    IT: 'M465,125 L480,125 478,158 465,155Z',
+    PT: 'M415,135 L425,135 425,158 415,158Z',
+    NL: 'M448,95 L460,95 460,105 448,105Z',
+    BE: 'M445,105 L458,105 458,115 445,115Z',
+    SE: 'M470,50 L485,45 490,90 475,92Z',
+    NO: 'M455,40 L475,38 478,85 460,88Z',
+    FI: 'M490,40 L510,38 512,80 492,82Z',
+    DK: 'M458,85 L472,83 474,95 460,96Z',
+    PL: 'M482,95 L510,92 512,118 484,120Z',
+    RU: 'M510,40 L720,35 725,130 515,125Z',
+    UA: 'M505,105 L540,102 542,125 508,127Z',
+    TR: 'M510,130 L560,128 562,148 512,150Z',
+    SA: 'M540,160 L580,155 582,195 545,198Z',
+    AE: 'M575,175 L590,173 592,185 577,187Z',
+    EG: 'M505,150 L530,148 532,175 507,177Z',
+    NG: 'M460,195 L485,192 487,220 462,222Z',
+    ZA: 'M495,270 L520,268 522,295 497,297Z',
+    KE: 'M530,210 L545,208 547,235 532,237Z',
+    MA: 'M415,148 L440,145 442,168 418,170Z',
+    IN: 'M600,150 L640,145 645,210 605,215Z',
+    PK: 'M590,140 L615,138 618,170 593,172Z',
+    BD: 'M630,168 L645,166 647,182 632,184Z',
+    CN: 'M645,95 L720,90 725,160 650,165Z',
+    JP: 'M735,110 L752,108 754,145 737,147Z',
+    KR: 'M720,120 L735,118 737,140 722,142Z',
+    AU: 'M690,250 L760,245 765,300 695,305Z',
+    NZ: 'M775,290 L790,288 792,310 777,312Z',
+    ID: 'M660,210 L720,205 722,228 662,230Z',
+    TH: 'M650,170 L668,168 670,200 652,202Z',
+    MY: 'M655,200 L680,198 682,212 657,214Z',
+    SG: 'M665,212 L672,211 673,216 666,217Z',
+    PH: 'M700,170 L718,168 720,200 702,202Z',
+    VN: 'M665,165 L678,163 680,200 667,202Z',
+    IL: 'M525,148 L535,147 536,162 526,163Z',
+    IR: 'M565,130 L600,128 602,160 567,162Z',
+    IQ: 'M545,132 L568,130 570,155 547,157Z',
+  };
+  const countryMap = {};
+  (countries || []).forEach(c => { countryMap[c.country] = c.hits; });
+  const maxHits = Math.max(...Object.values(countryMap), 1);
+
+  let paths = '';
+  for (const [code, d] of Object.entries(regions)) {
+    const hits = countryMap[code] || 0;
+    const intensity = hits > 0 ? Math.max(0.15, Math.min(1, hits / maxHits)) : 0;
+    const fill = hits > 0
+      ? `rgba(196,164,76,${(intensity * 0.7 + 0.15).toFixed(2)})`
+      : 'rgba(255,255,255,0.03)';
+    const stroke = hits > 0 ? 'rgba(196,164,76,0.3)' : 'rgba(255,255,255,0.06)';
+    const title = hits > 0 ? `${code}: ${hits} hits` : code;
+    paths += `<path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="0.5"><title>${title}</title></path>`;
+  }
+  return paths;
+}
+
+/* ── Format number with commas ── */
+function fmt(n) {
+  if (n == null) return '0';
+  return Number(n).toLocaleString('en-US');
+}
+
 export function renderAdmin({ videos, categories, key, editing, tab, users, comments, stats, countries, topPages, topVideos, dailyHits, searchLogs, visitors, agents, referers }) {
   const v = editing || {};
   const isEdit = !!editing;
@@ -10,259 +92,928 @@ export function renderAdmin({ videos, categories, key, editing, tab, users, comm
   agents = agents || []; referers = referers || [];
 
   const tabs = [
-    ['dashboard', 'Dashboard'],
-    ['analytics', 'Analytics'],
-    ['videos', `Videos (${videos.length})`],
-    ['comments', `Comments (${(comments||[]).length})`],
-    ['users', `Users (${(users||[]).length})`],
-    ['searches', 'Searches'],
-    ['visitors', 'Visitors'],
-    ['sql', 'SQL Console'],
-    ['tools', 'Tools'],
-    ['ai', 'AI Assistant'],
-    ['add', '+ Add'],
+    ['dashboard',  'Dashboard',  '<path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>'],
+    ['analytics',  'Analytics',  '<path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6m6 0h6m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0h6"/>'],
+    ['videos',     'Videos',     '<path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>'],
+    ['comments',   'Comments',   '<path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>'],
+    ['users',      'Users',      '<path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m9 5.197v-1"/>'],
+    ['searches',   'Searches',   '<path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>'],
+    ['visitors',   'Visitors',   '<path d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'],
+    ['sql',        'SQL Console', '<path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>'],
+    ['tools',      'Tools',      '<path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>'],
+    ['ai',         'AI Assistant','<path d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 3.3a.75.75 0 01-.588.307H8.058a.75.75 0 01-.588-.307L5 14.5m14 0H5m5.25 5.25v1.5m3.5-1.5v1.5"/>'],
+    ['add',        'Add Video',  '<path d="M12 4v16m8-8H4"/>'],
   ];
 
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — DeenSubs</title>
+  const totalHits = dailyHits.reduce((s, d) => s + d.hits, 0);
+  const avgHits = dailyHits.length ? Math.round(totalHits / dailyHits.length) : 0;
+
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — DeenSubs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Outfit',system-ui,sans-serif;background:#06060c;color:#e0e0e0;min-height:100vh}
-a{color:#c4a44c;text-decoration:none}
-.at{background:#0a0a14;border-bottom:1px solid #16162a;padding:.85rem 2rem;display:flex;align-items:center;justify-content:space-between}
-.at h1{font-size:1.1rem;font-weight:600;color:#c4a44c;display:flex;align-items:center;gap:.5rem}
-.at h1 span{font-size:.6rem;color:#555;font-weight:400;background:#12121e;padding:.15rem .5rem;border-radius:4px}
-.at a{font-size:.72rem;color:#666}
-.tabs{display:flex;gap:.2rem;padding:.5rem 2rem;background:#08080f;border-bottom:1px solid #16162a;overflow-x:auto;scrollbar-width:none}
-.tabs::-webkit-scrollbar{display:none}
-.tab{padding:.4rem .85rem;border-radius:8px;font-size:.72rem;color:#666;transition:all .15s;white-space:nowrap}
-.tab:hover{background:#12121e;color:#aaa}
-.tab.on{background:rgba(196,164,76,.08);color:#c4a44c}
-.body{max-width:1200px;margin:0 auto;padding:1.5rem 2rem}
-h2{font-size:.95rem;font-weight:600;margin-bottom:.85rem;color:#ccc}
-h3{font-size:.82rem;font-weight:600;margin:1.25rem 0 .6rem;color:#999}
+/* ── CSS Variables ── */
+:root {
+  --bg-body: #0a0a12;
+  --bg-sidebar: #08080f;
+  --bg-card: #0e0e18;
+  --bg-card-hover: #111122;
+  --bg-input: #0a0a14;
+  --bg-deep: #06060c;
+  --border: #1a1a2e;
+  --border-light: #22223a;
+  --gold: #c4a44c;
+  --gold-dim: rgba(196,164,76,.15);
+  --gold-glow: rgba(196,164,76,.06);
+  --text: #e0e0e8;
+  --text-dim: #8888a0;
+  --text-muted: #55556a;
+  --red: #e04058;
+  --red-dim: rgba(224,64,88,.12);
+  --green: #3ddc84;
+  --green-dim: rgba(61,220,132,.12);
+  --blue: #4c8ac4;
+  --blue-dim: rgba(76,138,196,.12);
+  --purple: #8a6ce0;
+  --sidebar-w: 240px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --font: 'Outfit', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+  --transition: all .2s cubic-bezier(.4,0,.2,1);
+}
 
-/* Dashboard cards */
-.dg{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-bottom:1.5rem}
-.dc{background:#0c0c16;border:1px solid #16162a;border-radius:10px;padding:1rem;text-align:center}
-.dc-v{font-size:1.8rem;font-weight:300;color:#c4a44c;line-height:1}
-.dc-l{font-size:.6rem;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-top:.25rem}
+/* ── Reset ── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{font-family:var(--font);background:var(--bg-body);color:var(--text);min-height:100vh;overflow-x:hidden}
+a{color:var(--gold);text-decoration:none;transition:var(--transition)}
+a:hover{opacity:.85}
+::selection{background:var(--gold);color:var(--bg-deep)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#22223a;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#33334a}
 
-/* Tables */
-table{width:100%;border-collapse:collapse;font-size:.75rem;margin-bottom:1.5rem}
-th{text-align:left;padding:.45rem .6rem;color:#444;font-weight:500;border-bottom:1px solid #16162a;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em}
-td{padding:.45rem .6rem;border-bottom:1px solid #0e0e1a}
-tr:hover{background:#0a0a14}
-.uav{width:20px;height:20px;border-radius:50%;vertical-align:middle;margin-right:.35rem}
+/* ── Layout ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{width:var(--sidebar-w);position:fixed;top:0;left:0;bottom:0;z-index:100;
+  background:var(--bg-sidebar);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+.sidebar::-webkit-scrollbar{width:4px}
+.main{margin-left:var(--sidebar-w);flex:1;min-width:0}
+
+/* ── Sidebar Brand ── */
+.sb-brand{padding:1.25rem 1.25rem 1rem;border-bottom:1px solid var(--border)}
+.sb-brand h1{font-size:1.05rem;font-weight:700;color:var(--gold);letter-spacing:-.01em}
+.sb-brand span{display:block;font-size:.65rem;color:var(--text-muted);font-weight:400;margin-top:.15rem;letter-spacing:.03em}
+
+/* ── Sidebar Nav ── */
+.sb-nav{flex:1;padding:.75rem .65rem}
+.sb-link{display:flex;align-items:center;gap:.65rem;padding:.55rem .75rem;border-radius:var(--radius-sm);
+  font-size:.8rem;font-weight:450;color:var(--text-dim);transition:var(--transition);margin-bottom:2px;
+  position:relative;overflow:hidden}
+.sb-link:hover{background:rgba(255,255,255,.03);color:var(--text);opacity:1}
+.sb-link.on{background:var(--gold-dim);color:var(--gold);font-weight:600}
+.sb-link.on::before{content:'';position:absolute;left:0;top:20%;bottom:20%;width:3px;background:var(--gold);border-radius:0 3px 3px 0}
+.sb-link svg{width:18px;height:18px;flex-shrink:0;stroke:currentColor;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.sb-link .count{margin-left:auto;font-size:.65rem;background:rgba(255,255,255,.06);padding:.1rem .4rem;border-radius:10px;font-weight:500;color:var(--text-muted)}
+.sb-link.on .count{background:rgba(196,164,76,.15);color:var(--gold)}
+.sb-sep{height:1px;background:var(--border);margin:.65rem .75rem}
+
+/* ── Sidebar Footer ── */
+.sb-foot{padding:1rem 1.25rem;border-top:1px solid var(--border)}
+.sb-foot a{font-size:.72rem;color:var(--text-muted);display:flex;align-items:center;gap:.4rem;transition:var(--transition)}
+.sb-foot a:hover{color:var(--text);opacity:1}
+.sb-foot a svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Top Bar ── */
+.topbar{padding:1rem 2rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;
+  background:rgba(10,10,18,.8);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);position:sticky;top:0;z-index:50}
+.topbar h2{font-size:1.1rem;font-weight:600;color:var(--text)}
+.topbar-right{display:flex;align-items:center;gap:1rem}
+.topbar-badge{font-size:.65rem;color:var(--text-muted);background:var(--bg-card);padding:.25rem .6rem;border-radius:20px;border:1px solid var(--border)}
+
+/* ── Content ── */
+.content{padding:1.75rem 2rem;max-width:1400px}
+
+/* ── Section Headers ── */
+.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.sh h3{font-size:.85rem;font-weight:600;color:var(--text-dim);letter-spacing:-.01em}
+.sh-badge{font-size:.62rem;color:var(--text-muted);background:rgba(255,255,255,.04);padding:.2rem .55rem;border-radius:10px}
+
+/* ── Stat Cards ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.85rem;margin-bottom:2rem}
+.stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem 1.35rem;
+  transition:var(--transition);position:relative;overflow:hidden}
+.stat-card:hover{border-color:var(--border-light);transform:translateY(-1px);box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.stat-card::after{content:'';position:absolute;top:0;right:0;width:100px;height:100px;
+  background:radial-gradient(circle at top right,var(--gold-glow),transparent 70%);pointer-events:none}
+.stat-label{font-size:.68rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;font-weight:500;margin-bottom:.5rem}
+.stat-value{font-size:2rem;font-weight:300;color:var(--gold);line-height:1;letter-spacing:-.02em}
+.stat-trend{display:inline-flex;align-items:center;gap:.25rem;font-size:.68rem;margin-top:.55rem;padding:.15rem .45rem;border-radius:6px;font-weight:500}
+.stat-trend.up{color:var(--green);background:var(--green-dim)}
+.stat-trend.down{color:var(--red);background:var(--red-dim)}
+.stat-trend svg{width:12px;height:12px;stroke:currentColor;stroke-width:2;fill:none}
+
+/* ── Cards Generic ── */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;transition:var(--transition)}
+.card:hover{border-color:var(--border-light)}
+.card-header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-header h4{font-size:.82rem;font-weight:600;color:var(--text-dim)}
+.card-body{padding:1.25rem}
+.card-body.np{padding:0}
+
+/* ── World Map ── */
+.map-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;margin-bottom:1.5rem;position:relative;overflow:hidden}
+.map-wrap::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 40%,rgba(196,164,76,.03),transparent 70%);pointer-events:none}
+.map-wrap h4{font-size:.82rem;font-weight:600;color:var(--text-dim);margin-bottom:1rem;position:relative;z-index:1}
+.map-wrap svg{width:100%;height:auto;position:relative;z-index:1}
+.map-wrap svg path{transition:var(--transition);cursor:pointer}
+.map-wrap svg path:hover{filter:brightness(1.5);stroke-width:1.5}
+.map-legend{display:flex;gap:1.5rem;margin-top:1rem;justify-content:center;position:relative;z-index:1}
+.map-legend-item{display:flex;align-items:center;gap:.35rem;font-size:.68rem;color:var(--text-muted)}
+.map-legend-dot{width:8px;height:8px;border-radius:50%}
+
+/* ── Traffic Chart ── */
+.chart-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin-bottom:1.5rem}
+.chart-wrap h4{font-size:.82rem;font-weight:600;color:var(--text-dim);margin-bottom:.85rem}
+.chart-meta{display:flex;gap:1.5rem;margin-bottom:1rem}
+.chart-meta-item{display:flex;flex-direction:column;gap:.1rem}
+.chart-meta-val{font-size:1.3rem;font-weight:300;color:var(--text)}
+.chart-meta-label{font-size:.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}
+.bar-chart{display:flex;align-items:flex-end;gap:4px;height:140px;padding-top:.5rem}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.bar-fill{width:100%;border-radius:4px 4px 2px 2px;min-height:3px;position:relative;transition:var(--transition);
+  background:linear-gradient(180deg,var(--gold),rgba(196,164,76,.4))}
+.bar-fill:hover{filter:brightness(1.3)}
+.bar-fill:hover::after{content:attr(data-label);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:var(--bg-card);color:var(--text);font-size:.65rem;padding:.3rem .55rem;border-radius:6px;
+  white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.3);border:1px solid var(--border);z-index:10;pointer-events:none}
+.bar-label{font-size:.55rem;color:var(--text-muted);writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);max-height:40px;overflow:hidden}
+
+/* ── Tables ── */
+table{width:100%;border-collapse:collapse;font-size:.78rem}
+th{text-align:left;padding:.65rem .85rem;color:var(--text-muted);font-weight:500;font-size:.68rem;
+  text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);background:rgba(255,255,255,.01)}
+td{padding:.65rem .85rem;border-bottom:1px solid rgba(255,255,255,.03);transition:var(--transition)}
+tr:hover td{background:rgba(255,255,255,.015)}
+.table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-card);margin-bottom:1.5rem}
+.table-wrap table{margin:0}
+
+/* ── Horizontal Bar Chart ── */
+.hbar{margin-bottom:.5rem}
+.hbar-row{display:flex;align-items:center;gap:.75rem;padding:.4rem 0}
+.hbar-label{flex:0 0 200px;font-size:.72rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:.68rem}
+.hbar-track{flex:1;height:24px;background:rgba(255,255,255,.02);border-radius:4px;overflow:hidden;position:relative}
+.hbar-fill{height:100%;border-radius:4px;transition:width .6s cubic-bezier(.4,0,.2,1);position:relative}
+.hbar-fill.gold{background:linear-gradient(90deg,rgba(196,164,76,.3),rgba(196,164,76,.6))}
+.hbar-fill.blue{background:linear-gradient(90deg,rgba(76,138,196,.3),rgba(76,138,196,.6))}
+.hbar-fill.purple{background:linear-gradient(90deg,rgba(138,108,224,.3),rgba(138,108,224,.6))}
+.hbar-fill.green{background:linear-gradient(90deg,rgba(61,220,132,.3),rgba(61,220,132,.5))}
+.hbar-val{font-size:.7rem;color:var(--text-muted);flex:0 0 60px;text-align:right;font-weight:500}
+
+/* ── View Bar (sparkline) ── */
+.view-bar{display:inline-block;height:6px;border-radius:3px;background:linear-gradient(90deg,rgba(196,164,76,.3),var(--gold));vertical-align:middle;min-width:4px;transition:width .4s ease}
+
+/* ── Status Badges ── */
+.badge{display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .5rem;border-radius:20px;font-size:.65rem;font-weight:500}
+.badge-ok{background:var(--green-dim);color:var(--green)}
+.badge-no{background:var(--red-dim);color:var(--red)}
+.badge-info{background:var(--blue-dim);color:var(--blue)}
+
+/* ── Thumbnail ── */
+.thumb-sm{width:48px;height:28px;border-radius:4px;object-fit:cover;background:var(--bg-deep);flex-shrink:0}
+
+/* ── Activity Feed ── */
+.feed{display:flex;flex-direction:column;gap:.6rem;max-height:380px;overflow-y:auto;padding-right:.5rem}
+.feed-item{display:flex;gap:.75rem;padding:.75rem;border-radius:var(--radius-sm);background:rgba(255,255,255,.015);transition:var(--transition)}
+.feed-item:hover{background:rgba(255,255,255,.03)}
+.feed-ava{width:32px;height:32px;border-radius:50%;flex-shrink:0;overflow:hidden;background:var(--gold-dim);
+  display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:600;color:var(--gold)}
+.feed-ava img{width:100%;height:100%;object-fit:cover}
+.feed-body{flex:1;min-width:0}
+.feed-name{font-size:.75rem;font-weight:600;color:var(--text)}
+.feed-text{font-size:.72rem;color:var(--text-dim);margin-top:.15rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.feed-meta{font-size:.62rem;color:var(--text-muted);margin-top:.25rem}
+
+/* ── User Cards ── */
+.user-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.85rem;margin-bottom:1.5rem}
+.user-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;transition:var(--transition);display:flex;flex-direction:column;gap:.75rem}
+.user-card:hover{border-color:var(--border-light);transform:translateY(-1px)}
+.user-card-top{display:flex;align-items:center;gap:.85rem}
+.user-ava{width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;background:var(--gold-dim);
+  display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:600;color:var(--gold)}
+.user-ava img{width:100%;height:100%;object-fit:cover}
+.user-info{flex:1;min-width:0}
+.user-name{font-size:.82rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-email{font-size:.68rem;color:var(--text-muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-card-bottom{display:flex;align-items:center;justify-content:space-between;padding-top:.65rem;border-top:1px solid var(--border)}
+.user-joined{font-size:.65rem;color:var(--text-muted)}
+.user-role-form{display:flex;align-items:center;gap:.35rem}
+
+/* ── Search Cloud ── */
+.search-cloud{display:flex;flex-wrap:wrap;gap:.5rem;padding:1.25rem;align-items:center;justify-content:center}
+.search-tag{display:inline-flex;align-items:center;gap:.35rem;padding:.35rem .75rem;border-radius:20px;
+  background:rgba(255,255,255,.03);border:1px solid var(--border);transition:var(--transition);cursor:default}
+.search-tag:hover{border-color:var(--gold);background:var(--gold-dim)}
+.search-tag-q{font-size:.78rem;color:var(--text)}
+.search-tag-c{font-size:.6rem;color:var(--text-muted);font-weight:500}
+.search-tag-r{font-size:.55rem;color:var(--text-muted)}
+
+/* ── SQL Console ── */
+.sql-area{font-family:var(--mono) !important;font-size:.78rem !important;background:var(--bg-deep) !important;
+  color:var(--gold) !important;border:1px solid var(--border) !important;border-radius:var(--radius-sm) !important;
+  padding:.85rem !important;line-height:1.6;min-height:120px;resize:vertical;tab-size:2}
+.sql-area:focus{border-color:var(--gold) !important;box-shadow:0 0 0 3px rgba(196,164,76,.08) !important}
+.sql-hint{display:flex;align-items:center;gap:.5rem;margin-top:.5rem}
+.sql-hint kbd{font-family:var(--mono);font-size:.62rem;padding:.1rem .35rem;border-radius:4px;
+  background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text-muted)}
+.sql-history{display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:1rem}
+.sql-history-item{font-size:.65rem;font-family:var(--mono);padding:.25rem .55rem;border-radius:6px;
+  background:rgba(255,255,255,.03);border:1px solid var(--border);color:var(--text-muted);cursor:pointer;transition:var(--transition)}
+.sql-history-item:hover{border-color:var(--gold);color:var(--gold)}
+
+/* ── Tools ── */
+.tool-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.85rem;margin-bottom:2rem}
+.tool-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;
+  text-align:center;transition:var(--transition);cursor:pointer;display:block}
+.tool-card:hover{border-color:var(--gold);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,.2);opacity:1}
+.tool-icon{font-size:1.8rem;margin-bottom:.65rem}
+.tool-label{font-size:.82rem;font-weight:600;color:var(--text);margin-bottom:.25rem}
+.tool-desc{font-size:.68rem;color:var(--text-muted)}
+
+/* ── Timeline ── */
+.timeline{position:relative;padding-left:2rem;margin:1rem 0}
+.timeline::before{content:'';position:absolute;left:.45rem;top:0;bottom:0;width:2px;background:var(--border)}
+.tl-item{position:relative;padding-bottom:1.25rem}
+.tl-item::before{content:'';position:absolute;left:-1.65rem;top:.35rem;width:10px;height:10px;border-radius:50%;
+  background:var(--gold);border:2px solid var(--bg-card);z-index:1}
+.tl-item .tl-time{font-size:.62rem;color:var(--text-muted);font-family:var(--mono)}
+.tl-item .tl-text{font-size:.75rem;color:var(--text-dim);margin-top:.15rem}
+
+/* ── AI Chat ── */
+.ai-container{max-width:780px}
+.ai-messages{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;
+  padding:1.25rem;min-height:300px;max-height:550px;overflow-y:auto}
+.ai-msg{margin-bottom:.85rem;padding:.85rem 1rem;border-radius:var(--radius-sm);line-height:1.65;font-size:.82rem}
+.ai-user{background:rgba(196,164,76,.08);border:1px solid rgba(196,164,76,.12);margin-left:3rem;color:var(--text)}
+.ai-bot{background:rgba(255,255,255,.02);border:1px solid var(--border);margin-right:3rem;color:var(--text-dim)}
+.ai-bot pre{font-family:var(--mono);font-size:.72rem;overflow-x:auto;background:var(--bg-deep);padding:.65rem;border-radius:var(--radius-sm);margin:.45rem 0;border:1px solid var(--border)}
+.ai-bot code{font-family:var(--mono);font-size:.72rem;background:rgba(255,255,255,.05);padding:.1rem .3rem;border-radius:3px}
+.ai-typing{color:var(--text-muted);font-style:italic;font-size:.75rem}
+.ai-input-wrap{display:flex;gap:0;border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius) var(--radius);overflow:hidden;background:var(--bg-card)}
+.ai-input-wrap input{border:none !important;border-radius:0 !important;padding:.85rem 1rem !important;background:transparent !important;font-size:.82rem}
+.ai-input-wrap button{border:none;border-radius:0;padding:.85rem 1.5rem;background:var(--gold);color:var(--bg-deep);
+  font-family:var(--font);font-size:.82rem;font-weight:600;cursor:pointer;transition:var(--transition);white-space:nowrap}
+.ai-input-wrap button:hover{filter:brightness(1.1)}
+
+/* ── Forms ── */
+.form-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:1.5rem}
+.form-section{padding:1.5rem}
+.form-section+.form-section{border-top:1px solid var(--border)}
+.form-section-title{font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+.form-section-title .num{width:22px;height:22px;border-radius:50%;background:var(--gold-dim);color:var(--gold);
+  display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;flex-shrink:0}
+label{display:block;font-size:.72rem;color:var(--text-muted);font-weight:500;margin-bottom:.3rem;margin-top:.85rem}
+label:first-child{margin-top:0}
+input,select,textarea{width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:.55rem .8rem;color:var(--text);font-family:var(--font);font-size:.82rem;transition:var(--transition)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(196,164,76,.08)}
+input::placeholder,textarea::placeholder{color:var(--text-muted)}
+textarea{resize:vertical;min-height:80px;line-height:1.5}
+select{cursor:pointer;-webkit-appearance:none;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2355556a'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right .75rem center;padding-right:2rem}
+select.rs{width:auto;padding:.3rem .5rem;font-size:.7rem;border-radius:6px;padding-right:1.5rem;background-position:right .4rem center}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;padding:.55rem 1.25rem;
+  background:var(--gold);color:var(--bg-deep);border:none;border-radius:var(--radius-sm);
+  font-family:var(--font);font-size:.82rem;font-weight:600;cursor:pointer;transition:var(--transition);white-space:nowrap}
+.btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn-sm{padding:.3rem .65rem;font-size:.72rem;border-radius:6px}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text-dim)}
+.btn-ghost:hover{border-color:var(--gold);color:var(--gold)}
+.btn-danger{background:transparent;border:1px solid rgba(224,64,88,.2);color:var(--red)}
+.btn-danger:hover{background:var(--red);color:#fff;border-color:var(--red)}
+
+/* ── Action Buttons ── */
+.acts{display:flex;gap:.3rem}
+.ab{padding:.25rem .55rem;border-radius:6px;font-size:.7rem;cursor:pointer;background:none;
+  border:1px solid var(--border);color:var(--text-muted);transition:var(--transition);font-family:var(--font);white-space:nowrap}
+.ab:hover{border-color:var(--gold);color:var(--gold)}
+.db{color:var(--red);border-color:rgba(224,64,88,.2)}.db:hover{background:var(--red);color:#fff;border-color:var(--red)}
+
+/* ── Checkbox ── */
+.chk{width:16px;height:16px;accent-color:var(--gold);cursor:pointer}
+
+/* ── Misc ── */
+.mono{font-family:var(--mono);font-size:.72rem;color:var(--text-muted)}
 .trunc{max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mono{font-family:monospace;font-size:.68rem;color:#888}
+.flag{font-size:.95rem;margin-right:.3rem}
+.back-link{display:inline-flex;align-items:center;gap:.35rem;font-size:.82rem;color:var(--text-dim);margin-bottom:1.25rem;transition:var(--transition)}
+.back-link:hover{color:var(--gold);opacity:1}
+.back-link svg{width:16px;height:16px;stroke:currentColor;stroke-width:2;fill:none}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.25rem}
+.empty-state{text-align:center;padding:3rem 1rem;color:var(--text-muted);font-size:.82rem}
 
-/* Chart */
-.chart{display:flex;align-items:flex-end;gap:3px;height:100px;margin-bottom:1.5rem;padding:.5rem;background:#0c0c16;border:1px solid #16162a;border-radius:10px}
-.chart-bar{flex:1;background:rgba(196,164,76,.3);border-radius:2px 2px 0 0;min-height:2px;position:relative;transition:background .2s}
-.chart-bar:hover{background:rgba(196,164,76,.6)}
-.chart-bar:hover::after{content:attr(data-label);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#ddd;font-size:.6rem;padding:.2rem .4rem;border-radius:4px;white-space:nowrap;margin-bottom:4px}
-
-/* Actions */
-.acts{display:flex;gap:.2rem}
-.ab{padding:.15rem .45rem;border-radius:4px;font-size:.65rem;cursor:pointer;background:none;border:1px solid #2a2a3a;color:#888;transition:all .12s}
-.ab:hover{border-color:#c4a44c;color:#c4a44c}
-.db{color:#c44;border-color:#3a1a1a}.db:hover{background:#c44;color:#fff;border-color:#c44}
-
-/* Forms */
-.fc{background:#0c0c16;border:1px solid #16162a;border-radius:10px;padding:1.25rem;margin-bottom:1.5rem}
-label{display:block;font-size:.7rem;color:#555;margin-bottom:.15rem;margin-top:.55rem}
-input,select,textarea{width:100%;background:#06060c;border:1px solid #1a1a2e;border-radius:6px;padding:.4rem .6rem;color:#e0e0e0;font:inherit;font-size:.78rem}
-input:focus,select:focus,textarea:focus{outline:none;border-color:#c4a44c}
-.btn{margin-top:.65rem;padding:.45rem 1.1rem;background:#c4a44c;color:#06060c;border:none;border-radius:6px;font:inherit;font-size:.78rem;font-weight:600;cursor:pointer}
-.btn:hover{filter:brightness(1.1)}
-select.rs{width:auto;padding:.15rem .35rem;font-size:.65rem;border-radius:4px}
-.back{display:inline-block;margin-bottom:.85rem;font-size:.78rem}
-
-/* Country flags */
-.flag{font-size:.9rem;margin-right:.3rem}
-
-/* AI */
-.ai-wrap{max-width:700px}
-.ai-chat{background:#0c0c16;border:1px solid #16162a;border-radius:10px;padding:1rem;margin-bottom:.75rem;min-height:200px;max-height:500px;overflow-y:auto;font-size:.8rem;line-height:1.6}
-.ai-msg{margin-bottom:.75rem;padding:.6rem .85rem;border-radius:8px}
-.ai-user{background:#16162a;margin-left:2rem}
-.ai-bot{background:#0a0a14;border:1px solid #1a1a2e;margin-right:2rem}
-.ai-bot pre{font-size:.72rem;overflow-x:auto;background:#08080f;padding:.5rem;border-radius:4px;margin:.3rem 0}
-.ai-form{display:flex;gap:.4rem}
-.ai-form input{flex:1}
-.ai-form button{flex-shrink:0}
-.ai-typing{color:#666;font-size:.72rem;font-style:italic}
+/* ── Responsive ── */
+@media(max-width:1024px){
+  .grid-2,.grid-3{grid-template-columns:1fr}
+  .sidebar{width:60px}
+  .sb-brand h1,.sb-brand span,.sb-link span,.sb-link .count,.sb-foot a span{display:none}
+  .sb-link{justify-content:center;padding:.55rem}
+  .sb-brand{padding:.85rem .5rem;text-align:center}
+  .sb-foot{padding:.75rem .5rem;text-align:center}
+  .main{margin-left:60px}
+  .content{padding:1.25rem 1rem}
+  .hbar-label{flex:0 0 120px}
+}
+@media(max-width:640px){
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .user-grid{grid-template-columns:1fr}
+  .tool-grid{grid-template-columns:1fr}
+}
 </style></head><body>
-<div class="at">
-  <h1>DeenSubs Admin <span>v2</span></h1>
-  <a href="/">← Back to site</a>
+
+<div class="layout">
+<!-- ── Sidebar ── -->
+<nav class="sidebar">
+  <div class="sb-brand">
+    <h1>DeenSubs</h1>
+    <span>Admin Console v3</span>
+  </div>
+  <div class="sb-nav">
+    ${tabs.map(([id, label, icon], i) => {
+      const count = id === 'videos' ? videos.length : id === 'comments' ? (comments||[]).length : id === 'users' ? (users||[]).length : 0;
+      const isOn = !isEdit && tab === id;
+      return `${i === 7 ? '<div class="sb-sep"></div>' : ''}` +
+        `<a href="/admin?tab=${id}${q}" class="sb-link${isOn ? ' on' : ''}">` +
+        `<svg viewBox="0 0 24 24">${icon}</svg>` +
+        `<span>${label}</span>` +
+        `${count ? `<span class="count">${count}</span>` : ''}` +
+        `</a>`;
+    }).join('')}
+  </div>
+  <div class="sb-foot">
+    <a href="/">
+      <svg viewBox="0 0 24 24"><path d="M10 19l-7-7m0 0l7-7m-7 7h18" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Back to site</span>
+    </a>
+  </div>
+</nav>
+
+<!-- ── Main Content ── -->
+<div class="main">
+<div class="topbar">
+  <h2>${isEdit ? 'Edit Video' : tabs.find(t => t[0] === tab)?.[1] || 'Dashboard'}</h2>
+  <div class="topbar-right">
+    <span class="topbar-badge">${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+  </div>
 </div>
-${!isEdit ? `<div class="tabs">${tabs.map(([id, label]) => `<a href="/admin?tab=${id}${q}" class="tab${tab === id ? ' on' : ''}">${label}</a>`).join('')}</div>` : ''}
-<div class="body">
+<div class="content">
 
 ${isEdit ? `
-<a href="/admin?tab=videos${q}" class="back">&larr; Back</a>
-<h2>Edit Video</h2>
-<div class="fc"><form method="post" action="${formAction}">
-<label>Title *</label><input name="title" required value="${e(v.title || '')}">
-<label>Arabic Title</label><input name="title_ar" dir="rtl" value="${e(v.title_ar || '')}">
-<label>Description</label><textarea name="description" rows="3">${e(v.description || '')}</textarea>
-<label>Category</label><select name="category_id">${categories.map(c => `<option value="${c.id}"${v.category_id === c.id ? ' selected' : ''}>${e(c.name)}</option>`).join('')}</select>
-<label>Source</label><input name="source" value="${e(v.source || '')}">
-<label>Duration (seconds)</label><input name="duration" type="number" value="${v.duration || ''}">
-<label>R2 Video Key *</label><input name="video_key" required value="${e(v.video_key || '')}">
-<label>R2 Subtitle Key</label><input name="srt_key" value="${e(v.srt_key || '')}">
-<label>R2 Thumbnail Key</label><input name="thumb_key" value="${e(v.thumb_key || '')}">
-<button class="btn" type="submit">Save Changes</button></form></div>
+<a href="/admin?tab=videos${q}" class="back-link">
+  <svg viewBox="0 0 24 24"><path d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+  Back to Videos
+</a>
+<div class="form-card">
+  <form method="post" action="${formAction}">
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">1</span> Basic Information</div>
+      <label>Title *</label><input name="title" required value="${e(v.title || '')}">
+      <label>Arabic Title</label><input name="title_ar" dir="rtl" value="${e(v.title_ar || '')}">
+      <label>Description</label><textarea name="description" rows="3">${e(v.description || '')}</textarea>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">2</span> Categorization</div>
+      <label>Category</label><select name="category_id">${categories.map(c => `<option value="${c.id}"${v.category_id === c.id ? ' selected' : ''}>${e(c.name)}</option>`).join('')}</select>
+      <label>Source</label><input name="source" value="${e(v.source || '')}">
+      <label>Duration (seconds)</label><input name="duration" type="number" value="${v.duration || ''}">
+    </div>
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">3</span> Media Files</div>
+      <label>R2 Video Key *</label><input name="video_key" required value="${e(v.video_key || '')}">
+      <label>R2 Subtitle Key</label><input name="srt_key" value="${e(v.srt_key || '')}">
+      <label>R2 Thumbnail Key</label><input name="thumb_key" value="${e(v.thumb_key || '')}">
+    </div>
+    <div class="form-section" style="display:flex;justify-content:flex-end">
+      <button class="btn" type="submit">Save Changes</button>
+    </div>
+  </form>
+</div>
 ` : ''}
 
 ${!isEdit && tab === 'dashboard' ? `
-<h2>Dashboard</h2>
-<div class="dg">
-  <div class="dc"><div class="dc-v">${stats?.video_count || 0}</div><div class="dc-l">Videos</div></div>
-  <div class="dc"><div class="dc-v">${stats?.user_count || 0}</div><div class="dc-l">Users</div></div>
-  <div class="dc"><div class="dc-v">${stats?.comment_count || 0}</div><div class="dc-l">Comments</div></div>
-  <div class="dc"><div class="dc-v">${stats?.total_views || 0}</div><div class="dc-l">Views</div></div>
-  <div class="dc"><div class="dc-v">${stats?.total_likes || 0}</div><div class="dc-l">Likes</div></div>
-  <div class="dc"><div class="dc-v">${countries.length}</div><div class="dc-l">Countries</div></div>
+<!-- ── Stat Cards ── -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Total Videos</div>
+    <div class="stat-value">${fmt(stats?.video_count || 0)}</div>
+    <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> Content library</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Registered Users</div>
+    <div class="stat-value">${fmt(stats?.user_count || 0)}</div>
+    <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> Growing</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Comments</div>
+    <div class="stat-value">${fmt(stats?.comment_count || 0)}</div>
+    <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> Engagement</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Views</div>
+    <div class="stat-value">${fmt(stats?.total_views || 0)}</div>
+    <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> All time</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Likes</div>
+    <div class="stat-value">${fmt(stats?.total_likes || 0)}</div>
+    <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> Appreciation</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Countries Reached</div>
+    <div class="stat-value">${fmt(countries.length)}</div>
+    <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> Global reach</div>
+  </div>
 </div>
 
-<h3>Traffic (Last 14 Days)</h3>
-${dailyHits.length ? `<div class="chart">${(() => {
-  const max = Math.max(...dailyHits.map(d => d.hits), 1);
-  return dailyHits.reverse().map(d => `<div class="chart-bar" style="height:${Math.max((d.hits / max) * 100, 2)}%" data-label="${d.day}: ${d.hits} hits"></div>`).join('');
-})()}</div>` : '<p style="color:#555;font-size:.78rem">No data yet</p>'}
+<!-- ── World Map ── -->
+<div class="map-wrap">
+  <h4>Global Visitor Distribution</h4>
+  <svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="rgba(196,164,76,.08)"/><stop offset="100%" stop-color="transparent"/></radialGradient>
+    </defs>
+    <rect width="800" height="340" fill="url(#glow)" rx="8"/>
+    <!-- Grid lines -->
+    <line x1="0" y1="85" x2="800" y2="85" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
+    <line x1="0" y1="170" x2="800" y2="170" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
+    <line x1="0" y1="255" x2="800" y2="255" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
+    <line x1="200" y1="0" x2="200" y2="340" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
+    <line x1="400" y1="0" x2="400" y2="340" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
+    <line x1="600" y1="0" x2="600" y2="340" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
+    ${worldMapSVG(countries)}
+  </svg>
+  <div class="map-legend">
+    <div class="map-legend-item"><div class="map-legend-dot" style="background:rgba(196,164,76,.2)"></div> Low</div>
+    <div class="map-legend-item"><div class="map-legend-dot" style="background:rgba(196,164,76,.5)"></div> Medium</div>
+    <div class="map-legend-item"><div class="map-legend-dot" style="background:rgba(196,164,76,.85)"></div> High</div>
+    <div class="map-legend-item" style="margin-left:1rem;font-size:.65rem">${countries.length} countries &middot; ${fmt(countries.reduce((s,c)=>s+c.hits,0))} total hits</div>
+  </div>
+</div>
 
-<h3>Top Countries</h3>
-<table><tr><th>Country</th><th>Hits</th></tr>
-${countries.slice(0, 10).map(c => `<tr><td>${e(c.country)}</td><td>${c.hits}</td></tr>`).join('')}
-</table>
+<div class="grid-2">
+  <!-- ── Traffic Chart ── -->
+  <div class="chart-wrap">
+    <h4>Traffic &mdash; Last ${dailyHits.length} Days</h4>
+    <div class="chart-meta">
+      <div class="chart-meta-item"><div class="chart-meta-val">${fmt(totalHits)}</div><div class="chart-meta-label">Total Hits</div></div>
+      <div class="chart-meta-item"><div class="chart-meta-val">${fmt(avgHits)}</div><div class="chart-meta-label">Avg / Day</div></div>
+    </div>
+    ${dailyHits.length ? `<div class="bar-chart">${(() => {
+      const sorted = [...dailyHits].reverse();
+      const max = Math.max(...sorted.map(d => d.hits), 1);
+      return sorted.map(d => {
+        const pct = Math.max((d.hits / max) * 100, 3);
+        const dayLabel = d.day.slice(5);
+        return `<div class="bar-col"><div class="bar-fill" style="height:${pct}%" data-label="${d.day}: ${fmt(d.hits)} hits"></div><div class="bar-label">${dayLabel}</div></div>`;
+      }).join('');
+    })()}</div>` : '<div class="empty-state">No traffic data yet</div>'}
+  </div>
 
-<h3>Recent Comments</h3>
-<table><tr><th>User</th><th>Video</th><th>Comment</th><th>When</th></tr>
-${(comments || []).slice(0, 8).map(c => `<tr><td>${c.user_avatar ? `<img src="${e(c.user_avatar)}" class="uav">` : ''}${e(c.user_name || c.author)}</td><td><a href="/watch/${e(c.video_slug || '')}">${e((c.video_title || '?').slice(0, 30))}</a></td><td class="trunc">${e(c.content)}</td><td>${ago(c.created_at)}</td></tr>`).join('')}
-</table>
+  <!-- ── Top Videos ── -->
+  <div class="card">
+    <div class="card-header"><h4>Top Videos</h4><span class="sh-badge">${topVideos.length} videos</span></div>
+    <div class="card-body np">
+      <table>
+        <tr><th>Video</th><th>Hits</th><th style="width:120px">Share</th></tr>
+        ${(() => {
+          const maxV = Math.max(...topVideos.map(v => v.hits), 1);
+          return topVideos.slice(0, 10).map(vi => `<tr>
+            <td><a href="/watch/${e(vi.slug)}" style="font-size:.78rem">${e(vi.slug)}</a></td>
+            <td style="font-weight:500">${fmt(vi.hits)}</td>
+            <td><span class="view-bar" style="width:${Math.max((vi.hits / maxV) * 100, 4)}%"></span></td>
+          </tr>`).join('');
+        })()}
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Top Countries + Recent Activity ── -->
+<div class="grid-2" style="margin-top:1.25rem">
+  <div class="card">
+    <div class="card-header"><h4>Top Countries</h4><span class="sh-badge">${countries.length} countries</span></div>
+    <div class="card-body np">
+      <table>
+        <tr><th>Country</th><th>Hits</th><th style="width:120px">Share</th></tr>
+        ${(() => {
+          const maxC = Math.max(...countries.map(c => c.hits), 1);
+          return countries.slice(0, 10).map(c => `<tr>
+            <td><span class="flag">${flag(c.country)}</span> ${e(c.country)}</td>
+            <td style="font-weight:500">${fmt(c.hits)}</td>
+            <td><span class="view-bar" style="width:${Math.max((c.hits / maxC) * 100, 4)}%"></span></td>
+          </tr>`).join('');
+        })()}
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h4>Live Activity</h4><span class="sh-badge">Recent comments</span></div>
+    <div class="card-body">
+      <div class="feed">
+        ${(comments || []).slice(0, 10).map(c => `<div class="feed-item">
+          <div class="feed-ava">${c.user_avatar ? `<img src="${e(c.user_avatar)}" alt="">` : (c.user_name || c.author || '?')[0].toUpperCase()}</div>
+          <div class="feed-body">
+            <div class="feed-name">${e(c.user_name || c.author)} <span style="color:var(--text-muted);font-weight:400;font-size:.7rem">on</span> <a href="/watch/${e(c.video_slug || '')}" style="font-size:.72rem">${e((c.video_title || '?').slice(0, 35))}</a></div>
+            <div class="feed-text">${e(c.content)}</div>
+            <div class="feed-meta">${ago(c.created_at)}</div>
+          </div>
+        </div>`).join('')}
+        ${!(comments||[]).length ? '<div class="empty-state">No comments yet</div>' : ''}
+      </div>
+    </div>
+  </div>
+</div>
 ` : ''}
 
 ${!isEdit && tab === 'analytics' ? `
-<h2>Analytics</h2>
-<h3>Top Pages</h3>
-<table><tr><th>Path</th><th>Hits</th></tr>
-${topPages.map(p => `<tr><td class="mono">${e(p.path)}</td><td>${p.hits}</td></tr>`).join('')}
-</table>
+<!-- ── Top Pages ── -->
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header"><h4>Top Pages</h4><span class="sh-badge">${topPages.length} pages</span></div>
+  <div class="card-body">
+    <div class="hbar">
+    ${(() => {
+      const maxP = Math.max(...topPages.map(p => p.hits), 1);
+      return topPages.slice(0, 15).map(p => `<div class="hbar-row">
+        <div class="hbar-label">${e(p.path)}</div>
+        <div class="hbar-track"><div class="hbar-fill gold" style="width:${Math.max((p.hits / maxP) * 100, 2)}%"></div></div>
+        <div class="hbar-val">${fmt(p.hits)}</div>
+      </div>`).join('');
+    })()}
+    </div>
+  </div>
+</div>
 
-<h3>Most Watched Videos</h3>
-<table><tr><th>Video</th><th>Page Loads</th></tr>
-${topVideos.map(v => `<tr><td><a href="/watch/${e(v.slug)}">${e(v.slug)}</a></td><td>${v.hits}</td></tr>`).join('')}
-</table>
+<div class="grid-2">
+  <!-- ── Most Watched Videos ── -->
+  <div class="card">
+    <div class="card-header"><h4>Most Watched Videos</h4></div>
+    <div class="card-body">
+      <div class="hbar">
+      ${(() => {
+        const maxV = Math.max(...topVideos.map(v => v.hits), 1);
+        return topVideos.slice(0, 12).map(vi => `<div class="hbar-row">
+          <div class="hbar-label"><a href="/watch/${e(vi.slug)}">${e(vi.slug)}</a></div>
+          <div class="hbar-track"><div class="hbar-fill blue" style="width:${Math.max((vi.hits / maxV) * 100, 2)}%"></div></div>
+          <div class="hbar-val">${fmt(vi.hits)}</div>
+        </div>`).join('');
+      })()}
+      </div>
+    </div>
+  </div>
 
-<h3>Top Referrers</h3>
-<table><tr><th>Referrer</th><th>Hits</th></tr>
-${referers.map(r => `<tr><td class="trunc mono">${e(r.referer)}</td><td>${r.hits}</td></tr>`).join('')}
-</table>
+  <!-- ── Top Referrers ── -->
+  <div class="card">
+    <div class="card-header"><h4>Top Referrers</h4></div>
+    <div class="card-body">
+      <div class="hbar">
+      ${(() => {
+        const maxR = Math.max(...referers.map(r => r.hits), 1);
+        return referers.slice(0, 12).map(r => `<div class="hbar-row">
+          <div class="hbar-label" title="${e(r.referer)}">${e(r.referer)}</div>
+          <div class="hbar-track"><div class="hbar-fill purple" style="width:${Math.max((r.hits / maxR) * 100, 2)}%"></div></div>
+          <div class="hbar-val">${fmt(r.hits)}</div>
+        </div>`).join('');
+      })()}
+      ${!referers.length ? '<div class="empty-state">No referrer data</div>' : ''}
+      </div>
+    </div>
+  </div>
+</div>
 
-<h3>User Agents</h3>
-<table><tr><th>Agent</th><th>Hits</th></tr>
-${agents.slice(0, 15).map(a => `<tr><td class="trunc mono" style="max-width:400px">${e(a.user_agent)}</td><td>${a.hits}</td></tr>`).join('')}
-</table>
+<!-- ── User Agents ── -->
+<div class="card" style="margin-top:1.5rem">
+  <div class="card-header"><h4>User Agents</h4><span class="sh-badge">${agents.length} agents</span></div>
+  <div class="card-body">
+    <div class="hbar">
+    ${(() => {
+      const maxA = Math.max(...agents.map(a => a.hits), 1);
+      return agents.slice(0, 12).map(a => `<div class="hbar-row">
+        <div class="hbar-label" title="${e(a.user_agent)}">${e(a.user_agent.slice(0, 60))}</div>
+        <div class="hbar-track"><div class="hbar-fill green" style="width:${Math.max((a.hits / maxA) * 100, 2)}%"></div></div>
+        <div class="hbar-val">${fmt(a.hits)}</div>
+      </div>`).join('');
+    })()}
+    </div>
+  </div>
+</div>
 ` : ''}
 
 ${!isEdit && tab === 'videos' ? `
-<h2>All Videos</h2>
-<table><tr><th>Title</th><th>Category</th><th>Views</th><th>Likes</th><th>Subs</th><th>Created</th><th></th></tr>
-${videos.map(vi => `<tr><td><a href="/watch/${e(vi.slug)}">${e(vi.title)}</a></td><td>${e(vi.category_name || '')}</td><td>${vi.views}</td><td>${vi.likes}</td><td>${vi.srt_key ? '✓' : '✗'}</td><td>${ago(vi.created_at)}</td>
-<td><div class="acts"><a href="/admin/edit/${vi.id}?tab=videos${q}" class="ab">Edit</a><form method="post" action="/admin/delete/${vi.id}?tab=videos${q}" onsubmit="return confirm('Delete?')" style="margin:0"><button class="ab db">Del</button></form></div></td></tr>`).join('')}
-</table>
+<div class="table-wrap">
+  <table>
+    <tr>
+      <th style="width:48px">Thumb</th>
+      <th>Title</th>
+      <th>Category</th>
+      <th>Views</th>
+      <th>Likes</th>
+      <th>Subtitles</th>
+      <th>Created</th>
+      <th style="width:120px">Actions</th>
+    </tr>
+    ${videos.map(vi => {
+      const thumbUrl = vi.thumb_key ? `https://cdn.deensubs.com/${vi.thumb_key}` : '';
+      return `<tr>
+        <td>${thumbUrl ? `<img src="${e(thumbUrl)}" class="thumb-sm" alt="" loading="lazy">` : '<div class="thumb-sm" style="background:var(--bg-deep)"></div>'}</td>
+        <td><a href="/watch/${e(vi.slug)}" style="font-weight:500">${e(vi.title)}</a></td>
+        <td style="color:var(--text-dim);font-size:.75rem">${e(vi.category_name || '-')}</td>
+        <td style="font-weight:500">${fmt(vi.views)}</td>
+        <td style="font-weight:500">${fmt(vi.likes)}</td>
+        <td>${vi.srt_key ? '<span class="badge badge-ok">Has Subs</span>' : '<span class="badge badge-no">No Subs</span>'}</td>
+        <td style="color:var(--text-muted);font-size:.72rem">${ago(vi.created_at)}</td>
+        <td>
+          <div class="acts">
+            <a href="/admin/edit/${vi.id}?tab=videos${q}" class="ab">Edit</a>
+            <form method="post" action="/admin/delete/${vi.id}?tab=videos${q}" onsubmit="return confirm('Delete this video?')" style="margin:0">
+              <button class="ab db">Del</button>
+            </form>
+          </div>
+        </td>
+      </tr>`;
+    }).join('')}
+  </table>
+</div>
 ` : ''}
 
 ${!isEdit && tab === 'comments' ? `
-<h2>Comment Moderation</h2>
-<table><tr><th>User</th><th>Video</th><th>Comment</th><th>When</th><th></th></tr>
-${(comments || []).map(c => `<tr><td>${c.user_avatar ? `<img src="${e(c.user_avatar)}" class="uav">` : ''}${e(c.user_name || c.author)}</td><td><a href="/watch/${e(c.video_slug || '')}">${e((c.video_title || '?').slice(0, 25))}</a></td><td class="trunc">${e(c.content)}</td><td>${ago(c.created_at)}</td>
-<td><form method="post" action="/admin/delete-comment/${c.id}?tab=comments${q}" onsubmit="return confirm('Delete?')" style="margin:0"><button class="ab db">Del</button></form></td></tr>`).join('')}
-</table>
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header">
+    <h4>Comment Moderation</h4>
+    <span class="sh-badge">${(comments||[]).length} comments</span>
+  </div>
+  <div class="card-body np">
+    <table>
+      <tr>
+        <th style="width:30px"><input type="checkbox" class="chk" id="chk-all"></th>
+        <th>User</th>
+        <th>Video</th>
+        <th>Comment</th>
+        <th>When</th>
+        <th style="width:60px"></th>
+      </tr>
+      ${(comments || []).map(c => `<tr>
+        <td><input type="checkbox" class="chk chk-item" value="${c.id}"></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:.55rem">
+            <div class="feed-ava" style="width:28px;height:28px;font-size:.65rem">${c.user_avatar ? `<img src="${e(c.user_avatar)}" alt="">` : (c.user_name || c.author || '?')[0].toUpperCase()}</div>
+            <span style="font-weight:500;font-size:.78rem">${e(c.user_name || c.author)}</span>
+          </div>
+        </td>
+        <td><a href="/watch/${e(c.video_slug || '')}" style="font-size:.75rem">${e((c.video_title || '?').slice(0, 30))}</a></td>
+        <td class="trunc" style="max-width:300px">${e(c.content)}</td>
+        <td style="color:var(--text-muted);font-size:.72rem">${ago(c.created_at)}</td>
+        <td>
+          <form method="post" action="/admin/delete-comment/${c.id}?tab=comments${q}" onsubmit="return confirm('Delete this comment?')" style="margin:0">
+            <button class="ab db">Del</button>
+          </form>
+        </td>
+      </tr>`).join('')}
+    </table>
+  </div>
+</div>
+<script>
+document.getElementById('chk-all').onchange=function(){
+  document.querySelectorAll('.chk-item').forEach(function(c){c.checked=this.checked}.bind(this));
+};
+</script>
 ` : ''}
 
 ${!isEdit && tab === 'users' ? `
-<h2>User Management</h2>
-<table><tr><th>User</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr>
-${(users || []).map(u => `<tr><td>${u.avatar ? `<img src="${e(u.avatar)}" class="uav">` : ''}${e(u.name)}</td><td class="mono">${e(u.email)}</td><td>${e(u.role || 'user')}</td><td>${ago(u.created_at)}</td>
-<td><form method="post" action="/admin/user-role/${u.id}?tab=users${q}" style="margin:0;display:flex;gap:.2rem"><select name="role" class="rs"><option value="user"${u.role !== 'admin' ? ' selected' : ''}>user</option><option value="admin"${u.role === 'admin' ? ' selected' : ''}>admin</option></select><button class="ab">Set</button></form></td></tr>`).join('')}
-</table>
+<div class="user-grid">
+  ${(users || []).map(u => `<div class="user-card">
+    <div class="user-card-top">
+      <div class="user-ava">${u.avatar ? `<img src="${e(u.avatar)}" alt="">` : (u.name || '?')[0].toUpperCase()}</div>
+      <div class="user-info">
+        <div class="user-name">${e(u.name)}</div>
+        <div class="user-email">${e(u.email)}</div>
+      </div>
+      <span class="badge ${u.role === 'admin' ? 'badge-info' : 'badge-ok'}">${e(u.role || 'user')}</span>
+    </div>
+    <div class="user-card-bottom">
+      <div class="user-joined">Joined ${ago(u.created_at)}</div>
+      <form method="post" action="/admin/user-role/${u.id}?tab=users${q}" style="margin:0" class="user-role-form">
+        <select name="role" class="rs">
+          <option value="user"${u.role !== 'admin' ? ' selected' : ''}>user</option>
+          <option value="admin"${u.role === 'admin' ? ' selected' : ''}>admin</option>
+        </select>
+        <button class="btn-sm btn-ghost" style="padding:.25rem .5rem;font-size:.65rem;border:1px solid var(--border);border-radius:6px;background:none;color:var(--text-muted);cursor:pointer;font-family:var(--font)">Set</button>
+      </form>
+    </div>
+  </div>`).join('')}
+</div>
+${!(users||[]).length ? '<div class="empty-state">No users found</div>' : ''}
 ` : ''}
 
 ${!isEdit && tab === 'searches' ? `
-<h2>Search Intelligence</h2>
-<table><tr><th>Query</th><th>Results</th><th>Times Searched</th></tr>
-${searchLogs.map(s => `<tr><td>${e(s.query)}</td><td>${s.results}</td><td>${s.times}</td></tr>`).join('')}
-</table>
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header"><h4>Search Cloud</h4><span class="sh-badge">${searchLogs.length} unique queries</span></div>
+  <div class="card-body">
+    <div class="search-cloud">
+      ${(() => {
+        const maxS = Math.max(...searchLogs.map(s => s.times), 1);
+        return searchLogs.map(s => {
+          const scale = 0.7 + (s.times / maxS) * 0.8;
+          const opacity = 0.4 + (s.times / maxS) * 0.6;
+          return `<div class="search-tag" style="font-size:${scale}rem;opacity:${opacity}">
+            <span class="search-tag-q">${e(s.query)}</span>
+            <span class="search-tag-c">${s.times}x</span>
+            <span class="search-tag-r">${s.results} results</span>
+          </div>`;
+        }).join('');
+      })()}
+      ${!searchLogs.length ? '<div class="empty-state">No search data yet</div>' : ''}
+    </div>
+  </div>
+</div>
+
+<!-- Search table below cloud -->
+<div class="table-wrap">
+  <table>
+    <tr><th>Query</th><th>Results Found</th><th>Times Searched</th><th>Popularity</th></tr>
+    ${(() => {
+      const maxS = Math.max(...searchLogs.map(s => s.times), 1);
+      return searchLogs.map(s => `<tr>
+        <td style="font-weight:500">${e(s.query)}</td>
+        <td>${s.results > 0 ? `<span class="badge badge-ok">${s.results} found</span>` : `<span class="badge badge-no">No results</span>`}</td>
+        <td style="font-weight:500">${s.times}</td>
+        <td><span class="view-bar" style="width:${Math.max((s.times / maxS) * 100, 4)}%"></span></td>
+      </tr>`).join('');
+    })()}
+  </table>
+</div>
 ` : ''}
 
 ${!isEdit && tab === 'visitors' ? `
-<h2>Visitor Intelligence</h2>
-<table><tr><th>IP</th><th>Country</th><th>Hits</th><th>Last Seen</th></tr>
-${visitors.map(v => `<tr><td class="mono">${e(v.ip)}</td><td>${e(v.country)}</td><td>${v.hits}</td><td>${ago(v.last_seen)}</td></tr>`).join('')}
-</table>
+<div class="table-wrap">
+  <table id="visitors-table">
+    <tr>
+      <th data-sort="ip" style="cursor:pointer">IP Address</th>
+      <th data-sort="country" style="cursor:pointer">Country</th>
+      <th data-sort="hits" style="cursor:pointer">Hits</th>
+      <th data-sort="last" style="cursor:pointer">Last Seen</th>
+    </tr>
+    ${visitors.map(vi => `<tr>
+      <td class="mono">${e(vi.ip)}</td>
+      <td><span class="flag">${flag(vi.country)}</span> ${e(vi.country)}</td>
+      <td style="font-weight:500">${fmt(vi.hits)}</td>
+      <td style="color:var(--text-muted);font-size:.75rem">${ago(vi.last_seen)}</td>
+    </tr>`).join('')}
+  </table>
+</div>
+<script>
+(function(){
+  var table=document.getElementById('visitors-table');
+  var headers=table.querySelectorAll('th[data-sort]');
+  var dir={};
+  headers.forEach(function(th){
+    th.onclick=function(){
+      var col=th.cellIndex;
+      var key=th.dataset.sort;
+      dir[key]=!dir[key];
+      var rows=Array.from(table.querySelectorAll('tr')).slice(1);
+      rows.sort(function(a,b){
+        var av=a.cells[col].textContent.trim();
+        var bv=b.cells[col].textContent.trim();
+        var an=parseFloat(av.replace(/,/g,''));
+        var bn=parseFloat(bv.replace(/,/g,''));
+        if(!isNaN(an)&&!isNaN(bn))return dir[key]?an-bn:bn-an;
+        return dir[key]?av.localeCompare(bv):bv.localeCompare(av);
+      });
+      rows.forEach(function(r){table.appendChild(r)});
+      headers.forEach(function(h){h.style.color=''});
+      th.style.color='var(--gold)';
+    };
+  });
+})();
+</script>
 ` : ''}
 
 ${!isEdit && tab === 'sql' ? `
-<h2>SQL Console</h2>
-<p style="color:#555;font-size:.72rem;margin-bottom:.75rem">Read-only. SELECT queries only. Direct access to the D1 database.</p>
-<div class="fc">
-  <textarea id="sql-input" rows="4" placeholder="SELECT * FROM videos LIMIT 10" style="font-family:monospace;font-size:.75rem"></textarea>
-  <button class="btn" id="sql-run" style="margin-top:.5rem">Execute</button>
+<p style="color:var(--text-muted);font-size:.75rem;margin-bottom:1rem">Read-only. SELECT queries only. Direct access to the D1 database.</p>
+
+<div id="sql-history-wrap" class="sql-history" style="display:none"></div>
+
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-body">
+    <textarea id="sql-input" class="sql-area" rows="5" placeholder="SELECT * FROM videos LIMIT 10" spellcheck="false"></textarea>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.65rem">
+      <div class="sql-hint">
+        <span style="font-size:.68rem;color:var(--text-muted)">Press</span>
+        <kbd>Ctrl</kbd><span style="font-size:.68rem;color:var(--text-muted)">+</span><kbd>Enter</kbd>
+        <span style="font-size:.68rem;color:var(--text-muted)">to execute</span>
+      </div>
+      <button class="btn" id="sql-run">Execute Query</button>
+    </div>
+  </div>
 </div>
-<div id="sql-result" style="overflow-x:auto"></div>
+<div id="sql-result"></div>
 <script>
-document.getElementById('sql-run').onclick=function(){
-  var q=document.getElementById('sql-input').value.trim();
-  if(!q)return;
-  var out=document.getElementById('sql-result');
-  out.innerHTML='<p style="color:#666;font-size:.75rem">Running...</p>';
-  fetch('/admin/sql',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
-    .then(function(r){return r.json()}).then(function(d){
-      if(d.error){out.innerHTML='<p style="color:#c44;font-size:.75rem">Error: '+d.error+'</p>';return}
-      if(!d.results||!d.results.length){out.innerHTML='<p style="color:#666;font-size:.75rem">No results ('+((d.meta&&d.meta.duration)?d.meta.duration.toFixed(2)+'ms':'')+')</p>';return}
-      var cols=Object.keys(d.results[0]);
-      var html='<p style="color:#555;font-size:.65rem;margin-bottom:.4rem">'+d.results.length+' rows'+(d.meta&&d.meta.duration?' · '+d.meta.duration.toFixed(2)+'ms':'')+'</p>';
-      html+='<table><tr>'+cols.map(function(c){return'<th>'+c+'</th>'}).join('')+'</tr>';
-      d.results.forEach(function(row){html+='<tr>'+cols.map(function(c){var v=row[c];return'<td class="mono trunc">'+(v===null?'<span style="color:#555">NULL</span>':String(v).slice(0,100))+'</td>'}).join('')+'</tr>'});
-      html+='</table>';out.innerHTML=html;
-    }).catch(function(e){out.innerHTML='<p style="color:#c44;font-size:.75rem">'+e.message+'</p>'});
-};
-document.getElementById('sql-input').onkeydown=function(e){if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();document.getElementById('sql-run').click()}};
+(function(){
+  var history=JSON.parse(localStorage.getItem('sql_history')||'[]');
+  var histWrap=document.getElementById('sql-history-wrap');
+  function renderHistory(){
+    if(!history.length){histWrap.style.display='none';return}
+    histWrap.style.display='flex';
+    histWrap.innerHTML='<span style="font-size:.65rem;color:var(--text-muted);margin-right:.3rem">Recent:</span>'+history.slice(-8).reverse().map(function(q){
+      return '<span class="sql-history-item" data-q="'+q.replace(/"/g,'&quot;')+'">'+q.slice(0,40)+(q.length>40?'...':'')+'</span>';
+    }).join('');
+    histWrap.querySelectorAll('.sql-history-item').forEach(function(el){
+      el.onclick=function(){document.getElementById('sql-input').value=this.dataset.q};
+    });
+  }
+  renderHistory();
+  function addHistory(q){
+    history=history.filter(function(h){return h!==q});
+    history.push(q);
+    if(history.length>20)history=history.slice(-20);
+    localStorage.setItem('sql_history',JSON.stringify(history));
+    renderHistory();
+  }
+  document.getElementById('sql-run').onclick=function(){
+    var q=document.getElementById('sql-input').value.trim();
+    if(!q)return;
+    addHistory(q);
+    var out=document.getElementById('sql-result');
+    out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--text-muted);font-size:.78rem">Running query...</p></div></div>';
+    fetch('/admin/sql',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+      .then(function(r){return r.json()}).then(function(d){
+        if(d.error){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--red);font-size:.78rem">Error: '+d.error+'</p></div></div>';return}
+        if(!d.results||!d.results.length){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--text-muted);font-size:.78rem">No results'+((d.meta&&d.meta.duration)?' &middot; '+d.meta.duration.toFixed(2)+'ms':'')+'</p></div></div>';return}
+        var cols=Object.keys(d.results[0]);
+        var html='<p style="color:var(--text-muted);font-size:.68rem;margin-bottom:.65rem">'+d.results.length+' rows'+(d.meta&&d.meta.duration?' &middot; '+d.meta.duration.toFixed(2)+'ms':'')+'</p>';
+        html+='<div class="table-wrap"><table><tr>'+cols.map(function(c){return'<th>'+c+'</th>'}).join('')+'</tr>';
+        d.results.forEach(function(row){html+='<tr>'+cols.map(function(c){var v=row[c];return'<td class="mono trunc">'+(v===null?'<span style="color:var(--text-muted)">NULL</span>':String(v).slice(0,100))+'</td>'}).join('')+'</tr>'});
+        html+='</table></div>';out.innerHTML=html;
+      }).catch(function(e){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--red);font-size:.78rem">'+e.message+'</p></div></div>'});
+  };
+  document.getElementById('sql-input').onkeydown=function(e){if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();document.getElementById('sql-run').click()}};
+})();
 </script>
 ` : ''}
 
 ${!isEdit && tab === 'tools' ? `
-<h2>Admin Tools</h2>
-<div class="dg" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-  <a href="/admin/export/videos" class="dc" style="cursor:pointer">
-    <div class="dc-v" style="font-size:1.2rem">📄</div>
-    <div class="dc-l">Export Videos CSV</div>
+<!-- ── Export Cards ── -->
+<div class="sh"><h3>Data Exports</h3></div>
+<div class="tool-grid">
+  <a href="/admin/export/videos" class="tool-card">
+    <div class="tool-icon">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    </div>
+    <div class="tool-label">Export Videos</div>
+    <div class="tool-desc">Download all videos as CSV</div>
   </a>
-  <a href="/admin/export/users" class="dc" style="cursor:pointer">
-    <div class="dc-v" style="font-size:1.2rem">👥</div>
-    <div class="dc-l">Export Users CSV</div>
+  <a href="/admin/export/users" class="tool-card">
+    <div class="tool-icon">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+    </div>
+    <div class="tool-label">Export Users</div>
+    <div class="tool-desc">Download all users as CSV</div>
   </a>
-  <a href="/admin/export/analytics" class="dc" style="cursor:pointer">
-    <div class="dc-v" style="font-size:1.2rem">📊</div>
-    <div class="dc-l">Export Analytics JSON</div>
+  <a href="/admin/export/analytics" class="tool-card">
+    <div class="tool-icon">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    </div>
+    <div class="tool-label">Export Analytics</div>
+    <div class="tool-desc">Download analytics as JSON</div>
   </a>
 </div>
 
-<h3>User Journey Lookup</h3>
-<div class="fc">
-  <label>User ID</label>
-  <div style="display:flex;gap:.4rem">
-    <input type="number" id="journey-uid" placeholder="Enter user ID" style="flex:1">
-    <button class="btn" id="journey-btn">Lookup</button>
+<!-- ── User Journey ── -->
+<div class="sh" style="margin-top:2rem"><h3>User Journey Lookup</h3></div>
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-body">
+    <label style="margin-top:0">User ID</label>
+    <div style="display:flex;gap:.5rem;margin-top:.35rem">
+      <input type="number" id="journey-uid" placeholder="Enter user ID" style="flex:1">
+      <button class="btn" id="journey-btn">Lookup</button>
+    </div>
   </div>
 </div>
 <div id="journey-result"></div>
 
-<h3>Quick SQL Queries</h3>
-<div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:1.5rem">
+<!-- ── Quick SQL ── -->
+<div class="sh" style="margin-top:2rem"><h3>Quick SQL Queries</h3></div>
+<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1.5rem">
   <button class="ab" onclick="quickSql('SELECT COUNT(*) as total, DATE(created_at) as day FROM analytics GROUP BY day ORDER BY day DESC LIMIT 7')">Daily traffic (7d)</button>
   <button class="ab" onclick="quickSql('SELECT slug, COUNT(*) as watches FROM analytics WHERE type=\\'watch\\' GROUP BY slug ORDER BY watches DESC LIMIT 10')">Top videos</button>
   <button class="ab" onclick="quickSql('SELECT country, COUNT(DISTINCT ip) as unique_ips FROM analytics GROUP BY country ORDER BY unique_ips DESC LIMIT 15')">Unique visitors by country</button>
@@ -271,54 +1022,69 @@ ${!isEdit && tab === 'tools' ? `
   <button class="ab" onclick="quickSql('SELECT query, SUM(times) as total FROM (SELECT query, COUNT(*) as times FROM search_logs GROUP BY query) GROUP BY query ORDER BY total DESC LIMIT 20')">All search queries</button>
   <button class="ab" onclick="quickSql('SELECT * FROM admin_logs ORDER BY created_at DESC LIMIT 20')">Admin audit log</button>
 </div>
-<div id="quick-result" style="overflow-x:auto"></div>
+<div id="quick-result"></div>
 
 <script>
 // User journey
 document.getElementById('journey-btn').onclick=function(){
   var uid=document.getElementById('journey-uid').value;if(!uid)return;
   var out=document.getElementById('journey-result');
-  out.innerHTML='<p style="color:#666;font-size:.75rem">Loading...</p>';
+  out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--text-muted);font-size:.78rem">Loading...</p></div></div>';
   fetch('/admin/user-journey/'+uid).then(function(r){return r.json()}).then(function(d){
-    if(!d.user){out.innerHTML='<p style="color:#c44;font-size:.75rem">User not found</p>';return}
-    var html='<div class="fc"><h3 style="margin-top:0">'+d.user.name+' ('+d.user.email+')</h3>';
-    html+='<p style="color:#555;font-size:.72rem">Role: '+d.user.role+' · Joined: '+d.user.created_at+'</p>';
-    if(d.pages.length){html+='<h3>Page Views ('+d.pages.length+')</h3><table><tr><th>Path</th><th>When</th></tr>';
-      d.pages.forEach(function(p){html+='<tr><td class="mono">'+p.path+'</td><td>'+p.created_at+'</td></tr>'});html+='</table>';}
-    if(d.comments.length){html+='<h3>Comments ('+d.comments.length+')</h3><table><tr><th>Video</th><th>Comment</th><th>When</th></tr>';
-      d.comments.forEach(function(c){html+='<tr><td>'+c.video_title+'</td><td class="trunc">'+c.content+'</td><td>'+c.created_at+'</td></tr>'});html+='</table>';}
-    if(d.searches.length){html+='<h3>Searches ('+d.searches.length+')</h3><table><tr><th>Query</th><th>Results</th><th>When</th></tr>';
-      d.searches.forEach(function(s){html+='<tr><td>'+s.query+'</td><td>'+s.results+'</td><td>'+s.created_at+'</td></tr>'});html+='</table>';}
-    html+='</div>';out.innerHTML=html;
-  }).catch(function(e){out.innerHTML='<p style="color:#c44">'+e.message+'</p>'});
+    if(!d.user){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--red);font-size:.78rem">User not found</p></div></div>';return}
+    var html='<div class="card"><div class="card-body">';
+    html+='<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem">';
+    html+='<div class="user-ava" style="width:48px;height:48px;font-size:1.1rem">'+d.user.name[0].toUpperCase()+'</div>';
+    html+='<div><div style="font-size:.95rem;font-weight:600;color:var(--text)">'+d.user.name+'</div>';
+    html+='<div class="mono" style="font-size:.72rem">'+d.user.email+'</div>';
+    html+='<div style="font-size:.68rem;color:var(--text-muted);margin-top:.2rem">Role: '+d.user.role+' &middot; Joined: '+d.user.created_at+'</div></div></div>';
+    if(d.pages.length){
+      html+='<div class="sh" style="margin-top:1.25rem"><h3>Page Views</h3><span class="sh-badge">'+d.pages.length+'</span></div>';
+      html+='<div class="timeline">';
+      d.pages.forEach(function(p){html+='<div class="tl-item"><div class="tl-time">'+p.created_at+'</div><div class="tl-text">'+p.path+'</div></div>'});
+      html+='</div>';
+    }
+    if(d.comments.length){
+      html+='<div class="sh" style="margin-top:1.25rem"><h3>Comments</h3><span class="sh-badge">'+d.comments.length+'</span></div>';
+      html+='<div class="timeline">';
+      d.comments.forEach(function(c){html+='<div class="tl-item"><div class="tl-time">'+c.created_at+'</div><div class="tl-text"><strong>'+c.video_title+'</strong>: '+c.content+'</div></div>'});
+      html+='</div>';
+    }
+    if(d.searches.length){
+      html+='<div class="sh" style="margin-top:1.25rem"><h3>Searches</h3><span class="sh-badge">'+d.searches.length+'</span></div>';
+      html+='<div class="timeline">';
+      d.searches.forEach(function(s){html+='<div class="tl-item"><div class="tl-time">'+s.created_at+'</div><div class="tl-text">Searched "<strong>'+s.query+'</strong>" &mdash; '+s.results+' results</div></div>'});
+      html+='</div>';
+    }
+    html+='</div></div>';out.innerHTML=html;
+  }).catch(function(e){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--red)">'+e.message+'</p></div></div>'});
 };
 
 // Quick SQL
 function quickSql(q){
   var out=document.getElementById('quick-result');
-  out.innerHTML='<p style="color:#666;font-size:.75rem">Running...</p>';
+  out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--text-muted);font-size:.78rem">Running...</p></div></div>';
   fetch('/admin/sql',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
     .then(function(r){return r.json()}).then(function(d){
-      if(d.error){out.innerHTML='<p style="color:#c44;font-size:.75rem">'+d.error+'</p>';return}
-      if(!d.results||!d.results.length){out.innerHTML='<p style="color:#666;font-size:.75rem">No results</p>';return}
+      if(d.error){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--red);font-size:.78rem">'+d.error+'</p></div></div>';return}
+      if(!d.results||!d.results.length){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--text-muted);font-size:.78rem">No results</p></div></div>';return}
       var cols=Object.keys(d.results[0]);
-      var html='<table><tr>'+cols.map(function(c){return'<th>'+c+'</th>'}).join('')+'</tr>';
-      d.results.forEach(function(row){html+='<tr>'+cols.map(function(c){var v=row[c];return'<td class="mono trunc">'+(v===null?'NULL':String(v).slice(0,80))+'</td>'}).join('')+'</tr>'});
-      out.innerHTML=html+'</table>';
-    }).catch(function(e){out.innerHTML='<p style="color:#c44">'+e.message+'</p>'});
+      var html='<div class="table-wrap"><table><tr>'+cols.map(function(c){return'<th>'+c+'</th>'}).join('')+'</tr>';
+      d.results.forEach(function(row){html+='<tr>'+cols.map(function(c){var v=row[c];return'<td class="mono trunc">'+(v===null?'<span style="color:var(--text-muted)">NULL</span>':String(v).slice(0,80))+'</td>'}).join('')+'</tr>'});
+      out.innerHTML=html+'</table></div>';
+    }).catch(function(e){out.innerHTML='<div class="card"><div class="card-body"><p style="color:var(--red)">'+e.message+'</p></div></div>'});
 }
 </script>
 ` : ''}
 
 ${!isEdit && tab === 'ai' ? `
-<h2>AI Assistant</h2>
-<div class="ai-wrap">
-  <div class="ai-chat" id="ai-chat">
+<div class="ai-container">
+  <div class="ai-messages" id="ai-chat">
     <div class="ai-msg ai-bot">How can I help manage DeenSubs? I can help with content strategy, video descriptions, SEO, moderation decisions, or analytics insights. Ask me anything about the platform.</div>
   </div>
-  <div class="ai-form">
+  <div class="ai-input-wrap">
     <input type="text" id="ai-input" placeholder="Ask about content, SEO, analytics..." autocomplete="off">
-    <button class="btn" id="ai-send">Send</button>
+    <button id="ai-send">Send</button>
   </div>
 </div>
 <script>
@@ -332,10 +1098,13 @@ function send(){
   fetch('/admin/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:q,context:context})})
     .then(function(r){return r.json()}).then(function(d){
       chat.querySelector('.ai-typing').remove();
-      var resp=(d.response||d.error||'No response').replace(/</g,'&lt;').replace(/\\n/g,'<br>');
+      var resp=(d.response||d.error||'No response').replace(/</g,'&lt;');
+      resp=resp.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g,'<pre>$1</pre>');
+      resp=resp.replace(/\`([^\`]+)\`/g,'<code>$1</code>');
+      resp=resp.replace(/\\n/g,'<br>');
       chat.innerHTML+='<div class="ai-msg ai-bot">'+resp+'</div>';
       chat.scrollTop=chat.scrollHeight;
-    }).catch(function(e){chat.querySelector('.ai-typing').remove();chat.innerHTML+='<div class="ai-msg ai-bot" style="color:#c44">Error: '+e.message+'</div>'})
+    }).catch(function(e){chat.querySelector('.ai-typing').remove();chat.innerHTML+='<div class="ai-msg ai-bot" style="color:var(--red)">Error: '+e.message+'</div>'})
     .finally(function(){btn.disabled=false;inp.focus()});
 }
 btn.onclick=send;inp.onkeydown=function(e){if(e.key==='Enter')send()};
@@ -343,20 +1112,47 @@ btn.onclick=send;inp.onkeydown=function(e){if(e.key==='Enter')send()};
 ` : ''}
 
 ${!isEdit && tab === 'add' ? `
-<h2>Add Video</h2>
-<div class="fc"><form method="post" action="/admin/video?${q.slice(1)}">
-<label>Title *</label><input name="title" required>
-<label>Arabic Title</label><input name="title_ar" dir="rtl">
-<label>Slug *</label><input name="slug" required pattern="[a-z0-9-]+">
-<label>Description</label><textarea name="description" rows="3"></textarea>
-<label>Category</label><select name="category_id">${categories.map(c => `<option value="${c.id}">${e(c.name)}</option>`).join('')}</select>
-<label>Source</label><input name="source">
-<label>Duration (seconds)</label><input name="duration" type="number">
-<label>R2 Video Key *</label><input name="video_key" required placeholder="videos/filename.mp4">
-<label>R2 Subtitle Key</label><input name="srt_key" placeholder="subs/filename.srt">
-<label>R2 Thumbnail Key</label><input name="thumb_key" placeholder="thumbs/filename.jpg">
-<button class="btn" type="submit">Add Video</button></form></div>
+<div class="form-card">
+  <form method="post" action="/admin/video?${q.slice(1)}">
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">1</span> Basic Information</div>
+      <label>Title *</label>
+      <input name="title" required placeholder="Enter video title">
+      <label>Arabic Title</label>
+      <input name="title_ar" dir="rtl" placeholder="Enter Arabic title">
+      <label>Slug *</label>
+      <input name="slug" required pattern="[a-z0-9-]+" placeholder="my-video-slug">
+      <label>Description</label>
+      <textarea name="description" rows="3" placeholder="Brief description of the video content"></textarea>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">2</span> Categorization</div>
+      <label>Category</label>
+      <select name="category_id">${categories.map(c => `<option value="${c.id}">${e(c.name)}</option>`).join('')}</select>
+      <label>Source</label>
+      <input name="source" placeholder="Original source or credit">
+      <label>Duration (seconds)</label>
+      <input name="duration" type="number" placeholder="360">
+    </div>
+    <div class="form-section">
+      <div class="form-section-title"><span class="num">3</span> Media Files</div>
+      <label>R2 Video Key *</label>
+      <input name="video_key" required placeholder="videos/filename.mp4">
+      <label>R2 Subtitle Key</label>
+      <input name="srt_key" placeholder="subs/filename.srt">
+      <label>R2 Thumbnail Key</label>
+      <input name="thumb_key" placeholder="thumbs/filename.jpg">
+    </div>
+    <div class="form-section" style="display:flex;justify-content:flex-end;gap:.75rem;align-items:center">
+      <a href="/admin?tab=videos${q}" style="font-size:.82rem;color:var(--text-muted)">Cancel</a>
+      <button class="btn" type="submit">Add Video</button>
+    </div>
+  </form>
+</div>
 ` : ''}
 
-</div></body></html>`;
+</div><!-- .content -->
+</div><!-- .main -->
+</div><!-- .layout -->
+</body></html>`;
 }

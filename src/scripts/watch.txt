@@ -47,28 +47,52 @@ function renderSub(){
   if(found)subEl.innerHTML='<span>'+found.replace(/</g,'&lt;')+'</span>';
   else subEl.innerHTML='';
 }
-// Subtitle loading with language support
-var subCache={},curLang='en';
+// Subtitle loading with language support + native TextTrack API for iOS
+var subCache={},curLang='en',nativeTracks={};
+
 function loadSubs(lang){
   curLang=lang;
-  if(lang==='off'){ccOn=false;subCues=[];subEl.innerHTML='';cc.classList.remove('vb-on');
+  if(lang==='off'){
+    ccOn=false;subCues=[];subEl.innerHTML='';cc.classList.remove('vb-on');
     document.querySelectorAll('.vb-lang-opt').forEach(function(b){b.classList.toggle('vb-lang-on',b.dataset.lang==='off')});
-    var tracks=vid.textTracks;for(var i=0;i<tracks.length;i++)tracks[i].mode='hidden';return}
+    // Hide all native tracks
+    for(var k in nativeTracks) nativeTracks[k].mode='hidden';
+    return;
+  }
   ccOn=true;cc.classList.add('vb-on');
   document.querySelectorAll('.vb-lang-opt').forEach(function(b){b.classList.toggle('vb-lang-on',b.dataset.lang===lang)});
   var key=lang==='ar'?srtAr:srt;
   if(!key)return;
-  if(subCache[lang]){subCues=subCache[lang];addNativeTrack(lang);return}
+  if(subCache[lang]){subCues=subCache[lang];activateNativeTrack(lang);return}
   fetch('https://cdn.deensubs.com/'+key).then(function(r){return r.text()}).then(function(s){
-    subCache[lang]=parseSrt(s);subCues=subCache[lang];addNativeTrack(lang);
+    subCache[lang]=parseSrt(s);
+    subCues=subCache[lang];
+    // Create native TextTrack with VTTCue objects (works on iOS native player)
+    createNativeTrack(lang, subCues);
+    activateNativeTrack(lang);
   }).catch(function(){});
 }
-function addNativeTrack(lang){
-  var tracks=vid.textTracks;
-  for(var i=0;i<tracks.length;i++){
-    tracks[i].mode=(tracks[i].language===lang)?'showing':'hidden';
+
+function createNativeTrack(lang, cues){
+  if(nativeTracks[lang])return; // already created
+  try{
+    var track=vid.addTextTrack('subtitles', lang==='ar'?'Arabic':'English', lang);
+    for(var i=0;i<cues.length;i++){
+      track.addCue(new VTTCue(cues[i].s, cues[i].e, cues[i].t));
+    }
+    track.mode='showing';
+    nativeTracks[lang]=track;
+  }catch(ex){
+    // VTTCue not supported in very old browsers - fall back silently
   }
 }
+
+function activateNativeTrack(lang){
+  for(var k in nativeTracks){
+    nativeTracks[k].mode=(k===lang)?'showing':'hidden';
+  }
+}
+
 if(srt)loadSubs('en');
 // Language menu clicks
 document.querySelectorAll('.vb-lang-opt').forEach(function(b){
