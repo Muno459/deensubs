@@ -106,6 +106,16 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .tag{display:inline-block;padding:.1rem .4rem;background:color-mix(in srgb,var(--tc,var(--gold)) 8%,transparent);border-radius:100px;color:var(--tc,var(--gold));font-size:.58rem;font-weight:500}
 .tag-s{--tc:var(--t2);background:var(--s2)}
 
+/* ── Home Scholar Spotlight ── */
+.home-scholars{margin-bottom:1.5rem}
+.home-sch-card{display:flex;flex-direction:column;align-items:center;gap:.4rem;min-width:90px;padding:.6rem .5rem;border-radius:12px;transition:all .25s;flex-shrink:0}
+.home-sch-card:hover{background:var(--s2)}
+.home-sch-av{width:56px;height:56px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:1.3rem;font-weight:700;overflow:hidden;border:2px solid transparent;transition:border-color .3s}
+.home-sch-av img{width:100%;height:100%;object-fit:cover;filter:grayscale(1) brightness(.9);transition:filter .3s}
+.home-sch-card:hover .home-sch-av{border-color:var(--gold)}
+.home-sch-card:hover .home-sch-av img{filter:grayscale(0) brightness(1)}
+.home-sch-name{font-size:.65rem;color:var(--t2);text-align:center;white-space:nowrap}
+
 /* ── Continue Watching ── */
 .sec-cw{margin-bottom:.5rem}
 .card-cw .card-th{position:relative}.card-cw .card-bd h3{font-size:.75rem}

@@ -24,10 +24,11 @@ function rp(c, title, body, cats, activeCat, meta) {
 
 pages.get('/', async (c) => {
   const db = c.env.DB;
-  const [cats, all, popular] = await Promise.all([
+  const [cats, all, popular, scholars] = await Promise.all([
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.created_at DESC LIMIT 30`).all(),
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.views DESC LIMIT 8`).all(),
+    db.prepare('SELECT * FROM scholars ORDER BY name').all(),
   ]);
   const videos = all.results;
   const byCategory = {};
@@ -42,6 +43,7 @@ pages.get('/', async (c) => {
     popular: popular.results,
     categories: cats.results,
     byCategory,
+    scholars: scholars.results,
   }), cats.results));
 });
 
