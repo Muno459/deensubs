@@ -46,7 +46,7 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
     <div class="nav-right">
       <a href="/scholars" class="nav-link">Scholars</a>
       <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
-      ${user?`<a href="/auth/logout" class="nav-user-btn" title="Sign out"><img src="${e(user.avatar)}" class="nav-user-av" alt="">${e(user.name.split(' ')[0])}</a>`:`<a href="/auth/google" class="nav-login">Sign in</a>`}
+      ${user?`<a href="/profile" class="nav-user-btn" title="Profile"><img src="${e(user.avatar)}" class="nav-user-av" alt="">${e(user.name.split(' ')[0])}</a>`:`<a href="/auth/google" class="nav-login">Sign in</a>`}
       <button class="nav-hb" id="hb" aria-label="Menu"><span></span><span></span><span></span></button>
     </div>
   </div>

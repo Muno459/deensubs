@@ -12,6 +12,7 @@ import { renderBookmarks } from '../templates/bookmarks.js';
 import { renderHistory } from '../templates/history.js';
 import { render404 } from '../templates/error.js';
 import { renderSymposium } from '../templates/symposium.js';
+import { renderProfile } from '../templates/profile.js';
 
 const pages = new Hono();
 
@@ -144,6 +145,18 @@ pages.get('/about', async (c) => {
 pages.get('/bookmarks', async (c) => {
   const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
   return c.html(rp(c,'Bookmarks', renderBookmarks(), cats));
+});
+
+pages.get('/profile', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.redirect('/auth/google');
+  const db = c.env.DB;
+  const [cats, comments, stats] = await Promise.all([
+    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    db.prepare('SELECT c.*, v.title as video_title, v.slug as video_slug FROM comments c LEFT JOIN videos v ON c.video_id = v.id WHERE c.user_id = ? ORDER BY c.created_at DESC LIMIT 20').bind(user.id).all(),
+    db.prepare('SELECT COUNT(*) as comment_count FROM comments WHERE user_id = ?').bind(user.id).first(),
+  ]);
+  return c.html(rp(c, 'Profile', renderProfile({ user, comments: comments.results, stats }), cats.results));
 });
 
 export default pages;

@@ -17,9 +17,9 @@ export async function getUser(c) {
   const sid = getCookie(c, 'sid');
   if (!sid) return null;
   const session = await c.env.DB.prepare(
-    "SELECT s.*, u.id as uid, u.name, u.email, u.avatar, u.google_id FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime('now')"
+    "SELECT s.*, u.id as uid, u.name, u.email, u.avatar, u.google_id, u.role, u.created_at as user_created FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime('now')"
   ).bind(sid).first();
-  return session ? { id: session.uid, name: session.name, email: session.email, avatar: session.avatar } : null;
+  return session ? { id: session.uid, name: session.name, email: session.email, avatar: session.avatar, role: session.role || 'user', created: session.user_created } : null;
 }
 
 export async function authMiddleware(c, next) {
