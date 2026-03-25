@@ -104,6 +104,69 @@ admin.post('/admin/user-role/:id', async (c) => {
   return c.redirect('/admin?tab=users' + (c.req.query('key') ? '&key=' + c.req.query('key') : ''));
 });
 
+// SQL Console (read-only)
+admin.post('/admin/sql', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
+  const { query } = await c.req.json();
+  if (!query) return c.json({ error: 'No query' }, 400);
+  const lower = query.trim().toLowerCase();
+  if (!lower.startsWith('select')) return c.json({ error: 'Only SELECT queries allowed' }, 403);
+  try {
+    const result = await c.env.DB.prepare(query).all();
+    const user = c.get('user');
+    c.executionCtx.waitUntil(c.env.DB.prepare('INSERT INTO admin_logs (admin_id, action, target, details) VALUES (?, ?, ?, ?)').bind(user?.id, 'sql_query', 'database', query.slice(0, 500)).run());
+    return c.json({ results: result.results, meta: result.meta });
+  } catch (err) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+// User journey endpoint
+admin.get('/admin/user-journey/:id', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
+  const uid = parseInt(c.req.param('id'));
+  const db = c.env.DB;
+  const [user, pages, comments, searches] = await Promise.all([
+    db.prepare('SELECT * FROM users WHERE id = ?').bind(uid).first(),
+    db.prepare("SELECT path, created_at FROM analytics WHERE user_id = ? ORDER BY created_at DESC LIMIT 50").bind(uid).all(),
+    db.prepare('SELECT c.*, v.title as video_title FROM comments c LEFT JOIN videos v ON c.video_id = v.id WHERE c.user_id = ? ORDER BY c.created_at DESC').bind(uid).all(),
+    db.prepare('SELECT * FROM search_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20').bind(uid).all(),
+  ]);
+  return c.json({ user, pages: pages.results, comments: comments.results, searches: searches.results });
+});
+
+// Export endpoints
+admin.get('/admin/export/videos', async (c) => {
+  if (!isAdmin(c)) return c.text('Unauthorized', 401);
+  const videos = (await c.env.DB.prepare('SELECT * FROM videos ORDER BY id').all()).results;
+  const csv = 'id,title,slug,category_id,source,views,likes,duration,created_at\n' + videos.map(v => `${v.id},"${(v.title||'').replace(/"/g,'""')}",${v.slug},${v.category_id},"${(v.source||'').replace(/"/g,'""')}",${v.views},${v.likes},${v.duration},"${v.created_at}"`).join('\n');
+  return new Response(csv, { headers: { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename=deensubs-videos.csv' } });
+});
+
+admin.get('/admin/export/users', async (c) => {
+  if (!isAdmin(c)) return c.text('Unauthorized', 401);
+  const users = (await c.env.DB.prepare('SELECT id,name,email,role,created_at FROM users ORDER BY id').all()).results;
+  const csv = 'id,name,email,role,created_at\n' + users.map(u => `${u.id},"${(u.name||'').replace(/"/g,'""')}",${u.email},${u.role},"${u.created_at}"`).join('\n');
+  return new Response(csv, { headers: { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename=deensubs-users.csv' } });
+});
+
+admin.get('/admin/export/analytics', async (c) => {
+  if (!isAdmin(c)) return c.text('Unauthorized', 401);
+  const data = (await c.env.DB.prepare('SELECT * FROM analytics ORDER BY created_at DESC LIMIT 5000').all()).results;
+  return c.json(data);
+});
+
+// Bulk actions
+admin.post('/admin/bulk-delete-comments', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
+  const { ids } = await c.req.json();
+  if (!ids || !ids.length) return c.json({ error: 'No IDs' }, 400);
+  for (const id of ids) {
+    await c.env.DB.prepare('DELETE FROM comments WHERE id = ?').bind(id).run();
+  }
+  return c.json({ deleted: ids.length });
+});
+
 // AI Chat endpoint for admin
 admin.post('/admin/ai', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);

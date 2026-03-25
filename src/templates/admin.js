@@ -17,8 +17,10 @@ export function renderAdmin({ videos, categories, key, editing, tab, users, comm
     ['users', `Users (${(users||[]).length})`],
     ['searches', 'Searches'],
     ['visitors', 'Visitors'],
+    ['sql', 'SQL Console'],
+    ['tools', 'Tools'],
     ['ai', 'AI Assistant'],
-    ['add', '+ Add Video'],
+    ['add', '+ Add'],
   ];
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — DeenSubs</title>
@@ -201,6 +203,111 @@ ${!isEdit && tab === 'visitors' ? `
 <table><tr><th>IP</th><th>Country</th><th>Hits</th><th>Last Seen</th></tr>
 ${visitors.map(v => `<tr><td class="mono">${e(v.ip)}</td><td>${e(v.country)}</td><td>${v.hits}</td><td>${ago(v.last_seen)}</td></tr>`).join('')}
 </table>
+` : ''}
+
+${!isEdit && tab === 'sql' ? `
+<h2>SQL Console</h2>
+<p style="color:#555;font-size:.72rem;margin-bottom:.75rem">Read-only. SELECT queries only. Direct access to the D1 database.</p>
+<div class="fc">
+  <textarea id="sql-input" rows="4" placeholder="SELECT * FROM videos LIMIT 10" style="font-family:monospace;font-size:.75rem"></textarea>
+  <button class="btn" id="sql-run" style="margin-top:.5rem">Execute</button>
+</div>
+<div id="sql-result" style="overflow-x:auto"></div>
+<script>
+document.getElementById('sql-run').onclick=function(){
+  var q=document.getElementById('sql-input').value.trim();
+  if(!q)return;
+  var out=document.getElementById('sql-result');
+  out.innerHTML='<p style="color:#666;font-size:.75rem">Running...</p>';
+  fetch('/admin/sql',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+    .then(function(r){return r.json()}).then(function(d){
+      if(d.error){out.innerHTML='<p style="color:#c44;font-size:.75rem">Error: '+d.error+'</p>';return}
+      if(!d.results||!d.results.length){out.innerHTML='<p style="color:#666;font-size:.75rem">No results ('+((d.meta&&d.meta.duration)?d.meta.duration.toFixed(2)+'ms':'')+')</p>';return}
+      var cols=Object.keys(d.results[0]);
+      var html='<p style="color:#555;font-size:.65rem;margin-bottom:.4rem">'+d.results.length+' rows'+(d.meta&&d.meta.duration?' · '+d.meta.duration.toFixed(2)+'ms':'')+'</p>';
+      html+='<table><tr>'+cols.map(function(c){return'<th>'+c+'</th>'}).join('')+'</tr>';
+      d.results.forEach(function(row){html+='<tr>'+cols.map(function(c){var v=row[c];return'<td class="mono trunc">'+(v===null?'<span style="color:#555">NULL</span>':String(v).slice(0,100))+'</td>'}).join('')+'</tr>'});
+      html+='</table>';out.innerHTML=html;
+    }).catch(function(e){out.innerHTML='<p style="color:#c44;font-size:.75rem">'+e.message+'</p>'});
+};
+document.getElementById('sql-input').onkeydown=function(e){if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();document.getElementById('sql-run').click()}};
+</script>
+` : ''}
+
+${!isEdit && tab === 'tools' ? `
+<h2>Admin Tools</h2>
+<div class="dg" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+  <a href="/admin/export/videos" class="dc" style="cursor:pointer">
+    <div class="dc-v" style="font-size:1.2rem">📄</div>
+    <div class="dc-l">Export Videos CSV</div>
+  </a>
+  <a href="/admin/export/users" class="dc" style="cursor:pointer">
+    <div class="dc-v" style="font-size:1.2rem">👥</div>
+    <div class="dc-l">Export Users CSV</div>
+  </a>
+  <a href="/admin/export/analytics" class="dc" style="cursor:pointer">
+    <div class="dc-v" style="font-size:1.2rem">📊</div>
+    <div class="dc-l">Export Analytics JSON</div>
+  </a>
+</div>
+
+<h3>User Journey Lookup</h3>
+<div class="fc">
+  <label>User ID</label>
+  <div style="display:flex;gap:.4rem">
+    <input type="number" id="journey-uid" placeholder="Enter user ID" style="flex:1">
+    <button class="btn" id="journey-btn">Lookup</button>
+  </div>
+</div>
+<div id="journey-result"></div>
+
+<h3>Quick SQL Queries</h3>
+<div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:1.5rem">
+  <button class="ab" onclick="quickSql('SELECT COUNT(*) as total, DATE(created_at) as day FROM analytics GROUP BY day ORDER BY day DESC LIMIT 7')">Daily traffic (7d)</button>
+  <button class="ab" onclick="quickSql('SELECT slug, COUNT(*) as watches FROM analytics WHERE type=\\'watch\\' GROUP BY slug ORDER BY watches DESC LIMIT 10')">Top videos</button>
+  <button class="ab" onclick="quickSql('SELECT country, COUNT(DISTINCT ip) as unique_ips FROM analytics GROUP BY country ORDER BY unique_ips DESC LIMIT 15')">Unique visitors by country</button>
+  <button class="ab" onclick="quickSql('SELECT u.name, u.email, COUNT(c.id) as comments FROM users u LEFT JOIN comments c ON u.id = c.user_id GROUP BY u.id ORDER BY comments DESC')">Most active commenters</button>
+  <button class="ab" onclick="quickSql('SELECT v.title, v.views, v.likes, ROUND(v.likes*100.0/NULLIF(v.views,0),1) as like_rate FROM videos v ORDER BY like_rate DESC')">Like rate per video</button>
+  <button class="ab" onclick="quickSql('SELECT query, SUM(times) as total FROM (SELECT query, COUNT(*) as times FROM search_logs GROUP BY query) GROUP BY query ORDER BY total DESC LIMIT 20')">All search queries</button>
+  <button class="ab" onclick="quickSql('SELECT * FROM admin_logs ORDER BY created_at DESC LIMIT 20')">Admin audit log</button>
+</div>
+<div id="quick-result" style="overflow-x:auto"></div>
+
+<script>
+// User journey
+document.getElementById('journey-btn').onclick=function(){
+  var uid=document.getElementById('journey-uid').value;if(!uid)return;
+  var out=document.getElementById('journey-result');
+  out.innerHTML='<p style="color:#666;font-size:.75rem">Loading...</p>';
+  fetch('/admin/user-journey/'+uid).then(function(r){return r.json()}).then(function(d){
+    if(!d.user){out.innerHTML='<p style="color:#c44;font-size:.75rem">User not found</p>';return}
+    var html='<div class="fc"><h3 style="margin-top:0">'+d.user.name+' ('+d.user.email+')</h3>';
+    html+='<p style="color:#555;font-size:.72rem">Role: '+d.user.role+' · Joined: '+d.user.created_at+'</p>';
+    if(d.pages.length){html+='<h3>Page Views ('+d.pages.length+')</h3><table><tr><th>Path</th><th>When</th></tr>';
+      d.pages.forEach(function(p){html+='<tr><td class="mono">'+p.path+'</td><td>'+p.created_at+'</td></tr>'});html+='</table>';}
+    if(d.comments.length){html+='<h3>Comments ('+d.comments.length+')</h3><table><tr><th>Video</th><th>Comment</th><th>When</th></tr>';
+      d.comments.forEach(function(c){html+='<tr><td>'+c.video_title+'</td><td class="trunc">'+c.content+'</td><td>'+c.created_at+'</td></tr>'});html+='</table>';}
+    if(d.searches.length){html+='<h3>Searches ('+d.searches.length+')</h3><table><tr><th>Query</th><th>Results</th><th>When</th></tr>';
+      d.searches.forEach(function(s){html+='<tr><td>'+s.query+'</td><td>'+s.results+'</td><td>'+s.created_at+'</td></tr>'});html+='</table>';}
+    html+='</div>';out.innerHTML=html;
+  }).catch(function(e){out.innerHTML='<p style="color:#c44">'+e.message+'</p>'});
+};
+
+// Quick SQL
+function quickSql(q){
+  var out=document.getElementById('quick-result');
+  out.innerHTML='<p style="color:#666;font-size:.75rem">Running...</p>';
+  fetch('/admin/sql',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+    .then(function(r){return r.json()}).then(function(d){
+      if(d.error){out.innerHTML='<p style="color:#c44;font-size:.75rem">'+d.error+'</p>';return}
+      if(!d.results||!d.results.length){out.innerHTML='<p style="color:#666;font-size:.75rem">No results</p>';return}
+      var cols=Object.keys(d.results[0]);
+      var html='<table><tr>'+cols.map(function(c){return'<th>'+c+'</th>'}).join('')+'</tr>';
+      d.results.forEach(function(row){html+='<tr>'+cols.map(function(c){var v=row[c];return'<td class="mono trunc">'+(v===null?'NULL':String(v).slice(0,80))+'</td>'}).join('')+'</tr>'});
+      out.innerHTML=html+'</table>';
+    }).catch(function(e){out.innerHTML='<p style="color:#c44">'+e.message+'</p>'});
+}
+</script>
 ` : ''}
 
 ${!isEdit && tab === 'ai' ? `
