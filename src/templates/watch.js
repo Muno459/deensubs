@@ -72,12 +72,16 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
           <button class="wa" id="dl-btn" title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span></button>
         </div>
       </div>
-      <div class="wi-mt">${video.scholar_slug?`<a href="/scholar/${e(video.scholar_slug)}" class="wi-scholar">${e(video.source||video.scholar_name)}</a>`:video.source?`<span>${e(video.source)}</span>`:''}
-        <span>${fv(video.views)}</span><span>${ago(video.created_at)}</span></div>
-      <div class="wi-tgs">
+      <div class="wi-mt">
+        <span>${fv(video.views)}</span>
+        <span>${ago(video.created_at)}</span>
         ${video.category_name?`<a href="/category/${e(video.category_slug)}" class="tag" style="--tc:${e(video.category_color)}">${e(video.category_name)}</a>`:''}
         <span class="tag tag-s">Arabic &rarr; English</span>
       </div>
+      ${video.scholar_slug?`<a href="/scholar/${e(video.scholar_slug)}" class="wi-sch-card">
+        <div class="wi-sch-av">${e((video.source||video.scholar_name||'').split(' ').pop().charAt(0))}</div>
+        <div class="wi-sch-info"><span class="wi-sch-name">${e(video.source||video.scholar_name)}</span>${video.scholar_title?`<span class="wi-sch-title">${e(video.scholar_title)}</span>`:''}</div>
+      </a>`:video.source?`<div class="wi-source">${e(video.source)}</div>`:''}
       ${video.description?`<div class="wi-desc">${e(video.description)}</div>`:''}
     </div>
     ${cues&&cues.length?`

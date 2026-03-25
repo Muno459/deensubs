@@ -226,20 +226,41 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .sc-i h4{font-size:.7rem;font-weight:500;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .sc-i span{font-size:.58rem;color:var(--t3)}
 
-/* ── Category ── */
-.cat-hd{display:flex;align-items:baseline;gap:.5rem}
-.cat-ctrls{display:flex;align-items:center;gap:.75rem}
-.cat-ct{font-size:.7rem;color:var(--t3)}
-.sort-btns{display:flex;gap:.2rem}
-.sb{padding:.2rem .55rem;border-radius:6px;font-size:.65rem;color:var(--t2);transition:all .2s}
-.sb:hover{background:var(--s2)}.sb-on{background:var(--gd);color:var(--gold)}
+/* ── Category Page ── */
+.cat-page{max-width:1320px}
+.cat-hero{margin-bottom:1.5rem;padding:1.5rem;background:var(--s1);border:1px solid var(--bd);border-radius:14px}
+.cat-hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:1.5rem}
+.cat-hero-ar{font-family:'Amiri',serif;font-size:1.3rem;color:var(--gold);direction:rtl;display:block;margin-bottom:.15rem}
+.cat-hero-title{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;margin-bottom:.35rem}
+.cat-hero-desc{font-size:.78rem;color:var(--t2);line-height:1.6;max-width:500px}
+.cat-hero-right{display:flex;flex-direction:column;align-items:flex-end;gap:.5rem;flex-shrink:0}
+.cat-hero-count{font-size:.72rem;color:var(--t3)}
+.sort-btns{display:flex;gap:.25rem}
+.sb{padding:.3rem .7rem;border-radius:8px;font-size:.68rem;font-weight:500;color:var(--t2);transition:all .2s;border:1px solid transparent}
+.sb:hover{background:var(--s2);border-color:var(--bd)}
+.sb-on{background:var(--gd);color:var(--gold);border-color:rgba(196,164,76,.1)}
+@media(max-width:640px){.cat-hero-top{flex-direction:column;gap:.75rem}.cat-hero-right{align-items:flex-start}}
+
+/* ── Watch Scholar Card ── */
+.wi-sch-card{display:flex;align-items:center;gap:.65rem;padding:.6rem .85rem;background:var(--s1);border:1px solid var(--bd);border-radius:10px;transition:all .25s;margin-bottom:.65rem}
+.wi-sch-card:hover{border-color:var(--bdh);background:var(--s2)}
+.wi-sch-av{width:36px;height:36px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:.9rem;font-weight:700;flex-shrink:0}
+.wi-sch-info{display:flex;flex-direction:column}
+.wi-sch-name{font-size:.8rem;font-weight:500}
+.wi-sch-title{font-size:.65rem;color:var(--t3)}
+.wi-source{font-size:.78rem;color:var(--t2);margin-bottom:.5rem}
 
 /* ── 404 ── */
 .e404{text-align:center;padding:5rem 2rem}
-.e404 h1{font-family:'Cormorant Garamond',serif;font-size:4rem;font-weight:300;color:var(--gold);margin:.5rem 0}
-.e404 p{color:var(--t2);margin-bottom:1.5rem}
-.e404-btn{display:inline-block;padding:.5rem 1.5rem;border:1px solid var(--bdh);border-radius:8px;color:var(--gold);font-size:.8rem;transition:all .2s}
-.e404-btn:hover{background:var(--gd)}
+.e404-geo{margin-bottom:.5rem;opacity:.5}
+.e404 h1{font-family:'Cormorant Garamond',serif;font-size:5rem;font-weight:300;color:var(--gold);margin:.25rem 0;line-height:1}
+.e404 p{color:var(--t2);font-size:.9rem}
+.e404-sub{color:var(--t3);font-size:.78rem;margin-bottom:1.5rem}
+.e404-actions{display:flex;gap:.5rem;justify-content:center}
+.e404-btn{display:inline-block;padding:.5rem 1.5rem;border:1px solid var(--bd);border-radius:8px;color:var(--t2);font-size:.78rem;transition:all .25s}
+.e404-btn:hover{border-color:var(--bdh);color:var(--tx)}
+.e404-primary{background:var(--gd);border-color:rgba(196,164,76,.1);color:var(--gold)}
+.e404-primary:hover{background:rgba(196,164,76,.1);border-color:var(--gold)}
 
 /* ── Toast ── */
 .toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(16px);background:var(--s3);border:1px solid var(--bdh);color:var(--tx);padding:.45rem 1.1rem;border-radius:8px;font-size:.78rem;opacity:0;transition:all .3s;z-index:200;pointer-events:none}
@@ -416,7 +437,7 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 
 /* With transparent portrait */
 .sp-hero-img{padding-right:280px}
-.sp-hero-portrait{position:absolute;right:0;top:0;bottom:0;width:300px;pointer-events:none;overflow:hidden}
+.sp-hero-portrait{position:absolute;right:0;bottom:0;width:300px;pointer-events:none}
 .sp-hero-portrait img{width:100%;display:block;filter:drop-shadow(-10px 0 40px rgba(0,0,0,.4))}
 
 /* Without transparent portrait — large avatar */
