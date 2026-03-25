@@ -199,7 +199,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
     <div class="cms">
       <h2>${comments.length} Comment${comments.length!==1?'s':''}</h2>
       <form id="cf" class="cf" data-slug="${e(video.slug)}">
-        <div class="cf-r"><input name="author" placeholder="Your name" maxlength="100" required autocomplete="off"><button type="submit">Post</button></div>
+        <div class="cf-r">${video._user?`<input name="author" type="hidden" value="${e(video._user.name)}"><div class="cf-user"><img src="${e(video._user.avatar)}" class="cf-user-av"><span>${e(video._user.name)}</span></div>`:`<input name="author" placeholder="Your name" maxlength="100" required autocomplete="off">`}<button type="submit">Post</button></div>
         <div class="cf-ta-wrap"><textarea name="content" placeholder="Share your thoughts..." maxlength="2000" rows="2" required id="cf-ta"></textarea><span class="cf-counter" id="cf-ct">2000</span></div>
       </form>
       <div id="cl" class="cl">${comments.map(commentHTML).join('')}</div>
@@ -574,8 +574,8 @@ ${videos.map(vi=>`<tr><td><a href="/watch/${e(vi.slug)}">${e(vi.title)}</a></td>
 }
 
 // ═══ LAYOUT ═══
-export function renderPage(title, body, categories, activeCat, meta) {
-  meta = meta || {};
+export function renderPage(title, body, categories, activeCat, meta, user) {
+  meta = meta || {}; user = user || null;
   const desc = meta.description || 'Arabic Islamic lectures with accurate English subtitles, powered by AI.';
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -616,6 +616,7 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
     <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
     <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.filter(c=>c.slug!=='symposium').map(c=>`<a href="/category/${e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
     <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search videos..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
+    ${user?`<div class="nav-user"><a href="/auth/logout" class="nav-user-btn" title="Sign out"><img src="${e(user.avatar)}" class="nav-user-av" alt="">${e(user.name.split(' ')[0])}</a></div>`:`<a href="/auth/google" class="nav-login">Sign in</a>`}
     <a href="/scholars" class="nav-icon" title="Scholars"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></a>
     <a href="/bookmarks" class="nav-icon" title="Saved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg></a>
     <button class="nav-hb" id="hb" aria-label="Menu"><span></span><span></span><span></span></button>
@@ -644,6 +645,15 @@ document.addEventListener('keydown',function(e){if(e.key==='/'&&e.target.tagName
   document.querySelectorAll('[data-bg]').forEach(function(el){lo.observe(el)});
   var co=new IntersectionObserver(function(en){en.forEach(function(e){if(e.isIntersecting){e.target.classList.add('card-vis');co.unobserve(e.target)}})},{threshold:.05,rootMargin:'0px 0px -20px 0px'});
   document.querySelectorAll('.card-anim').forEach(function(c){co.observe(c)});
+})();
+${!user?`
+  // Google One Tap
+  var otScript=document.createElement('script');otScript.src='https://accounts.google.com/gsi/client';otScript.async=true;
+  otScript.onload=function(){google.accounts.id.initialize({client_id:'1009654832009-9k61ld72vu7l6ml8n6v93vpgn9opfffb.apps.googleusercontent.com',callback:function(r){
+    fetch('/auth/onetap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:r.credential})}).then(function(res){if(res.ok)location.reload()})
+  },auto_select:true});google.accounts.id.prompt()};
+  document.head.appendChild(otScript);
+`:''}
 })();
 </script>
 </body></html>`;
@@ -960,6 +970,11 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .nav-sf input::placeholder{color:var(--t3)}
 .nav-sf input:focus+.nav-kbd{display:none}
 .nav-kbd{position:absolute;right:.5rem;background:var(--s3);border:1px solid var(--bd);border-radius:4px;padding:0 .3rem;font:inherit;font-size:.6rem;color:var(--t3);pointer-events:none;line-height:1.6}
+.nav-login{padding:.25rem .7rem;background:var(--gd);border:1px solid rgba(196,164,76,.1);border-radius:8px;font-size:.7rem;font-weight:500;color:var(--gold);transition:all .2s;flex-shrink:0;white-space:nowrap}
+.nav-login:hover{border-color:var(--bdh);background:rgba(196,164,76,.1)}
+.nav-user-btn{display:flex;align-items:center;gap:.4rem;font-size:.7rem;color:var(--t2);transition:color .2s;flex-shrink:0;white-space:nowrap}
+.nav-user-btn:hover{color:var(--tx)}
+.nav-user-av{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--bd)}
 .nav-hb{display:none;background:none;border:none;cursor:pointer;padding:.4rem;flex-shrink:0}
 .nav-hb span{display:block;width:16px;height:1.5px;background:var(--t2);margin:3px 0;transition:all .3s;border-radius:1px}
 
@@ -1119,6 +1134,8 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .cf input,.cf textarea{flex:1;background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:.5rem .65rem;color:var(--tx);font:inherit;font-size:.78rem;transition:border-color .2s;resize:vertical}
 .cf input:focus,.cf textarea:focus{outline:none;border-color:var(--gold)}
 .cf input::placeholder,.cf textarea::placeholder{color:var(--t3)}
+.cf-user{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:var(--tx);flex:1}
+.cf-user-av{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--bd)}
 .cf button{padding:.5rem 1.1rem;background:var(--gold);color:var(--bg);border:none;border-radius:8px;font:inherit;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
 .cf button:hover{filter:brightness(1.1)}.cf button:disabled{opacity:.5}
 .cm{padding:.75rem 0;border-bottom:1px solid var(--bd)}.cm:last-child{border-bottom:none}

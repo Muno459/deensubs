@@ -3,7 +3,42 @@ import { renderPage, renderHome, renderWatch, renderCategory, renderSearch, rend
 
 const app = new Hono();
 
+// ── Auth Middleware ──
+
+async function getUser(c) {
+  const sid = getCookie(c, 'sid');
+  if (!sid) return null;
+  const session = await c.env.DB.prepare('SELECT s.*, u.id as uid, u.name, u.email, u.avatar, u.google_id FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime(\'now\')').bind(sid).first();
+  return session ? { id: session.uid, name: session.name, email: session.email, avatar: session.avatar } : null;
+}
+
+function getCookie(c, name) {
+  const cookies = c.req.header('Cookie') || '';
+  const match = cookies.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+  return match ? match[1] : null;
+}
+
+function genId() {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let id = '';
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  for (const b of arr) id += chars[b % chars.length];
+  return id;
+}
+
+// Inject user into all page requests
+app.use('*', async (c, next) => {
+  c.set('user', await getUser(c));
+  await next();
+});
+
 const VC = 'v.*, c.name as category_name, c.slug as category_slug, c.color as category_color';
+
+// Helper to render page with user
+function rp(c, title, body, cats, activeCat, meta) {
+  return renderPage(title, body, cats, activeCat, meta, c.get('user'));
+}
 const VJ = 'FROM videos v LEFT JOIN categories c ON v.category_id = c.id';
 
 // ── SRT Parser ──
@@ -44,7 +79,7 @@ app.get('/', async (c) => {
     if (!byCategory[s]) byCategory[s] = [];
     byCategory[s].push(v);
   });
-  return c.html(renderPage('Home', renderHome({
+  return c.html(rp(c,'Home', renderHome({
     featured: videos[0] || null,
     videos,
     popular: popular.results,
@@ -57,7 +92,7 @@ app.get('/watch/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = c.env.DB;
   const video = await db.prepare(`SELECT ${VC}, s.slug as scholar_slug, s.name as scholar_name, s.title as scholar_title ${VJ} LEFT JOIN scholars s ON v.scholar_id = s.id WHERE v.slug = ?`).bind(slug).first();
-  if (!video) return c.html(renderPage('Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
+  if (!video) return c.html(rp(c,'Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
 
   const [, comments, related, cats, cues] = await Promise.all([
     db.prepare('UPDATE videos SET views = views + 1 WHERE slug = ?').bind(slug).run(),
@@ -66,13 +101,14 @@ app.get('/watch/:slug', async (c) => {
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
     parseSRT(c.env, video.srt_key),
   ]);
+  video._user = c.get('user');
   const base = new URL(c.req.url).origin;
   const meta = {
     description: video.description || `Watch ${video.title} with English subtitles on DeenSubs.`,
     type: 'video.other',
     image: video.thumb_key ? base + '/api/media/' + video.thumb_key : null,
   };
-  return c.html(renderPage(video.title, renderWatch({ video, comments: comments.results, related: related.results, cues, base }), cats.results, video.category_slug, meta));
+  return c.html(rp(c,video.title, renderWatch({ video, comments: comments.results, related: related.results, cues, base }), cats.results, video.category_slug, meta));
 });
 
 app.get('/category/:slug', async (c) => {
@@ -85,8 +121,8 @@ app.get('/category/:slug', async (c) => {
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = ? ORDER BY ${orderBy}`).bind(slug).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  if (!category) return c.html(renderPage('Not Found', render404(), cats.results), 404);
-  return c.html(renderPage(category.name, renderCategory({ category, videos: videos.results, sort }), cats.results, slug));
+  if (!category) return c.html(rp(c,'Not Found', render404(), cats.results), 404);
+  return c.html(rp(c,category.name, renderCategory({ category, videos: videos.results, sort }), cats.results, slug));
 });
 
 app.get('/search', async (c) => {
@@ -101,7 +137,7 @@ app.get('/search', async (c) => {
       videos = (await db.prepare(`SELECT ${VC} ${VJ} WHERE v.title LIKE ? OR v.description LIKE ? OR v.source LIKE ? ORDER BY v.created_at DESC LIMIT 50`).bind('%' + q + '%', '%' + q + '%', '%' + q + '%').all()).results;
     }
   }
-  return c.html(renderPage(q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
+  return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
 // app.get('/symposium', ... ) — disabled for now
@@ -112,35 +148,35 @@ app.get('/scholars', async (c) => {
     db.prepare('SELECT s.*, (SELECT COUNT(*) FROM videos v WHERE v.scholar_id = s.id) as video_count, (SELECT SUM(views) FROM videos v WHERE v.scholar_id = s.id) as total_views FROM scholars s ORDER BY s.name').all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  return c.html(renderPage('Scholars', renderScholars({ scholars: scholars.results }), cats.results));
+  return c.html(rp(c,'Scholars', renderScholars({ scholars: scholars.results }), cats.results));
 });
 
 app.get('/scholar/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = c.env.DB;
   const scholar = await db.prepare('SELECT * FROM scholars WHERE slug = ?').bind(slug).first();
-  if (!scholar) return c.html(renderPage('Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
+  if (!scholar) return c.html(rp(c,'Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
   const [videos, cats] = await Promise.all([
     db.prepare(`SELECT ${VC} ${VJ} WHERE v.scholar_id = ? ORDER BY v.created_at DESC`).bind(scholar.id).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  return c.html(renderPage(scholar.name, renderScholar({ scholar, videos: videos.results }), cats.results));
+  return c.html(rp(c,scholar.name, renderScholar({ scholar, videos: videos.results }), cats.results));
 });
 
 app.get('/history', async (c) => {
   const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
-  return c.html(renderPage('Watch History', renderHistory(), cats));
+  return c.html(rp(c,'Watch History', renderHistory(), cats));
 });
 
 app.get('/about', async (c) => {
   const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
   const stats = await c.env.DB.prepare('SELECT COUNT(*) as count, SUM(views) as views FROM videos').first();
-  return c.html(renderPage('About', renderAbout({ stats }), cats));
+  return c.html(rp(c,'About', renderAbout({ stats }), cats));
 });
 
 app.get('/bookmarks', async (c) => {
   const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
-  return c.html(renderPage('Bookmarks', renderBookmarks(), cats));
+  return c.html(rp(c,'Bookmarks', renderBookmarks(), cats));
 });
 
 // ── Admin ──
@@ -248,6 +284,114 @@ app.get('/api/vtt/*', async (c) => {
   });
 });
 
+// ── Auth Routes ──
+
+app.get('/auth/google', (c) => {
+  const redirect_uri = new URL(c.req.url).origin + '/auth/callback';
+  const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+    client_id: c.env.GOOGLE_CLIENT_ID,
+    redirect_uri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    prompt: 'select_account',
+  });
+  return c.redirect(url);
+});
+
+app.get('/auth/callback', async (c) => {
+  const code = c.req.query('code');
+  if (!code) return c.redirect('/');
+  const redirect_uri = new URL(c.req.url).origin + '/auth/callback';
+
+  // Exchange code for tokens
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: c.env.GOOGLE_CLIENT_ID,
+      client_secret: c.env.GOOGLE_CLIENT_SECRET,
+      redirect_uri,
+      grant_type: 'authorization_code',
+    }),
+  });
+  const tokens = await tokenRes.json();
+  if (!tokens.access_token) return c.redirect('/');
+
+  // Get user info
+  const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: { Authorization: 'Bearer ' + tokens.access_token },
+  });
+  const guser = await userRes.json();
+  if (!guser.id || !guser.email) return c.redirect('/');
+
+  // Upsert user
+  const db = c.env.DB;
+  let user = await db.prepare('SELECT id FROM users WHERE google_id = ?').bind(guser.id).first();
+  if (!user) {
+    const r = await db.prepare('INSERT INTO users (google_id, email, name, avatar) VALUES (?, ?, ?, ?)').bind(guser.id, guser.email, guser.name || guser.email, guser.picture || '').run();
+    user = { id: r.meta.last_row_id };
+  } else {
+    await db.prepare('UPDATE users SET name = ?, avatar = ?, email = ? WHERE google_id = ?').bind(guser.name || guser.email, guser.picture || '', guser.email, guser.id).run();
+  }
+
+  // Create session (30 days)
+  const sid = genId();
+  await db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))").bind(sid, user.id).run();
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: '/',
+      'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+    },
+  });
+});
+
+app.get('/auth/logout', async (c) => {
+  const sid = getCookie(c, 'sid');
+  if (sid) await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run();
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: '/',
+      'Set-Cookie': 'sid=; Path=/; HttpOnly; Secure; Max-Age=0',
+    },
+  });
+});
+
+app.post('/auth/onetap', async (c) => {
+  const { credential } = await c.req.json();
+  if (!credential) return c.json({ error: 'Missing credential' }, 400);
+
+  // Decode JWT payload (Google One Tap sends a signed JWT)
+  const parts = credential.split('.');
+  if (parts.length !== 3) return c.json({ error: 'Invalid token' }, 400);
+  const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+
+  if (!payload.sub || !payload.email) return c.json({ error: 'Invalid payload' }, 400);
+
+  // Upsert user
+  const db = c.env.DB;
+  let user = await db.prepare('SELECT id FROM users WHERE google_id = ?').bind(payload.sub).first();
+  if (!user) {
+    const r = await db.prepare('INSERT INTO users (google_id, email, name, avatar) VALUES (?, ?, ?, ?)').bind(payload.sub, payload.email, payload.name || payload.email, payload.picture || '').run();
+    user = { id: r.meta.last_row_id };
+  } else {
+    await db.prepare('UPDATE users SET name = ?, avatar = ?, email = ? WHERE google_id = ?').bind(payload.name || payload.email, payload.picture || '', payload.email, payload.sub).run();
+  }
+
+  const sid = genId();
+  await db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))").bind(sid, user.id).run();
+
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+    },
+  });
+});
+
 // ── Static assets ──
 
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0a0a10"/><rect x="7" y="7" width="18" height="18" fill="none" stroke="#c4a44c" stroke-width="1.2"/><rect x="7" y="7" width="18" height="18" fill="none" stroke="#c4a44c" stroke-width="1.2" transform="rotate(45 16 16)"/><circle cx="16" cy="16" r="3" fill="none" stroke="#c4a44c" stroke-width="0.8"/></svg>`;
@@ -342,7 +486,7 @@ app.get('/api/media/*', async (c) => {
 
 app.notFound(async (c) => {
   const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
-  return c.html(renderPage('Not Found', render404(), cats), 404);
+  return c.html(rp(c,'Not Found', render404(), cats), 404);
 });
 
 export default app;
