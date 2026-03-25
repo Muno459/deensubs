@@ -481,24 +481,31 @@ export function renderScholars({ scholars }) {
 
 // ═══ SCHOLAR PAGE ═══
 export function renderScholar({ scholar, videos }) {
+  const hasHero = !!scholar.photo_hero;
   return `
 <div class="sch-profile">
-  <div class="sch-pro-hero">
-    <div class="sch-pro-portrait">
-      ${scholar.photo?`<img src="${cdn(scholar.photo)}" alt="${e(scholar.name)}">`:`<div class="sch-pro-initial">${e(scholar.name).split(' ').pop().charAt(0)}</div>`}
+  <div class="sp-hero${hasHero?' sp-hero-img':''}">
+    <div class="sp-hero-bg">
+      <svg viewBox="0 0 600 300" fill="none" class="sp-hero-geo">
+        <circle cx="300" cy="150" r="140" stroke="rgba(164,132,76,.05)" stroke-width=".7"/>
+        <rect x="210" y="60" width="180" height="180" stroke="rgba(164,132,76,.06)" stroke-width=".6" transform="rotate(45 300 150)"/>
+        <rect x="210" y="60" width="180" height="180" stroke="rgba(164,132,76,.06)" stroke-width=".6"/>
+        <circle cx="300" cy="150" r="50" stroke="rgba(164,132,76,.04)" stroke-width=".5"/>
+      </svg>
     </div>
-    <div class="sch-pro-info">
-      ${scholar.name_ar?`<div class="sch-pro-ar">${e(scholar.name_ar)}</div>`:''}
-      <h1>${e(scholar.name)}</h1>
-      ${scholar.title?`<div class="sch-pro-title">${e(scholar.title)}</div>`:''}
-      ${scholar.bio?`<p class="sch-pro-bio">${e(scholar.bio)}</p>`:''}
-      <div class="sch-pro-stats">
-        <div class="sch-pro-stat"><span>${videos.length}</span>Videos</div>
-        <div class="sch-pro-stat"><span>${videos.reduce((a,v)=>a+(v.views||0),0)}</span>Views</div>
-        <div class="sch-pro-stat"><span>${videos.filter(v=>v.srt_key).length}</span>Subtitled</div>
+    ${hasHero?`<div class="sp-hero-portrait"><img src="${cdn(scholar.photo_hero)}" alt="${e(scholar.name)}"></div>`:''}
+    <div class="sp-hero-content${hasHero?' sp-hero-content-offset':''}">
+      ${scholar.name_ar?`<div class="sp-hero-ar">${e(scholar.name_ar)}</div>`:''}
+      <h1 class="sp-hero-name">${e(scholar.name)}</h1>
+      ${scholar.title?`<div class="sp-hero-title">${e(scholar.title)}</div>`:''}
+      <div class="sp-hero-stats">
+        <div class="sp-stat"><span>${videos.length}</span>Videos</div>
+        <div class="sp-stat"><span>${videos.reduce((a,v)=>a+(v.views||0),0)}</span>Views</div>
+        <div class="sp-stat"><span>${videos.filter(v=>v.srt_key).length}</span>Subtitled</div>
       </div>
     </div>
   </div>
+  ${scholar.bio?`<div class="sp-bio"><p>${e(scholar.bio)}</p></div>`:''}
   <div class="sec">
     <div class="sec-hd"><h2>All Videos</h2></div>
     <div class="grid">${videos.map(v=>vcard(v,{anim:true})).join('')}</div>
@@ -1339,8 +1346,8 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .sch-card{background:var(--s1);border:1px solid var(--bd);border-radius:16px;overflow:hidden;transition:all .4s cubic-bezier(.23,1,.32,1);display:flex;flex-direction:column}
 .sch-card:hover{border-color:var(--bdh);transform:translateY(-6px);box-shadow:0 16px 48px rgba(0,0,0,.35),0 0 0 1px rgba(164,132,76,.06)}
 .sch-card-img{aspect-ratio:3/4;background:var(--s2);position:relative;overflow:hidden}
-.sch-card-img img{width:100%;height:100%;object-fit:cover;transition:transform .5s cubic-bezier(.23,1,.32,1),filter .5s}
-.sch-card:hover .sch-card-img img{transform:scale(1.04)}
+.sch-card-img img{width:100%;height:100%;object-fit:cover;filter:grayscale(1) brightness(.9) contrast(1.05);transition:transform .5s cubic-bezier(.23,1,.32,1),filter .5s}
+.sch-card:hover .sch-card-img img{transform:scale(1.04);filter:grayscale(0) brightness(1) contrast(1)}
 .sch-card-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:4rem;font-weight:700;color:rgba(164,132,76,.15);background:linear-gradient(135deg,var(--s2),var(--s3))}
 .sch-card-gradient{position:absolute;bottom:0;left:0;right:0;height:50%;background:linear-gradient(to top,var(--s1),transparent);pointer-events:none}
 .sch-card-body{padding:1.1rem 1.25rem 1.35rem;display:flex;flex-direction:column;gap:.2rem}
@@ -1350,21 +1357,24 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .sch-card-stats{display:flex;gap:1rem;margin-top:.4rem;font-size:.65rem;color:var(--t3)}
 .sch-card-stat span{color:var(--gold);font-weight:600}
 
-/* Scholar Profile */
+/* Scholar Profile Hero */
 .sch-profile{max-width:1000px;margin:0 auto}
-.sch-pro-hero{display:flex;gap:2rem;align-items:flex-start;padding:1.5rem 0 2rem;border-bottom:1px solid var(--bd);margin-bottom:1.5rem}
-.sch-pro-portrait{width:180px;flex-shrink:0;border-radius:14px;overflow:hidden;aspect-ratio:3/4;background:var(--s2)}
-.sch-pro-portrait img{width:100%;height:100%;object-fit:cover}
-.sch-pro-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:4rem;font-weight:700;color:rgba(164,132,76,.15);background:linear-gradient(135deg,var(--s2),var(--s3))}
-.sch-pro-info{flex:1;padding-top:.5rem}
-.sch-pro-ar{font-family:'Amiri',serif;font-size:1.2rem;color:var(--gold);direction:rtl;margin-bottom:.15rem;text-shadow:0 0 30px rgba(164,132,76,.1)}
-.sch-pro-info h1{font-family:'Cormorant Garamond',serif;font-size:clamp(1.4rem,2.5vw,1.8rem);font-weight:600;line-height:1.2;margin-bottom:.25rem}
-.sch-pro-title{font-size:.78rem;color:var(--gold);margin-bottom:.65rem;opacity:.65}
-.sch-pro-bio{font-size:.82rem;color:var(--t2);line-height:1.75;margin-bottom:1rem}
-.sch-pro-stats{display:flex;gap:2rem}
-.sch-pro-stat{text-align:center}
-.sch-pro-stat span{display:block;font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:600;color:var(--gold);line-height:1}
-.sch-pro-stat{font-size:.58rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em}
+.sp-hero{position:relative;border-radius:16px;overflow:hidden;background:var(--s1);border:1px solid var(--bd);padding:2.5rem;margin-bottom:1.5rem;min-height:240px;display:flex;align-items:flex-end}
+.sp-hero-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.sp-hero-geo{width:100%;max-width:500px;opacity:.6}
+.sp-hero-img{padding-right:280px}
+.sp-hero-portrait{position:absolute;right:0;bottom:0;width:300px;pointer-events:none}
+.sp-hero-portrait img{width:100%;display:block;filter:drop-shadow(-10px 0 40px rgba(0,0,0,.4))}
+.sp-hero-content{position:relative;z-index:1}
+.sp-hero-ar{font-family:'Amiri',serif;font-size:clamp(1.2rem,2.5vw,1.6rem);color:var(--gold);direction:rtl;margin-bottom:.2rem;text-shadow:0 0 40px rgba(164,132,76,.15)}
+.sp-hero-name{font-family:'Cormorant Garamond',serif;font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;line-height:1.15;margin-bottom:.25rem;background:linear-gradient(135deg,var(--tx),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sp-hero-title{font-size:.78rem;color:var(--gold);margin-bottom:1rem;opacity:.6}
+.sp-hero-stats{display:flex;gap:1.5rem}
+.sp-stat{text-align:center;padding:.5rem .75rem;background:rgba(0,0,0,.25);border-radius:8px;backdrop-filter:blur(8px)}
+.sp-stat span{display:block;font-family:'Cormorant Garamond',serif;font-size:1.4rem;font-weight:600;color:var(--gold);line-height:1}
+.sp-stat{font-size:.55rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em}
+.sp-bio{padding:1rem 1.25rem;background:var(--s1);border:1px solid var(--bd);border-radius:12px;margin-bottom:1.5rem}
+.sp-bio p{font-size:.82rem;color:var(--t2);line-height:1.75}
 
 /* Watch page scholar link */
 .wi-scholar{color:var(--gold);transition:opacity .2s;font-weight:500}
@@ -1374,7 +1384,7 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .hist-done{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;background:rgba(76,164,76,.85);display:flex;align-items:center;justify-content:center;color:#fff;z-index:2}
 
 @media(max-width:768px){.sch-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}}
-@media(max-width:640px){.sch-pro-hero{flex-direction:column;align-items:center;text-align:center}.sch-pro-portrait{width:140px}.sch-pro-stats{justify-content:center}}
+@media(max-width:768px){.sp-hero-img{padding-right:0}.sp-hero-portrait{position:relative;width:200px;margin:1rem auto 0}.sp-hero{flex-direction:column;align-items:center;text-align:center}.sp-hero-stats{justify-content:center}}
 
 /* ── Download Modal ── */
 .dl-modal{position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.65);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s}
