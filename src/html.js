@@ -1,5 +1,6 @@
 // ── Utilities ──
 function e(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function jsStr(s) { return s == null ? '' : String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function ago(d) { if (!d) return ''; const s = Math.floor((Date.now() - new Date(d+'Z').getTime()) / 1000); if (s<60) return 'just now'; if (s<3600) return Math.floor(s/60)+'m ago'; if (s<86400) return Math.floor(s/3600)+'h ago'; if (s<2592000) return Math.floor(s/86400)+'d ago'; return new Date(d).toLocaleDateString('en',{month:'short',day:'numeric',year:'numeric'}); }
 function fv(n) { return !n ? '0 views' : n>=1e6 ? (n/1e6).toFixed(1)+'M views' : n>=1e3 ? (n/1e3).toFixed(1)+'K views' : n+' views'; }
 function fl(n) { return !n ? '' : n>=1e3 ? (n/1e3).toFixed(1)+'K' : String(n); }
@@ -125,15 +126,15 @@ export function renderWatch({ video, comments, related, cues, base }) {
     duration:video.duration?'PT'+Math.floor(video.duration/60)+'M'+Math.floor(video.duration%60)+'S':'',
   });
   return `
-${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
+${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
 <script type="application/ld+json">${jsonLd}</script>
 <div class="wl">
   <div class="wm">
     <div class="vp" id="vp">
-      <video id="vid" crossorigin="anonymous" preload="metadata"${th?` poster="${e(th)}"`:''}>
+      <video id="vid" preload="metadata" playsinline${th?` poster="${e(th)}"`:''}>
         <source src="${cdn(video.video_key)}" type="video/mp4">
-        ${video.srt_key?`<track kind="captions" src="${cdn('vtt/'+video.srt_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="en" label="English" default>`:''}
-        ${video.srt_ar_key?`<track kind="captions" src="${cdn('vtt/'+video.srt_ar_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="ar" label="العربية">`:''}
+        ${video.srt_key?`<track kind="captions" src="/api/vtt/${e(video.srt_key)}" srclang="en" label="English" default>`:''}
+        ${video.srt_ar_key?`<track kind="captions" src="/api/vtt/${e(video.srt_ar_key)}" srclang="ar" label="العربية">`:''}
       </video>
       <div class="vp-spinner" id="vp-spin"></div>
       <button class="vp-mini-close" id="vp-mini-x">&times;</button>
@@ -176,7 +177,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
           <button class="wa" id="lk-btn" title="Like"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg><span id="lk-ct">${video.likes||0}</span></button>
           <button class="wa" id="bk-btn" title="Bookmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg><span>Save</span></button>
           <button class="wa" id="sh-btn" title="Share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span>Share</span></button>
-          ${video.srt_key?`<a class="wa" href="${cdn(video.srt_key)}" download title="Download subtitles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Subs</span></a>`:''}
+          <button class="wa" id="dl-btn" title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span></button>
         </div>
       </div>
       <div class="wi-mt">${video.source?`<span>${e(video.source)}</span>`:''}
@@ -209,7 +210,12 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
 <div class="scroll-prog" id="scroll-prog"></div>
 <button class="btt" id="btt" title="Back to top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M18 15l-6-6-6 6"/></svg></button>
 <div class="toast" id="toast"></div>
-<script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__SRT_AR__',video.srt_ar_key?e(video.srt_ar_key):'').replace('__TITLE__',e(video.title).replace(/'/g,"\\\'")).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',video.source?e(video.source):'')}</script>`;
+<div class="dl-modal" id="dl-modal"><div class="dl-inner"><div class="dl-header"><h3>Download</h3><button class="dl-close" id="dl-close">&times;</button></div><div class="dl-grid">
+<a href="${cdn(video.video_key)}" download class="dl-item"><div class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><div><div class="dl-label">Video</div><div class="dl-sub">MP4 · Original quality</div></div></a>
+${video.srt_key?`<a href="${cdn(video.srt_key)}" download class="dl-item"><div class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div><div><div class="dl-label">English Subtitles</div><div class="dl-sub">SRT format</div></div></a>`:''}
+${video.srt_ar_key?`<a href="${cdn(video.srt_ar_key)}" download class="dl-item"><div class="dl-icon dl-icon-ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div><div><div class="dl-label">Arabic Subtitles</div><div class="dl-sub">SRT · العربية</div></div></a>`:''}
+</div></div></div>
+<script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__SRT_AR__',video.srt_ar_key?e(video.srt_ar_key):'').replace('__TITLE__',jsStr(video.title)).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',jsStr(video.source||''))}</script>`;
 }
 
 function avatarColor(name) {
@@ -241,44 +247,104 @@ export function renderSearch({ query, videos }) {
 
 // ═══ SYMPOSIUM ═══
 export function renderSymposium({ videos }) {
+  const totalMin = Math.round(videos.reduce((a,v)=>a+v.duration,0)/60);
+  const subbed = videos.filter(v=>v.srt_key).length;
   return `
-<div class="symp">
-  <div class="symp-hero">
-    <div class="symp-geo">
-      <svg viewBox="0 0 400 200" fill="none" width="300"><rect x="120" y="20" width="160" height="160" stroke="rgba(196,164,76,.08)" stroke-width="1" transform="rotate(45 200 100)"/><rect x="120" y="20" width="160" height="160" stroke="rgba(196,164,76,.08)" stroke-width="1"/><circle cx="200" cy="100" r="40" stroke="rgba(196,164,76,.06)" stroke-width=".8"/><circle cx="200" cy="100" r="12" fill="rgba(196,164,76,.04)"/></svg>
+<div class="sy">
+  <!-- Hero -->
+  <div class="sy-hero">
+    <div class="sy-bg">
+      <svg viewBox="0 0 800 400" fill="none" class="sy-geo">
+        <circle cx="400" cy="200" r="180" stroke="rgba(164,132,76,.06)" stroke-width=".8"/>
+        <circle cx="400" cy="200" r="150" stroke="rgba(164,132,76,.04)" stroke-width=".5" stroke-dasharray="4 6"/>
+        <rect x="300" y="100" width="200" height="200" stroke="rgba(164,132,76,.07)" stroke-width=".7" transform="rotate(45 400 200)"/>
+        <rect x="300" y="100" width="200" height="200" stroke="rgba(164,132,76,.07)" stroke-width=".7"/>
+        <rect x="330" y="130" width="140" height="140" stroke="rgba(164,132,76,.05)" stroke-width=".6" transform="rotate(45 400 200)"/>
+        <rect x="330" y="130" width="140" height="140" stroke="rgba(164,132,76,.05)" stroke-width=".6"/>
+        <circle cx="400" cy="200" r="30" stroke="rgba(164,132,76,.06)" stroke-width=".6"/>
+        <circle cx="400" cy="200" r="10" fill="rgba(164,132,76,.04)"/>
+        <line x1="400" y1="20" x2="400" y2="380" stroke="rgba(164,132,76,.025)" stroke-width=".5"/>
+        <line x1="220" y1="200" x2="580" y2="200" stroke="rgba(164,132,76,.025)" stroke-width=".5"/>
+      </svg>
     </div>
-    <div class="symp-badge">Symposium</div>
-    <h1 class="symp-title">الفتوى في الحرمين الشريفين على ضوء المنهج النبوي</h1>
-    <h2 class="symp-title-en">Fatwa in the Two Holy Mosques<br>in Light of the Prophetic Methodology</h2>
-    <p class="symp-desc">A scholarly symposium featuring senior scholars discussing the principles, methodology, history, and guidelines of issuing fatwas in the sacred precincts of the Two Holy Mosques — from the Prophetic era through the Rightly Guided Caliphs to the present day.</p>
-    <div class="symp-stats">
-      <div class="symp-stat"><span>${videos.length}</span>Sessions</div>
-      <div class="symp-stat"><span>${Math.round(videos.reduce((a,v)=>a+v.duration,0)/60)}</span>Minutes</div>
-      <div class="symp-stat"><span>${videos.filter(v=>v.srt_key).length}</span>Subtitled</div>
+    <div class="sy-hero-content">
+      <div class="sy-badge"><span class="sy-badge-dot"></span>Scholarly Symposium</div>
+      <div class="sy-ornament">❖</div>
+      <h1 class="sy-title-ar">الفتوى في الحرمين الشريفين<br>على ضوء المنهج النبوي</h1>
+      <div class="sy-divider"><span></span><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><rect x="5" y="5" width="14" height="14" stroke="rgba(164,132,76,.4)" stroke-width="1" transform="rotate(45 12 12)"/></svg><span></span></div>
+      <h2 class="sy-title-en">Fatwa in the Two Holy Mosques<br>in Light of the Prophetic Methodology</h2>
+      <p class="sy-desc">A scholarly symposium bringing together senior scholars to examine the foundations, methodology, and application of religious rulings within the sacred precincts of Masjid al-Haram and Masjid an-Nabawi — tracing the tradition from the Prophetic era through the Rightly Guided Caliphs to the present day.</p>
     </div>
   </div>
-  <div class="symp-sessions">
-    <h3>Sessions</h3>
-    <div class="symp-list">
+
+  <!-- Stats -->
+  <div class="sy-stats">
+    <div class="sy-stat">
+      <div class="sy-stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+      <div class="sy-stat-val">${videos.length}</div>
+      <div class="sy-stat-lbl">Sessions</div>
+    </div>
+    <div class="sy-stat">
+      <div class="sy-stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+      <div class="sy-stat-val">${totalMin}</div>
+      <div class="sy-stat-lbl">Minutes</div>
+    </div>
+    <div class="sy-stat">
+      <div class="sy-stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+      <div class="sy-stat-val">${videos.length}</div>
+      <div class="sy-stat-lbl">Scholars</div>
+    </div>
+    <div class="sy-stat">
+      <div class="sy-stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg></div>
+      <div class="sy-stat-val">${subbed}/${videos.length}</div>
+      <div class="sy-stat-lbl">Subtitled</div>
+    </div>
+  </div>
+
+  <!-- Sessions -->
+  <div class="sy-sessions">
+    <div class="sy-sec-hd">
+      <div class="sy-sec-line"></div>
+      <h3>Sessions</h3>
+      <div class="sy-sec-line"></div>
+    </div>
+
+    <div class="sy-timeline">
       ${videos.map((v,i) => {
         const th = thu(v);
-        return `<a href="/watch/${e(v.slug)}" class="symp-card card-anim">
-          <div class="symp-num">${String(i+1).padStart(2,'0')}</div>
-          <div class="symp-card-th"${th?` style="background-image:url('${e(th)}');background-size:cover;background-position:center"`:''}>
-            ${!th?tsvg(v.title,'#a4844c',200,113):''}
+        return `<a href="/watch/${e(v.slug)}" class="sy-card card-anim">
+        <div class="sy-card-num"><span>${String(i+1).padStart(2,'0')}</span></div>
+        <div class="sy-card-main">
+          <div class="sy-card-th"${th?` style="background-image:url('${e(th)}');background-size:cover;background-position:center"`:''}>
+            ${!th?tsvg(v.title,'#a4844c',240,135):''}
+            <div class="sy-card-play"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M8 5v14l11-7z"/></svg></div>
             ${v.duration?`<span class="dur">${ft(v.duration)}</span>`:''}
           </div>
-          <div class="symp-card-info">
-            ${v.title_ar?`<div class="symp-card-ar">${e(v.title_ar)}</div>`:''}
+          <div class="sy-card-info">
+            ${v.title_ar?`<div class="sy-card-ar">${e(v.title_ar)}</div>`:''}
             <h4>${e(v.title)}</h4>
-            <span class="symp-card-src">${e(v.source||'')}</span>
-            <div class="symp-card-tags">
-              ${v.srt_key?'<span class="tag tag-s">CC</span>':'<span class="tag" style="--tc:var(--t3)">Pending</span>'}
+            <div class="sy-card-speaker"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${e(v.source||'')}</div>
+            <div class="sy-card-foot">
+              <div class="sy-card-tags">
+                ${v.srt_key?'<span class="sy-tag sy-tag-en">English</span>':''}
+                ${v.srt_ar_key?'<span class="sy-tag sy-tag-ar">العربية</span>':''}
+                ${!v.srt_key?'<span class="sy-tag sy-tag-pending">Pending</span>':''}
+              </div>
+              <span class="sy-card-dur">${ft(v.duration)}</span>
             </div>
           </div>
-        </a>`;
+        </div>
+      </a>`;
       }).join('')}
     </div>
+  </div>
+
+  <!-- Footer quote -->
+  <div class="sy-quote">
+    <div class="sy-quote-mark">"</div>
+    <p class="sy-quote-ar">يُرِيدُ ٱللَّهُ بِكُمُ ٱلْيُسْرَ وَلَا يُرِيدُ بِكُمُ ٱلْعُسْرَ</p>
+    <p class="sy-quote-en">"Allah intends ease for you and does not intend hardship for you."</p>
+    <p class="sy-quote-ref">— Surah Al-Baqarah, 2:185</p>
   </div>
 </div>`;
 }
@@ -597,7 +663,15 @@ cc.onclick=function(ev){ev.stopPropagation();langWrap.classList.toggle('vb-lang-
 document.addEventListener('click',function(){langWrap.classList.remove('vb-lang-open')});
 var spds=[.5,.75,1,1.25,1.5,2],si=2;
 spd.onclick=function(){si=(si+1)%spds.length;vid.playbackRate=spds[si];spd.textContent=spds[si]+'x'};
-fs.onclick=function(){document.fullscreenElement?document.exitFullscreen():vp.requestFullscreen().catch(function(){})};
+fs.onclick=function(){
+  if(document.fullscreenElement||document.webkitFullscreenElement){
+    (document.exitFullscreen||document.webkitExitFullscreen).call(document);
+  }else if(vid.webkitEnterFullscreen){
+    vid.webkitEnterFullscreen();
+  }else{
+    vp.requestFullscreen().catch(function(){});
+  }
+};
 
 document.onkeydown=function(ev){if(ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA')return;
   switch(ev.key){case' ':case'k':ev.preventDefault();toggle();break;case'ArrowLeft':case'j':vid.currentTime=Math.max(0,vid.currentTime-10);break;
@@ -703,6 +777,11 @@ function updBk(){var s=bks.indexOf(slug)!==-1;bkBtn.classList.toggle('wa-on',s);
 updBk();bkBtn.onclick=function(){var i=bks.indexOf(slug);if(i===-1)bks.push(slug);else bks.splice(i,1);localStorage.setItem('ds_bk',JSON.stringify(bks));updBk();toast(i===-1?'Bookmarked':'Removed')};
 
 // Share
+// Download modal
+document.getElementById('dl-btn').onclick=function(){document.getElementById('dl-modal').classList.add('dl-open')};
+document.getElementById('dl-close').onclick=function(){document.getElementById('dl-modal').classList.remove('dl-open')};
+document.getElementById('dl-modal').onclick=function(ev){if(ev.target===this)this.classList.remove('dl-open')};
+
 // Share with timestamp
 document.getElementById('sh-btn').onclick=function(){
   var url=location.origin+location.pathname;
@@ -733,7 +812,7 @@ const CSS = `
 html{scroll-behavior:smooth}body{font-family:'Outfit',system-ui,sans-serif;background:var(--bg);color:var(--tx);line-height:1.6;-webkit-font-smoothing:antialiased}
 body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{color:inherit;text-decoration:none}
 .wrap{animation:pageIn .4s ease both}
-@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pageIn{from{opacity:0}to{opacity:1}}
 
 .grain{position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.015;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 
@@ -1094,33 +1173,99 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 .kb-close{width:100%;padding:.45rem;background:var(--s3);border:1px solid var(--bd);border-radius:8px;color:var(--t2);font:inherit;font-size:.78rem;cursor:pointer;transition:all .2s}
 .kb-close:hover{border-color:var(--bdh);color:var(--tx)}
 
+/* ── Download Modal ── */
+.dl-modal{position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.65);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s}
+.dl-modal.dl-open{opacity:1;pointer-events:auto}
+.dl-inner{background:var(--s1);border:1px solid var(--bd);border-radius:16px;padding:0;max-width:420px;width:90%;overflow:hidden;transform:translateY(12px) scale(.97);transition:transform .3s cubic-bezier(.23,1,.32,1)}
+.dl-modal.dl-open .dl-inner{transform:translateY(0) scale(1)}
+.dl-header{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:1px solid var(--bd)}
+.dl-header h3{font-family:'Cormorant Garamond',serif;font-size:1.05rem;font-weight:600}
+.dl-close{background:none;border:none;color:var(--t2);font-size:1.3rem;cursor:pointer;padding:0 .25rem;transition:color .2s;line-height:1}
+.dl-close:hover{color:var(--tx)}
+.dl-grid{padding:1rem 1.25rem;display:flex;flex-direction:column;gap:.6rem}
+.dl-item{display:flex;align-items:center;gap:1rem;padding:.85rem 1rem;background:var(--s2);border:1px solid var(--bd);border-radius:12px;transition:all .25s;text-decoration:none;color:var(--tx)}
+.dl-item:hover{border-color:var(--bdh);background:var(--s3);transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.dl-icon{width:44px;height:44px;border-radius:10px;background:var(--gd);display:flex;align-items:center;justify-content:center;color:var(--gold);flex-shrink:0}
+.dl-icon-ar{background:rgba(76,138,196,.08);color:#4c8ac4}
+.dl-label{font-size:.85rem;font-weight:500}
+.dl-sub{font-size:.68rem;color:var(--t3);margin-top:.1rem}
+
 /* ── Symposium ── */
-.symp{max-width:900px;margin:0 auto}
-.symp-hero{text-align:center;padding:2.5rem 1rem 2rem;position:relative;overflow:hidden}
-.symp-geo{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:.5;pointer-events:none}
-.symp-badge{display:inline-block;padding:.2rem .7rem;background:rgba(164,132,76,.08);border:1px solid rgba(164,132,76,.12);border-radius:100px;font-size:.65rem;font-weight:600;color:#a4844c;letter-spacing:.08em;text-transform:uppercase;margin-bottom:1rem;position:relative}
-.symp-title{font-family:'Amiri',serif;font-size:clamp(1.4rem,3vw,2rem);color:var(--gold);direction:rtl;margin-bottom:.5rem;position:relative}
-.symp-title-en{font-family:'Cormorant Garamond',serif;font-size:clamp(1.1rem,2.5vw,1.6rem);font-weight:400;line-height:1.3;margin-bottom:1rem;position:relative;background:linear-gradient(135deg,var(--tx),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.symp-desc{color:var(--t2);font-size:.82rem;line-height:1.7;max-width:600px;margin:0 auto 1.5rem;position:relative}
-.symp-stats{display:flex;justify-content:center;gap:2.5rem;position:relative}
-.symp-stat{text-align:center}
-.symp-stat span{display:block;font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:300;color:var(--gold)}
-.symp-stat{font-size:.6rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em}
-.symp-sessions{margin-top:2rem}
-.symp-sessions h3{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid var(--bd)}
-.symp-list{display:flex;flex-direction:column;gap:.6rem}
-.symp-card{display:flex;align-items:center;gap:1rem;padding:.75rem;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);transition:all .3s ease}
-.symp-card:hover{border-color:var(--bdh);transform:translateX(4px);box-shadow:0 6px 24px rgba(0,0,0,.25)}
-.symp-num{font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:300;color:var(--gold);opacity:.3;min-width:32px;text-align:center;flex-shrink:0}
-.symp-card:hover .symp-num{opacity:.6}
-.symp-card-th{width:160px;aspect-ratio:16/9;background:var(--s2);border-radius:8px;flex-shrink:0;overflow:hidden;position:relative}
-.symp-card-th .tsvg{position:absolute;inset:0;width:100%;height:100%}
-.symp-card-info{flex:1;min-width:0}
-.symp-card-ar{font-family:'Amiri',serif;font-size:.82rem;color:var(--gold);direction:rtl;margin-bottom:.15rem;opacity:.7}
-.symp-card-info h4{font-size:.85rem;font-weight:500;line-height:1.3;margin-bottom:.2rem}
-.symp-card-src{font-size:.68rem;color:var(--t3);display:block;margin-bottom:.3rem}
-.symp-card-tags{display:flex;gap:.25rem}
-@media(max-width:640px){.symp-card{flex-wrap:wrap}.symp-num{display:none}.symp-card-th{width:100%}.symp-stats{gap:1.5rem}}
+.sy{max-width:860px;margin:0 auto}
+
+/* Hero */
+.sy-hero{text-align:center;padding:3.5rem 1.5rem 2.5rem;position:relative;overflow:hidden}
+.sy-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.sy-geo{width:100%;max-width:700px;opacity:.7}
+.sy-hero-content{position:relative}
+.sy-badge{display:inline-flex;align-items:center;gap:.5rem;padding:.3rem .9rem;background:rgba(164,132,76,.06);border:1px solid rgba(164,132,76,.1);border-radius:100px;font-size:.62rem;font-weight:600;color:#a4844c;letter-spacing:.1em;text-transform:uppercase;margin-bottom:1.25rem}
+.sy-badge-dot{width:6px;height:6px;border-radius:50%;background:#a4844c;animation:dotPulse 2s ease-in-out infinite}
+@keyframes dotPulse{0%,100%{opacity:.4}50%{opacity:1}}
+.sy-ornament{font-size:1.2rem;color:rgba(164,132,76,.25);margin-bottom:.75rem;letter-spacing:.5em}
+.sy-title-ar{font-family:'Amiri',serif;font-size:clamp(1.5rem,3.5vw,2.2rem);color:var(--gold);direction:rtl;line-height:1.5;margin-bottom:.75rem;text-shadow:0 0 60px rgba(164,132,76,.12)}
+.sy-divider{display:flex;align-items:center;justify-content:center;gap:.75rem;margin-bottom:.75rem}
+.sy-divider span{width:60px;height:1px;background:linear-gradient(to right,transparent,rgba(164,132,76,.2),transparent)}
+.sy-title-en{font-family:'Cormorant Garamond',serif;font-size:clamp(1rem,2.2vw,1.45rem);font-weight:400;line-height:1.4;margin-bottom:1.25rem;color:var(--t2)}
+.sy-desc{color:var(--t3);font-size:.8rem;line-height:1.75;max-width:580px;margin:0 auto}
+
+/* Stats */
+.sy-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin:2rem 0;padding:1.25rem;background:var(--s1);border:1px solid var(--bd);border-radius:14px}
+.sy-stat{text-align:center;padding:.75rem .5rem}
+.sy-stat-icon{color:rgba(164,132,76,.4);margin-bottom:.4rem;display:flex;justify-content:center}
+.sy-stat-val{font-family:'Cormorant Garamond',serif;font-size:1.6rem;font-weight:600;color:var(--gold);line-height:1}
+.sy-stat-lbl{font-size:.6rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-top:.2rem}
+
+/* Section header */
+.sy-sec-hd{display:flex;align-items:center;gap:1rem;margin:2.5rem 0 1.5rem}
+.sy-sec-hd h3{font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;white-space:nowrap}
+.sy-sec-line{flex:1;height:1px;background:linear-gradient(to right,transparent,var(--bd),transparent)}
+
+/* Timeline */
+.sy-timeline{display:flex;flex-direction:column;gap:.75rem;position:relative;padding-left:2rem}
+.sy-timeline::before{content:'';position:absolute;left:.85rem;top:1rem;bottom:1rem;width:1px;background:linear-gradient(to bottom,transparent,rgba(164,132,76,.12),rgba(164,132,76,.12),transparent)}
+
+/* Card */
+.sy-card{display:flex;gap:1rem;position:relative;text-decoration:none;color:var(--tx)}
+.sy-card-num{position:absolute;left:-2rem;top:1rem;width:1.7rem;display:flex;flex-direction:column;align-items:center;gap:.25rem}
+.sy-card-num span{font-family:'Cormorant Garamond',serif;font-size:.75rem;font-weight:600;color:var(--gold);opacity:.4;transition:opacity .3s}
+.sy-card-num::after{content:'';width:7px;height:7px;border-radius:50%;background:var(--s2);border:1.5px solid rgba(164,132,76,.25);transition:all .3s}
+.sy-card:hover .sy-card-num span{opacity:1}
+.sy-card:hover .sy-card-num::after{background:var(--gold);border-color:var(--gold);box-shadow:0 0 8px rgba(164,132,76,.3)}
+
+.sy-card-main{flex:1;display:flex;gap:1rem;padding:1rem;background:var(--s1);border:1px solid var(--bd);border-radius:12px;transition:all .35s cubic-bezier(.23,1,.32,1)}
+.sy-card:hover .sy-card-main{border-color:var(--bdh);box-shadow:0 8px 32px rgba(0,0,0,.25);transform:translateY(-2px)}
+
+.sy-card-th{width:200px;aspect-ratio:16/9;background:var(--s2);border-radius:8px;flex-shrink:0;overflow:hidden;position:relative}
+.sy-card-th .tsvg{position:absolute;inset:0;width:100%;height:100%}
+.sy-card-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.2);opacity:0;transition:opacity .25s}
+.sy-card-play svg{filter:drop-shadow(0 2px 8px rgba(0,0,0,.3))}
+.sy-card:hover .sy-card-play{opacity:1}
+
+.sy-card-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+.sy-card-ar{font-family:'Amiri',serif;font-size:.82rem;color:var(--gold);direction:rtl;margin-bottom:.2rem;opacity:.6}
+.sy-card-info h4{font-size:.88rem;font-weight:500;line-height:1.35;margin-bottom:.35rem}
+.sy-card-speaker{font-size:.7rem;color:var(--t3);display:flex;align-items:center;gap:.35rem;margin-bottom:.5rem}
+.sy-card-foot{display:flex;align-items:center;justify-content:space-between}
+.sy-card-tags{display:flex;gap:.25rem}
+.sy-tag{padding:.15rem .45rem;border-radius:100px;font-size:.55rem;font-weight:500}
+.sy-tag-en{background:rgba(76,164,76,.08);color:#4ca44c}
+.sy-tag-ar{background:rgba(76,138,196,.08);color:#4c8ac4}
+.sy-tag-pending{background:var(--s3);color:var(--t3)}
+.sy-card-dur{font-size:.68rem;color:var(--t3)}
+
+/* Quote */
+.sy-quote{text-align:center;padding:2.5rem 1.5rem;margin-top:2.5rem;background:var(--s1);border:1px solid var(--bd);border-radius:14px;position:relative}
+.sy-quote-mark{font-family:'Amiri',serif;font-size:3rem;color:rgba(164,132,76,.12);line-height:1;margin-bottom:-.5rem}
+.sy-quote-ar{font-family:'Amiri',serif;font-size:1.15rem;color:var(--gold);direction:rtl;margin-bottom:.5rem}
+.sy-quote-en{color:var(--t2);font-size:.85rem;font-style:italic;margin-bottom:.35rem;font-family:'Cormorant Garamond',serif;font-size:1rem}
+.sy-quote-ref{font-size:.68rem;color:var(--t3)}
+
+@media(max-width:768px){
+  .sy-stats{grid-template-columns:repeat(2,1fr)}
+  .sy-card-main{flex-direction:column}.sy-card-th{width:100%}
+  .sy-timeline{padding-left:0}.sy-timeline::before{display:none}.sy-card-num{display:none}
+}
+@media(max-width:480px){.sy-hero{padding:2.5rem 1rem 1.5rem}}
 
 /* ── View Transitions ── */
 @view-transition{navigation:auto}
