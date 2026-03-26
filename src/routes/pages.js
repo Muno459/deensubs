@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { VIDEO_COLS, VIDEO_JOIN, VIDEO_WITH_SCHOLAR, VIDEO_SCHOLAR_JOIN, readDB, writeDB } from '../lib/db.js';
+import { getCategories, getScholars } from '../lib/kv-cache.js';
 import { parseSRT } from '../lib/srt.js';
 import { renderPage } from '../templates/layout.js';
 import { renderHome } from '../templates/home.js';
@@ -27,7 +28,7 @@ function rp(c, title, body, cats, activeCat, meta) {
 pages.get('/', async (c) => {
   const db = readDB(c.env);
   const [cats, all, popular, scholars] = await Promise.all([
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    getCategories(c.env).then(r=>({results:r})),
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.created_at DESC LIMIT 30`).all(),
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.views DESC LIMIT 8`).all(),
     db.prepare('SELECT * FROM scholars ORDER BY name').all(),
@@ -53,13 +54,13 @@ pages.get('/watch/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = readDB(c.env);
   const video = await db.prepare(`SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} WHERE v.slug = ?`).bind(slug).first();
-  if (!video) return c.html(rp(c,'Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
+  if (!video) return c.html(rp(c,'Not Found', render404(), await getCategories(c.env)), 404);
 
   const [, comments, related, cats, cues] = await Promise.all([
     writeDB(c.env).prepare('UPDATE videos SET views = views + 1 WHERE slug = ?').bind(slug).run(),
     db.prepare('SELECT * FROM comments WHERE video_id = ? ORDER BY created_at DESC LIMIT 200').bind(video.id).all(),
     db.prepare(`SELECT ${VC} ${VJ} WHERE v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 12`).bind(video.id, video.category_id).all(),
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    getCategories(c.env).then(r=>({results:r})),
     parseSRT(c.env, video.srt_key),
   ]);
   video._user = c.get('user');
@@ -80,7 +81,7 @@ pages.get('/category/:slug', async (c) => {
   const [category, videos, cats] = await Promise.all([
     db.prepare('SELECT * FROM categories WHERE slug = ?').bind(slug).first(),
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = ? ORDER BY ${orderBy}`).bind(slug).all(),
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    getCategories(c.env).then(r=>({results:r})),
   ]);
   if (!category) return c.html(rp(c,'Not Found', render404(), cats.results), 404);
   return c.html(rp(c,category.name, renderCategory({ category, videos: videos.results, sort }), cats.results, slug));
@@ -89,7 +90,7 @@ pages.get('/category/:slug', async (c) => {
 pages.get('/search', async (c) => {
   const q = (c.req.query('q') || '').trim();
   const db = readDB(c.env);
-  const cats = (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const cats = await getCategories(c.env);
   let videos = [];
   if (q) {
     try {
@@ -107,7 +108,7 @@ pages.get('/symposium', async (c) => {
   const db = readDB(c.env);
   const [videos, cats] = await Promise.all([
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = 'symposium' ORDER BY v.id`).all(),
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    getCategories(c.env).then(r=>({results:r})),
   ]);
   return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos: videos.results }), cats.results, 'symposium'));
 });
@@ -116,7 +117,7 @@ pages.get('/scholars', async (c) => {
   const db = readDB(c.env);
   const [scholars, cats] = await Promise.all([
     db.prepare('SELECT s.*, (SELECT COUNT(*) FROM videos v WHERE v.scholar_id = s.id) as video_count, (SELECT SUM(views) FROM videos v WHERE v.scholar_id = s.id) as total_views FROM scholars s ORDER BY s.name').all(),
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    getCategories(c.env).then(r=>({results:r})),
   ]);
   return c.html(rp(c,'Scholars', renderScholars({ scholars: scholars.results }), cats.results, 'scholars'));
 });
@@ -125,27 +126,27 @@ pages.get('/scholar/:slug', async (c) => {
   const slug = c.req.param('slug');
   const db = readDB(c.env);
   const scholar = await db.prepare('SELECT * FROM scholars WHERE slug = ?').bind(slug).first();
-  if (!scholar) return c.html(rp(c,'Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
+  if (!scholar) return c.html(rp(c,'Not Found', render404(), await getCategories(c.env)), 404);
   const [videos, cats] = await Promise.all([
     db.prepare(`SELECT ${VC} ${VJ} WHERE v.scholar_id = ? ORDER BY v.created_at DESC`).bind(scholar.id).all(),
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    getCategories(c.env).then(r=>({results:r})),
   ]);
   return c.html(rp(c,scholar.name, renderScholar({ scholar, videos: videos.results }), cats.results, 'scholars'));
 });
 
 pages.get('/history', async (c) => {
-  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const cats = await getCategories(c.env);
   return c.html(rp(c,'Watch History', renderHistory(), cats));
 });
 
 pages.get('/about', async (c) => {
-  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const cats = await getCategories(c.env);
   const stats = await readDB(c.env).prepare('SELECT COUNT(*) as count, SUM(views) as views FROM videos').first();
   return c.html(rp(c,'About', renderAbout({ stats }), cats));
 });
 
 pages.get('/bookmarks', async (c) => {
-  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const cats = await getCategories(c.env);
   return c.html(rp(c,'Bookmarks', renderBookmarks(), cats));
 });
 
@@ -154,7 +155,7 @@ pages.get('/profile', async (c) => {
   if (!user) return c.redirect('/auth/google');
   const db = readDB(c.env);
   const [cats, comments, stats] = await Promise.all([
-    db.prepare('SELECT * FROM categories ORDER BY name').all(),
+    getCategories(c.env).then(r=>({results:r})),
     db.prepare('SELECT c.*, v.title as video_title, v.slug as video_slug FROM comments c LEFT JOIN videos v ON c.video_id = v.id WHERE c.user_id = ? ORDER BY c.created_at DESC LIMIT 20').bind(user.id).all(),
     db.prepare('SELECT COUNT(*) as comment_count FROM comments WHERE user_id = ?').bind(user.id).first(),
   ]);

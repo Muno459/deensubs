@@ -11,6 +11,10 @@ fallthrough = false
 binding = "MEDIA_BUCKET"
 bucket_name = "deensubs-media-weur"
 
+[[kv_namespaces]]
+binding = "CACHE"
+id = "c025d769b8584d02aedcdaca9ba9edc0"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "deensubs-db-weur"
