@@ -20,7 +20,8 @@ ${meta.image ? `<meta property="og:image" content="${e(meta.image)}">
 <meta name="theme-color" content="#c4a44c">
 <link rel="preconnect" href="https://cdn.deensubs.com"><link rel="dns-prefetch" href="https://cdn.deensubs.com">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Amiri:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="preload" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Amiri:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Amiri:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet"></noscript>
 <link rel="dns-prefetch" href="https://fonts.gstatic.com">
 <style>${CSS}</style></head><body>
 <a href="#main-content" class="skip-link">Skip to content</a>

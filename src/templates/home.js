@@ -11,8 +11,8 @@ export function renderHome({ featured, videos, popular, categories, byCategory, 
 ${featured ? `
 <section class="hero">
   <a href="/watch/${e(featured.slug)}" class="hero-card">
-    <div class="hero-th"${thu(featured) ? ` style="background-image:url('${e(thu(featured))}')"` : ''}>
-      ${!thu(featured) ? tsvg(featured.title, featured.category_color || '#c4a44c', 900, 506) : ''}
+    <div class="hero-th">
+      ${thu(featured) ? `<img src="${e(thu(featured))}" alt="" class="hero-img" fetchpriority="high">` : tsvg(featured.title, featured.category_color || '#c4a44c', 900, 506)}
       <div class="hero-ov">
         <div class="hero-pb"></div>
         <div class="hero-meta-ov">
@@ -45,7 +45,7 @@ ${scholars && scholars.length ? `
   </div>
 </section>` : ''}
 
-${popular.length > 1 ? section('Popular', '', popular, { scroll: true }) : ''}
+${popular.length > 1 ? section('Popular', '', popular, { scroll: true, eager: true }) : ''}
 
 ${catsWithContent.map(c => {
   const cv = byCategory[c.slug];
