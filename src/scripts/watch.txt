@@ -70,13 +70,48 @@ function loadSubs(lang){
   }).catch(function(){});
 }
 
+var isFullscreen=false;
+
 function activateNativeTrack(lang){
-  // Toggle the HTML <track> elements' text tracks
   var tracks=vid.textTracks;
   for(var i=0;i<tracks.length;i++){
-    tracks[i].mode=(tracks[i].language===lang)?'showing':'hidden';
+    if(tracks[i].language===lang){
+      // In fullscreen/PiP: show native cues. Inline: hide native (custom overlay handles it)
+      tracks[i].mode=isFullscreen?'showing':'hidden';
+    }else{
+      tracks[i].mode='hidden';
+    }
   }
 }
+
+// Fullscreen/PiP detection: swap between custom overlay and native cues
+function onFullscreenChange(){
+  isFullscreen=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  subEl.style.display=isFullscreen?'none':'';
+  if(ccOn)activateNativeTrack(curLang);
+}
+document.addEventListener('fullscreenchange',onFullscreenChange);
+document.addEventListener('webkitfullscreenchange',onFullscreenChange);
+
+// iOS native fullscreen (webkitbeginfullscreen fires when iOS takes over)
+vid.addEventListener('webkitbeginfullscreen',function(){
+  isFullscreen=true;subEl.style.display='none';
+  if(ccOn)activateNativeTrack(curLang);
+});
+vid.addEventListener('webkitendfullscreen',function(){
+  isFullscreen=false;subEl.style.display='';
+  if(ccOn)activateNativeTrack(curLang);
+});
+
+// PiP
+vid.addEventListener('enterpictureinpicture',function(){
+  isFullscreen=true;subEl.style.display='none';
+  if(ccOn)activateNativeTrack(curLang);
+});
+vid.addEventListener('leavepictureinpicture',function(){
+  isFullscreen=false;subEl.style.display='';
+  if(ccOn)activateNativeTrack(curLang);
+});
 
 if(srt)loadSubs('en');
 // Language menu clicks
