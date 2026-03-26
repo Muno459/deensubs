@@ -13,5 +13,5 @@ bucket_name = "deensubs-media-weur"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "deensubs-db"
-database_id = "3d1d4521-a145-4450-b196-60a37674dd03"
+database_name = "deensubs-db-weur"
+database_id = "e90d776f-5d7a-4b8e-8e3a-3c0b5e9dd0aa"
