@@ -53,4 +53,36 @@ app.notFound(async (c) => {
   return c.html(renderPage('Not Found', render404(), cats, null, null, c.get('user')), 404);
 });
 
-export default app;
+// Scheduled handler — runs daily to optimize images + clean sessions
+export default {
+  fetch: app.fetch,
+  async scheduled(event, env, ctx) {
+    // 1. Clean expired sessions
+    await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
+
+    // 2. Auto-convert JPG thumbnails to WebP
+    const thumbs = await env.MEDIA_BUCKET.list({ prefix: 'thumbs/' });
+    const jpgs = thumbs.objects.filter(o => /\.(jpg|jpeg|png)$/i.test(o.key));
+
+    for (const jpg of jpgs) {
+      const webpKey = jpg.key.replace(/\.(jpg|jpeg|png)$/i, '.webp');
+      // Check if WebP already exists
+      const existing = await env.MEDIA_BUCKET.head(webpKey);
+      if (existing) continue;
+
+      // Fetch original via Cloudflare Image Resizing (converts to WebP)
+      try {
+        const cdnUrl = 'https://cdn.deensubs.com/' + jpg.key;
+        const resp = await fetch(cdnUrl, {
+          cf: { image: { format: 'webp', quality: 80 } }
+        });
+        if (resp.ok) {
+          const body = await resp.arrayBuffer();
+          await env.MEDIA_BUCKET.put(webpKey, body, {
+            httpMetadata: { contentType: 'image/webp' }
+          });
+        }
+      } catch {}
+    }
+  }
+};
