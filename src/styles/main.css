@@ -28,6 +28,21 @@ body.no-scroll{overflow:hidden}::selection{background:rgba(196,164,76,.25)}a{col
 .nav-sf input:focus+.nav-kbd{display:none}
 .nav-kbd{position:absolute;right:.5rem;background:var(--s3);border:1px solid var(--bd);border-radius:4px;padding:0 .3rem;font:inherit;font-size:.6rem;color:var(--t3);pointer-events:none;line-height:1.6}
 .nav-right{display:flex;align-items:center;gap:.75rem;flex-shrink:0}
+/* ── Search Autocomplete ── */
+.nav-sf{position:relative}
+.search-dd{position:absolute;top:100%;left:0;right:0;margin-top:.35rem;background:var(--s1);border:1px solid var(--bd);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;display:none;z-index:200;max-height:400px;overflow-y:auto}
+.search-dd-open{display:block}
+.search-dd-label{font-size:.6rem;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;padding:.5rem .75rem .25rem}
+.search-dd-item{display:flex;align-items:center;gap:.6rem;padding:.45rem .75rem;transition:background .15s;cursor:pointer}
+.search-dd-item:hover{background:var(--s2)}
+.search-dd-thumb{width:48px;height:27px;border-radius:4px;object-fit:cover;flex-shrink:0}
+.search-dd-av{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.search-dd-av-letter{width:28px;height:28px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:.7rem;font-weight:700;flex-shrink:0}
+.search-dd-info{display:flex;flex-direction:column;min-width:0}
+.search-dd-title{font-size:.78rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-dd-src{font-size:.62rem;color:var(--t3)}
+.search-dd-scholar span{font-size:.82rem;font-weight:500}
+
 .nav-link{font-size:.75rem;font-weight:500;color:var(--t2);transition:color .2s;white-space:nowrap}
 .nav-link:hover{color:var(--gold)}
 .nav-link-on{color:var(--gold)}
@@ -245,7 +260,8 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 /* ── Watch Scholar Card ── */
 .wi-sch-card{display:flex;align-items:center;gap:.65rem;padding:.6rem .85rem;background:var(--s1);border:1px solid var(--bd);border-radius:10px;transition:all .25s;margin-bottom:.65rem}
 .wi-sch-card:hover{border-color:var(--bdh);background:var(--s2)}
-.wi-sch-av{width:36px;height:36px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:.9rem;font-weight:700;flex-shrink:0}
+.wi-sch-av{width:36px;height:36px;border-radius:50%;background:rgba(164,132,76,.1);color:var(--gold);display:flex;align-items:center;justify-content:center;font-family:'Amiri',serif;font-size:.9rem;font-weight:700;flex-shrink:0;overflow:hidden}
+.wi-sch-av img{width:100%;height:100%;object-fit:cover}
 .wi-sch-info{display:flex;flex-direction:column}
 .wi-sch-name{font-size:.8rem;font-weight:500}
 .wi-sch-title{font-size:.65rem;color:var(--t3)}

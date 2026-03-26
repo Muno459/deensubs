@@ -549,50 +549,24 @@ ${!isEdit && tab === 'dashboard' ? `
   fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
     .then(function(r){return r.json()})
     .then(function(geo){
-      L.geoJSON(geo,{
+      var gl=L.geoJSON(geo,{
         style:function(feature){
-          var iso=feature.properties.ISO_A2;
+          var iso=feature.properties['ISO3166-1-Alpha-2'];
           var hits=hitData[iso]||0;
-          if(!hits)return{fillColor:'transparent',color:'#1a1a2e',weight:.5,fillOpacity:0};
+          if(!hits)return{fillColor:'#0e0e1a',color:'#1a1a2e',weight:.3,fillOpacity:.4};
           var intensity=Math.min(hits/maxH,1);
           var r=Math.round(196*(0.3+intensity*0.7));
           var g=Math.round(164*(0.3+intensity*0.7));
           var b=Math.round(76*(0.3+intensity*0.7));
-          return{
-            fillColor:'rgb('+r+','+g+','+b+')',
-            color:'#c4a44c',
-            weight:intensity>0.3?1:.5,
-            fillOpacity:0.15+intensity*0.55
-          };
+          return{fillColor:'rgb('+r+','+g+','+b+')',color:'#c4a44c',weight:intensity>0.3?1.5:.5,fillOpacity:0.2+intensity*0.6};
         },
         onEachFeature:function(feature,layer){
-          var iso=feature.properties.ISO_A2;
+          var iso=feature.properties['ISO3166-1-Alpha-2'];
           var hits=hitData[iso];
           if(hits){
-            layer.bindTooltip('<strong>'+feature.properties.ADMIN+'</strong><br>'+hits+' hits',{className:'map-tip',sticky:true});
-            layer.on('mouseover',function(){this.setStyle({weight:2,fillOpacity:0.8})});
-            layer.on('mouseout',function(e){geo_layer.resetStyle(e.target)});
-          }
-        }
-      });
-      var geo_layer=L.geoJSON(geo,{
-        style:function(feature){
-          var iso=feature.properties.ISO_A2;
-          var hits=hitData[iso]||0;
-          if(!hits)return{fillColor:'transparent',color:'#1a1a2e',weight:.5,fillOpacity:0};
-          var intensity=Math.min(hits/maxH,1);
-          var r=Math.round(196*(0.3+intensity*0.7));
-          var g=Math.round(164*(0.3+intensity*0.7));
-          var b=Math.round(76*(0.3+intensity*0.7));
-          return{fillColor:'rgb('+r+','+g+','+b+')',color:'#c4a44c',weight:intensity>0.3?1:.5,fillOpacity:0.15+intensity*0.55};
-        },
-        onEachFeature:function(feature,layer){
-          var iso=feature.properties.ISO_A2;
-          var hits=hitData[iso];
-          if(hits){
-            layer.bindTooltip('<strong>'+feature.properties.ADMIN+'</strong><br>'+hits+' hits',{className:'map-tip',sticky:true});
-            layer.on('mouseover',function(){this.setStyle({weight:2,fillOpacity:0.8})});
-            layer.on('mouseout',function(e){geo_layer.resetStyle(e.target)});
+            layer.bindTooltip('<strong>'+feature.properties.name+'</strong><br>'+hits+' hits',{className:'map-tip',sticky:true});
+            layer.on('mouseover',function(){this.setStyle({weight:2.5,fillOpacity:0.85})});
+            layer.on('mouseout',function(e){gl.resetStyle(e.target)});
           }
         }
       }).addTo(map);

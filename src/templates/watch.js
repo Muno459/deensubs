@@ -78,7 +78,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
         <span class="tag tag-s">Arabic &rarr; English</span>
       </div>
       ${video.scholar_slug?`<a href="/scholar/${e(video.scholar_slug)}" class="wi-sch-card">
-        <div class="wi-sch-av">${e((video.source||video.scholar_name||'').split(' ').pop().charAt(0))}</div>
+        <div class="wi-sch-av">${video.scholar_photo?`<img src="${cdn(video.scholar_photo)}" alt="">`:e((video.source||video.scholar_name||'').split(' ').pop().charAt(0))}</div>
         <div class="wi-sch-info"><span class="wi-sch-name">${e(video.source||video.scholar_name)}</span>${video.scholar_title?`<span class="wi-sch-title">${e(video.scholar_title)}</span>`:''}</div>
       </a>`:video.source?`<div class="wi-source">${e(video.source)}</div>`:''}
       ${video.description?`<div class="wi-desc">${e(video.description)}</div>`:''}

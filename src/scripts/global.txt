@@ -1,6 +1,56 @@
 document.getElementById('hb').onclick=function(){document.getElementById('mob').classList.toggle('open');document.body.classList.toggle('no-scroll')};
 document.getElementById('mob').onclick=function(e){if(e.target===this){this.classList.remove('open');document.body.classList.remove('no-scroll')}};
 document.addEventListener('keydown',function(e){if(e.key==='/'&&e.target.tagName!=='INPUT'&&e.target.tagName!=='TEXTAREA'){e.preventDefault();var si=document.querySelector('.nav-sf input');if(si)si.focus()}});
+
+// Search autocomplete
+(function(){
+  var sf=document.querySelector('.nav-sf');
+  if(!sf)return;
+  var inp=sf.querySelector('input');
+  if(!inp)return;
+
+  var dd=document.createElement('div');
+  dd.className='search-dd';
+  sf.appendChild(dd);
+
+  var timer=null;
+  inp.addEventListener('input',function(){
+    clearTimeout(timer);
+    var q=inp.value.trim();
+    if(q.length<2){dd.innerHTML='';dd.classList.remove('search-dd-open');return}
+    timer=setTimeout(function(){
+      fetch('/api/search/suggest?q='+encodeURIComponent(q))
+        .then(function(r){return r.json()})
+        .then(function(d){
+          if(!d.videos.length&&!d.scholars.length){dd.innerHTML='';dd.classList.remove('search-dd-open');return}
+          var html='';
+          if(d.scholars.length){
+            html+='<div class="search-dd-label">Scholars</div>';
+            d.scholars.forEach(function(s){
+              html+='<a href="/scholar/'+s.slug+'" class="search-dd-item search-dd-scholar">'
+                +(s.photo?'<img src="https://cdn.deensubs.com/'+s.photo+'" class="search-dd-av">':'<div class="search-dd-av-letter">'+s.name.split(" ").pop().charAt(0)+'</div>')
+                +'<span>'+s.name.replace(/</g,'&lt;')+'</span></a>';
+            });
+          }
+          if(d.videos.length){
+            html+='<div class="search-dd-label">Videos</div>';
+            d.videos.forEach(function(v){
+              html+='<a href="/watch/'+v.slug+'" class="search-dd-item">'
+                +(v.thumb_key?'<img src="https://cdn.deensubs.com/'+v.thumb_key+'" class="search-dd-thumb">':'')
+                +'<div class="search-dd-info"><span class="search-dd-title">'+v.title.replace(/</g,'&lt;')+'</span>'
+                +(v.source?'<span class="search-dd-src">'+v.source.replace(/</g,'&lt;')+'</span>':'')
+                +'</div></a>';
+            });
+          }
+          dd.innerHTML=html;
+          dd.classList.add('search-dd-open');
+        }).catch(function(){});
+    },200);
+  });
+
+  inp.addEventListener('blur',function(){setTimeout(function(){dd.classList.remove('search-dd-open')},200)});
+  inp.addEventListener('focus',function(){if(dd.innerHTML&&inp.value.trim().length>=2)dd.classList.add('search-dd-open')});
+})();
 // Global lazy load + card reveal
 (function(){
   var lo=new IntersectionObserver(function(en){en.forEach(function(e){if(e.isIntersecting){var bg=e.target.dataset.bg;if(bg){e.target.style.backgroundImage="url('"+bg+"')";e.target.style.backgroundSize="cover";e.target.style.backgroundPosition="center"}lo.unobserve(e.target)}})},{rootMargin:'200px'});
