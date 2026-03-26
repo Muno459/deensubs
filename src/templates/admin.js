@@ -7,79 +7,37 @@ function flag(cc) {
   return String.fromCodePoint(...[...a].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
 }
 
-/* ── Simplified SVG world map paths (major regions) ── */
-function worldMapSVG(countries) {
-  const regions = {
-    US: 'M55,135 L130,135 135,155 115,170 60,165Z',
-    CA: 'M55,85 L165,80 170,125 55,130Z',
-    MX: 'M60,165 L115,170 100,195 65,190Z',
-    BR: 'M155,210 L195,185 210,220 190,265 155,250Z',
-    AR: 'M155,260 L175,255 175,310 155,305Z',
-    CL: 'M145,260 L155,260 155,310 145,305Z',
-    CO: 'M130,190 L155,185 155,210 135,210Z',
-    GB: 'M430,100 L440,95 445,110 435,115Z',
-    FR: 'M435,120 L460,115 465,140 440,140Z',
-    DE: 'M455,100 L480,98 482,125 458,125Z',
-    ES: 'M420,135 L448,132 450,155 425,155Z',
-    IT: 'M465,125 L480,125 478,158 465,155Z',
-    PT: 'M415,135 L425,135 425,158 415,158Z',
-    NL: 'M448,95 L460,95 460,105 448,105Z',
-    BE: 'M445,105 L458,105 458,115 445,115Z',
-    SE: 'M470,50 L485,45 490,90 475,92Z',
-    NO: 'M455,40 L475,38 478,85 460,88Z',
-    FI: 'M490,40 L510,38 512,80 492,82Z',
-    DK: 'M458,85 L472,83 474,95 460,96Z',
-    PL: 'M482,95 L510,92 512,118 484,120Z',
-    RU: 'M510,40 L720,35 725,130 515,125Z',
-    UA: 'M505,105 L540,102 542,125 508,127Z',
-    TR: 'M510,130 L560,128 562,148 512,150Z',
-    SA: 'M540,160 L580,155 582,195 545,198Z',
-    AE: 'M575,175 L590,173 592,185 577,187Z',
-    EG: 'M505,150 L530,148 532,175 507,177Z',
-    NG: 'M460,195 L485,192 487,220 462,222Z',
-    ZA: 'M495,270 L520,268 522,295 497,297Z',
-    KE: 'M530,210 L545,208 547,235 532,237Z',
-    MA: 'M415,148 L440,145 442,168 418,170Z',
-    IN: 'M600,150 L640,145 645,210 605,215Z',
-    PK: 'M590,140 L615,138 618,170 593,172Z',
-    BD: 'M630,168 L645,166 647,182 632,184Z',
-    CN: 'M645,95 L720,90 725,160 650,165Z',
-    JP: 'M735,110 L752,108 754,145 737,147Z',
-    KR: 'M720,120 L735,118 737,140 722,142Z',
-    AU: 'M690,250 L760,245 765,300 695,305Z',
-    NZ: 'M775,290 L790,288 792,310 777,312Z',
-    ID: 'M660,210 L720,205 722,228 662,230Z',
-    TH: 'M650,170 L668,168 670,200 652,202Z',
-    MY: 'M655,200 L680,198 682,212 657,214Z',
-    SG: 'M665,212 L672,211 673,216 666,217Z',
-    PH: 'M700,170 L718,168 720,200 702,202Z',
-    VN: 'M665,165 L678,163 680,200 667,202Z',
-    IL: 'M525,148 L535,147 536,162 526,163Z',
-    IR: 'M565,130 L600,128 602,160 567,162Z',
-    IQ: 'M545,132 L568,130 570,155 547,157Z',
-  };
-  const countryMap = {};
-  (countries || []).forEach(c => { countryMap[c.country] = c.hits; });
-  const maxHits = Math.max(...Object.values(countryMap), 1);
-
-  let paths = '';
-  for (const [code, d] of Object.entries(regions)) {
-    const hits = countryMap[code] || 0;
-    const intensity = hits > 0 ? Math.max(0.15, Math.min(1, hits / maxHits)) : 0;
-    const fill = hits > 0
-      ? `rgba(196,164,76,${(intensity * 0.7 + 0.15).toFixed(2)})`
-      : 'rgba(255,255,255,0.03)';
-    const stroke = hits > 0 ? 'rgba(196,164,76,0.3)' : 'rgba(255,255,255,0.06)';
-    const title = hits > 0 ? `${code}: ${hits} hits` : code;
-    paths += `<path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="0.5"><title>${title}</title></path>`;
-  }
-  return paths;
-}
-
 /* ── Format number with commas ── */
 function fmt(n) {
   if (n == null) return '0';
   return Number(n).toLocaleString('en-US');
+}
+
+/* ── Resolve slug to video title ── */
+function resolveTitle(slug, videos) {
+  if (!slug || !videos || !videos.length) return slug || '';
+  const v = videos.find(v => v.slug === slug);
+  return v ? v.title : slug;
+}
+
+/* ── Resolve analytics path to a readable name ── */
+function resolvePath(path, videos) {
+  if (!path) return '';
+  const m = path.match(/^\/watch\/(.+)$/);
+  if (m) {
+    const title = resolveTitle(m[1], videos);
+    return title !== m[1] ? title : path;
+  }
+  return path;
+}
+
+/* ── Device type icon ── */
+function deviceIcon(type) {
+  switch ((type || '').toLowerCase()) {
+    case 'mobile': return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>';
+    case 'tablet': return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>';
+    default: return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+  }
 }
 
 export function renderAdmin({ videos, categories, key, editing, tab, users, comments, stats, countries, topPages, topVideos, dailyHits, searchLogs, visitors, agents, referers }) {
@@ -204,7 +162,7 @@ a:hover{opacity:.85}
 .sh-badge{font-size:.62rem;color:var(--text-muted);background:rgba(255,255,255,.04);padding:.2rem .55rem;border-radius:10px}
 
 /* ── Stat Cards ── */
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.85rem;margin-bottom:2rem}
+.stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.85rem;margin-bottom:2rem}
 .stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem 1.35rem;
   transition:var(--transition);position:relative;overflow:hidden}
 .stat-card:hover{border-color:var(--border-light);transform:translateY(-1px);box-shadow:0 8px 32px rgba(0,0,0,.2)}
@@ -225,16 +183,14 @@ a:hover{opacity:.85}
 .card-body{padding:1.25rem}
 .card-body.np{padding:0}
 
-/* ── World Map ── */
-.map-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;margin-bottom:1.5rem;position:relative;overflow:hidden}
-.map-wrap::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 40%,rgba(196,164,76,.03),transparent 70%);pointer-events:none}
-.map-wrap h4{font-size:.82rem;font-weight:600;color:var(--text-dim);margin-bottom:1rem;position:relative;z-index:1}
-.map-wrap svg{width:100%;height:auto;position:relative;z-index:1}
-.map-wrap svg path{transition:var(--transition);cursor:pointer}
-.map-wrap svg path:hover{filter:brightness(1.5);stroke-width:1.5}
-.map-legend{display:flex;gap:1.5rem;margin-top:1rem;justify-content:center;position:relative;z-index:1}
-.map-legend-item{display:flex;align-items:center;gap:.35rem;font-size:.68rem;color:var(--text-muted)}
-.map-legend-dot{width:8px;height:8px;border-radius:50%}
+/* ── Country Table ── */
+.country-table{width:100%;border-collapse:collapse}
+.country-table td{padding:.55rem .85rem;border-bottom:1px solid rgba(255,255,255,.03);font-size:.78rem}
+.country-table tr:hover td{background:rgba(255,255,255,.015)}
+.country-bar{height:20px;border-radius:4px;background:linear-gradient(90deg,rgba(196,164,76,.25),rgba(196,164,76,.55));transition:width .6s cubic-bezier(.4,0,.2,1);min-width:4px}
+.country-flag{font-size:1.1rem;margin-right:.4rem;vertical-align:middle}
+.country-code{font-size:.72rem;color:var(--text-dim);font-weight:500}
+.country-hits{font-size:.72rem;color:var(--text-muted);font-weight:500;text-align:right;white-space:nowrap}
 
 /* ── Traffic Chart ── */
 .chart-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin-bottom:1.5rem}
@@ -321,6 +277,35 @@ tr:hover td{background:rgba(255,255,255,.015)}
 .search-tag-q{font-size:.78rem;color:var(--text)}
 .search-tag-c{font-size:.6rem;color:var(--text-muted);font-weight:500}
 .search-tag-r{font-size:.55rem;color:var(--text-muted)}
+
+/* ── Visitor / Device Cards ── */
+.device-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:.85rem;margin-bottom:1.5rem}
+.device-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.15rem;
+  transition:var(--transition);cursor:pointer;position:relative}
+.device-card:hover{border-color:var(--border-light);transform:translateY(-1px);box-shadow:0 6px 24px rgba(0,0,0,.2)}
+.device-card-top{display:flex;align-items:flex-start;gap:.85rem}
+.device-icon{width:40px;height:40px;border-radius:var(--radius-sm);background:var(--gold-dim);
+  display:flex;align-items:center;justify-content:center;color:var(--gold);flex-shrink:0}
+.device-info{flex:1;min-width:0}
+.device-os{font-size:.8rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-browser{font-size:.7rem;color:var(--text-dim);margin-top:.1rem}
+.device-meta{display:flex;flex-wrap:wrap;gap:.5rem .85rem;margin-top:.75rem;padding-top:.65rem;border-top:1px solid var(--border)}
+.device-meta-item{display:flex;align-items:center;gap:.3rem;font-size:.68rem;color:var(--text-muted)}
+.device-meta-item svg{width:13px;height:13px;stroke:currentColor;stroke-width:1.5;fill:none;flex-shrink:0}
+.device-meta-item .val{color:var(--text-dim);font-weight:500}
+.device-user{display:flex;align-items:center;gap:.5rem;margin-top:.65rem;padding-top:.55rem;border-top:1px solid var(--border)}
+.device-user-ava{width:24px;height:24px;border-radius:50%;overflow:hidden;background:var(--gold-dim);
+  display:flex;align-items:center;justify-content:center;font-size:.55rem;font-weight:600;color:var(--gold);flex-shrink:0}
+.device-user-ava img{width:100%;height:100%;object-fit:cover}
+.device-user-name{font-size:.72rem;font-weight:500;color:var(--text)}
+.device-user-email{font-size:.62rem;color:var(--text-muted);font-family:var(--mono)}
+.device-visits{position:absolute;top:.85rem;right:.85rem;font-size:.62rem;color:var(--gold);background:var(--gold-dim);
+  padding:.15rem .5rem;border-radius:10px;font-weight:600}
+.device-expand{display:none;margin-top:.75rem;padding-top:.65rem;border-top:1px solid var(--border);font-size:.7rem;color:var(--text-muted)}
+.device-card.expanded .device-expand{display:block}
+.device-expand-row{display:flex;justify-content:space-between;padding:.25rem 0;border-bottom:1px solid rgba(255,255,255,.02)}
+.device-expand-row .lbl{color:var(--text-muted);font-weight:500}
+.device-expand-row .val{color:var(--text-dim);font-family:var(--mono);font-size:.65rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 
 /* ── SQL Console ── */
 .sql-area{font-family:var(--mono) !important;font-size:.78rem !important;background:var(--bg-deep) !important;
@@ -424,6 +409,7 @@ select.rs{width:auto;padding:.3rem .5rem;font-size:.7rem;border-radius:6px;paddi
 /* ── Responsive ── */
 @media(max-width:1024px){
   .grid-2,.grid-3{grid-template-columns:1fr}
+  .stats-grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
   .sidebar{width:60px}
   .sb-brand h1,.sb-brand span,.sb-link span,.sb-link .count,.sb-foot a span{display:none}
   .sb-link{justify-content:center;padding:.55rem}
@@ -434,8 +420,9 @@ select.rs{width:auto;padding:.3rem .5rem;font-size:.7rem;border-radius:6px;paddi
   .hbar-label{flex:0 0 120px}
 }
 @media(max-width:640px){
-  .stats-grid{grid-template-columns:1fr 1fr}
+  .stats-grid{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
   .user-grid{grid-template-columns:1fr}
+  .device-grid{grid-template-columns:1fr}
   .tool-grid{grid-template-columns:1fr}
 }
 </style></head><body>
@@ -510,7 +497,7 @@ ${isEdit ? `
 ` : ''}
 
 ${!isEdit && tab === 'dashboard' ? `
-<!-- ── Stat Cards ── -->
+<!-- ── Stat Cards (5 max) ── -->
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-label">Total Videos</div>
@@ -537,35 +524,21 @@ ${!isEdit && tab === 'dashboard' ? `
     <div class="stat-value">${fmt(stats?.total_likes || 0)}</div>
     <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> Appreciation</div>
   </div>
-  <div class="stat-card">
-    <div class="stat-label">Countries Reached</div>
-    <div class="stat-value">${fmt(countries.length)}</div>
-    <div class="stat-trend up"><svg viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg> Global reach</div>
-  </div>
 </div>
 
-<!-- ── World Map ── -->
-<div class="map-wrap">
-  <h4>Global Visitor Distribution</h4>
-  <svg viewBox="0 0 800 340" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="rgba(196,164,76,.08)"/><stop offset="100%" stop-color="transparent"/></radialGradient>
-    </defs>
-    <rect width="800" height="340" fill="url(#glow)" rx="8"/>
-    <!-- Grid lines -->
-    <line x1="0" y1="85" x2="800" y2="85" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
-    <line x1="0" y1="170" x2="800" y2="170" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
-    <line x1="0" y1="255" x2="800" y2="255" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
-    <line x1="200" y1="0" x2="200" y2="340" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
-    <line x1="400" y1="0" x2="400" y2="340" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
-    <line x1="600" y1="0" x2="600" y2="340" stroke="rgba(255,255,255,.02)" stroke-width=".5"/>
-    ${worldMapSVG(countries)}
-  </svg>
-  <div class="map-legend">
-    <div class="map-legend-item"><div class="map-legend-dot" style="background:rgba(196,164,76,.2)"></div> Low</div>
-    <div class="map-legend-item"><div class="map-legend-dot" style="background:rgba(196,164,76,.5)"></div> Medium</div>
-    <div class="map-legend-item"><div class="map-legend-dot" style="background:rgba(196,164,76,.85)"></div> High</div>
-    <div class="map-legend-item" style="margin-left:1rem;font-size:.65rem">${countries.length} countries &middot; ${fmt(countries.reduce((s,c)=>s+c.hits,0))} total hits</div>
+<!-- ── Countries Table (replaces broken SVG map) ── -->
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header"><h4>Global Visitor Distribution</h4><span class="sh-badge">${countries.length} countries &middot; ${fmt(countries.reduce((s,c)=>s+c.hits,0))} total hits</span></div>
+  <div class="card-body${countries.length ? ' np' : ''}">
+    ${countries.length ? (() => {
+      const maxC = Math.max(...countries.map(c => c.hits), 1);
+      return `<table class="country-table">${countries.slice(0, 20).map(c => `<tr>
+        <td style="width:44px"><span class="country-flag">${flag(c.country)}</span></td>
+        <td style="width:60px"><span class="country-code">${e(c.country)}</span></td>
+        <td><div class="country-bar" style="width:${Math.max((c.hits / maxC) * 100, 2)}%"></div></td>
+        <td style="width:70px" class="country-hits">${fmt(c.hits)} hits</td>
+      </tr>`).join('')}</table>`;
+    })() : '<div class="empty-state">No country data yet</div>'}
   </div>
 </div>
 
@@ -588,7 +561,7 @@ ${!isEdit && tab === 'dashboard' ? `
     })()}</div>` : '<div class="empty-state">No traffic data yet</div>'}
   </div>
 
-  <!-- ── Top Videos ── -->
+  <!-- ── Top Videos (with real titles) ── -->
   <div class="card">
     <div class="card-header"><h4>Top Videos</h4><span class="sh-badge">${topVideos.length} videos</span></div>
     <div class="card-body np">
@@ -596,18 +569,21 @@ ${!isEdit && tab === 'dashboard' ? `
         <tr><th>Video</th><th>Hits</th><th style="width:120px">Share</th></tr>
         ${(() => {
           const maxV = Math.max(...topVideos.map(v => v.hits), 1);
-          return topVideos.slice(0, 10).map(vi => `<tr>
-            <td><a href="/watch/${e(vi.slug)}" style="font-size:.78rem">${e(vi.slug)}</a></td>
+          return topVideos.slice(0, 10).map(vi => {
+            const title = resolveTitle(vi.slug, videos);
+            return `<tr>
+            <td><a href="/watch/${e(vi.slug)}" style="font-size:.78rem" title="${e(vi.slug)}">${e(title)}</a></td>
             <td style="font-weight:500">${fmt(vi.hits)}</td>
             <td><span class="view-bar" style="width:${Math.max((vi.hits / maxV) * 100, 4)}%"></span></td>
-          </tr>`).join('');
+          </tr>`;
+          }).join('');
         })()}
       </table>
     </div>
   </div>
 </div>
 
-<!-- ── Top Countries + Recent Activity ── -->
+<!-- ── Recent Activity ── -->
 <div class="grid-2" style="margin-top:1.25rem">
   <div class="card">
     <div class="card-header"><h4>Top Countries</h4><span class="sh-badge">${countries.length} countries</span></div>
@@ -646,36 +622,42 @@ ${!isEdit && tab === 'dashboard' ? `
 ` : ''}
 
 ${!isEdit && tab === 'analytics' ? `
-<!-- ── Top Pages ── -->
+<!-- ── Top Pages (with real titles) ── -->
 <div class="card" style="margin-bottom:1.5rem">
   <div class="card-header"><h4>Top Pages</h4><span class="sh-badge">${topPages.length} pages</span></div>
   <div class="card-body">
     <div class="hbar">
     ${(() => {
       const maxP = Math.max(...topPages.map(p => p.hits), 1);
-      return topPages.slice(0, 15).map(p => `<div class="hbar-row">
-        <div class="hbar-label">${e(p.path)}</div>
+      return topPages.slice(0, 15).map(p => {
+        const label = resolvePath(p.path, videos);
+        return `<div class="hbar-row">
+        <div class="hbar-label" title="${e(p.path)}">${e(label)}</div>
         <div class="hbar-track"><div class="hbar-fill gold" style="width:${Math.max((p.hits / maxP) * 100, 2)}%"></div></div>
         <div class="hbar-val">${fmt(p.hits)}</div>
-      </div>`).join('');
+      </div>`;
+      }).join('');
     })()}
     </div>
   </div>
 </div>
 
 <div class="grid-2">
-  <!-- ── Most Watched Videos ── -->
+  <!-- ── Most Watched Videos (with real titles) ── -->
   <div class="card">
     <div class="card-header"><h4>Most Watched Videos</h4></div>
     <div class="card-body">
       <div class="hbar">
       ${(() => {
         const maxV = Math.max(...topVideos.map(v => v.hits), 1);
-        return topVideos.slice(0, 12).map(vi => `<div class="hbar-row">
-          <div class="hbar-label"><a href="/watch/${e(vi.slug)}">${e(vi.slug)}</a></div>
+        return topVideos.slice(0, 12).map(vi => {
+          const title = resolveTitle(vi.slug, videos);
+          return `<div class="hbar-row">
+          <div class="hbar-label"><a href="/watch/${e(vi.slug)}" title="${e(vi.slug)}">${e(title)}</a></div>
           <div class="hbar-track"><div class="hbar-fill blue" style="width:${Math.max((vi.hits / maxV) * 100, 2)}%"></div></div>
           <div class="hbar-val">${fmt(vi.hits)}</div>
-        </div>`).join('');
+        </div>`;
+        }).join('');
       })()}
       </div>
     </div>
@@ -864,48 +846,57 @@ ${!isEdit && tab === 'searches' ? `
 ` : ''}
 
 ${!isEdit && tab === 'visitors' ? `
-<div class="table-wrap">
-  <table id="visitors-table">
-    <tr>
-      <th data-sort="ip" style="cursor:pointer">IP Address</th>
-      <th data-sort="country" style="cursor:pointer">Country</th>
-      <th data-sort="hits" style="cursor:pointer">Hits</th>
-      <th data-sort="last" style="cursor:pointer">Last Seen</th>
-    </tr>
-    ${visitors.map(vi => `<tr>
-      <td class="mono">${e(vi.ip)}</td>
-      <td><span class="flag">${flag(vi.country)}</span> ${e(vi.country)}</td>
-      <td style="font-weight:500">${fmt(vi.hits)}</td>
-      <td style="color:var(--text-muted);font-size:.75rem">${ago(vi.last_seen)}</td>
-    </tr>`).join('')}
-  </table>
+<!-- ── Fingerprint Device Cards ── -->
+<div class="sh"><h3>Device Fingerprints</h3><span class="sh-badge">${visitors.length} devices</span></div>
+<div class="device-grid">
+  ${visitors.map((vi, idx) => `<div class="device-card" id="dev-${idx}" onclick="(function(el){el.classList.toggle('expanded')})(document.getElementById('dev-${idx}'))">
+    <div class="device-visits">${fmt(vi.visit_count || 0)} visits</div>
+    <div class="device-card-top">
+      <div class="device-icon">${deviceIcon(vi.device_type)}</div>
+      <div class="device-info">
+        <div class="device-os">${e(vi.os || 'Unknown OS')} &middot; ${e(vi.browser || 'Unknown')}</div>
+        <div class="device-browser">${e((vi.device_type || 'desktop').charAt(0).toUpperCase() + (vi.device_type || 'desktop').slice(1))} &middot; ${vi.screen_w || '?'}x${vi.screen_h || '?'}</div>
+      </div>
+    </div>
+    <div class="device-meta">
+      <div class="device-meta-item">
+        <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span class="val">${flag(vi.country)} ${e(vi.country || '??')}${vi.city ? ', ' + e(vi.city) : ''}</span>
+      </div>
+      <div class="device-meta-item">
+        <svg viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="val">${ago(vi.last_seen)}</span>
+      </div>
+      ${vi.gpu ? `<div class="device-meta-item">
+        <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span class="val" title="${e(vi.gpu)}">${e((vi.gpu || '').length > 30 ? vi.gpu.slice(0, 30) + '...' : (vi.gpu || ''))}</span>
+      </div>` : ''}
+    </div>
+    ${vi.user_name ? `<div class="device-user">
+      <div class="device-user-ava">${vi.user_avatar ? `<img src="${e(vi.user_avatar)}" alt="">` : (vi.user_name || '?')[0].toUpperCase()}</div>
+      <div>
+        <div class="device-user-name">${e(vi.user_name)}</div>
+        ${vi.user_email ? `<div class="device-user-email">${e(vi.user_email)}</div>` : ''}
+      </div>
+    </div>` : ''}
+    <div class="device-expand">
+      <div class="device-expand-row"><span class="lbl">Fingerprint ID</span><span class="val">${e(vi.id || '')}</span></div>
+      <div class="device-expand-row"><span class="lbl">IP Address</span><span class="val">${e(vi.ip || '')}</span></div>
+      <div class="device-expand-row"><span class="lbl">User Agent</span><span class="val" title="${e(vi.user_agent || '')}">${e((vi.user_agent || '').slice(0, 80))}</span></div>
+      <div class="device-expand-row"><span class="lbl">Screen</span><span class="val">${vi.screen_w || '?'}x${vi.screen_h || '?'}</span></div>
+      <div class="device-expand-row"><span class="lbl">GPU</span><span class="val" title="${e(vi.gpu || '')}">${e(vi.gpu || 'N/A')}</span></div>
+      <div class="device-expand-row"><span class="lbl">Timezone</span><span class="val">${e(vi.timezone || 'N/A')}</span></div>
+      <div class="device-expand-row"><span class="lbl">Language</span><span class="val">${e(vi.language || 'N/A')}</span></div>
+      <div class="device-expand-row"><span class="lbl">CPU Cores</span><span class="val">${vi.cores || 'N/A'}</span></div>
+      <div class="device-expand-row"><span class="lbl">Memory</span><span class="val">${vi.memory ? vi.memory + ' GB' : 'N/A'}</span></div>
+      <div class="device-expand-row"><span class="lbl">Touch</span><span class="val">${vi.touch ? 'Yes' : 'No'}</span></div>
+      <div class="device-expand-row"><span class="lbl">First Seen</span><span class="val">${vi.first_seen || 'N/A'}</span></div>
+      <div class="device-expand-row"><span class="lbl">Last Seen</span><span class="val">${vi.last_seen || 'N/A'}</span></div>
+      <div class="device-expand-row"><span class="lbl">User ID</span><span class="val">${vi.user_id || 'Anonymous'}</span></div>
+    </div>
+  </div>`).join('')}
 </div>
-<script>
-(function(){
-  var table=document.getElementById('visitors-table');
-  var headers=table.querySelectorAll('th[data-sort]');
-  var dir={};
-  headers.forEach(function(th){
-    th.onclick=function(){
-      var col=th.cellIndex;
-      var key=th.dataset.sort;
-      dir[key]=!dir[key];
-      var rows=Array.from(table.querySelectorAll('tr')).slice(1);
-      rows.sort(function(a,b){
-        var av=a.cells[col].textContent.trim();
-        var bv=b.cells[col].textContent.trim();
-        var an=parseFloat(av.replace(/,/g,''));
-        var bn=parseFloat(bv.replace(/,/g,''));
-        if(!isNaN(an)&&!isNaN(bn))return dir[key]?an-bn:bn-an;
-        return dir[key]?av.localeCompare(bv):bv.localeCompare(av);
-      });
-      rows.forEach(function(r){table.appendChild(r)});
-      headers.forEach(function(h){h.style.color=''});
-      th.style.color='var(--gold)';
-    };
-  });
-})();
-</script>
+${!visitors.length ? '<div class="empty-state">No visitor fingerprints yet</div>' : ''}
 ` : ''}
 
 ${!isEdit && tab === 'sql' ? `
