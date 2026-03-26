@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { VIDEO_COLS, VIDEO_JOIN, readDB, writeDB } from '../lib/db.js';
+import { getSearchSuggestions } from '../lib/kv-cache.js';
 
 const api = new Hono();
 
@@ -82,14 +83,8 @@ api.get('/api/media/*', async (c) => {
 api.get('/api/search/suggest', async (c) => {
   const q = (c.req.query('q') || '').trim();
   if (!q || q.length < 2) return c.json({ results: [] });
-  const db = readDB(c.env);
-  const videos = (await db.prepare(
-    "SELECT title, slug, source, thumb_key FROM videos WHERE title LIKE ? ORDER BY views DESC LIMIT 6"
-  ).bind('%' + q + '%').all()).results;
-  const scholars = (await db.prepare(
-    "SELECT name, slug, photo FROM scholars WHERE name LIKE ? LIMIT 3"
-  ).bind('%' + q + '%').all()).results;
-  return c.json({ videos, scholars });
+  const data = await getSearchSuggestions(c.env, q);
+  return c.json(data);
 });
 
 // Watch event tracking (sendBeacon)

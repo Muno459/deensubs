@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { VIDEO_COLS, VIDEO_JOIN, VIDEO_WITH_SCHOLAR, VIDEO_SCHOLAR_JOIN, readDB, writeDB } from '../lib/db.js';
-import { getCategories, getScholars } from '../lib/kv-cache.js';
+import { getCategories, getScholars, getHomeVideos, getPopularVideos, getVideo, getPlatformStats } from '../lib/kv-cache.js';
 import { parseSRT } from '../lib/srt.js';
 import { renderPage } from '../templates/layout.js';
 import { renderHome } from '../templates/home.js';
@@ -26,14 +26,12 @@ function rp(c, title, body, cats, activeCat, meta) {
 }
 
 pages.get('/', async (c) => {
-  const db = readDB(c.env);
-  const [cats, all, popular, scholars] = await Promise.all([
-    getCategories(c.env).then(r=>({results:r})),
-    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.created_at DESC LIMIT 30`).all(),
-    db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.views DESC LIMIT 8`).all(),
-    db.prepare('SELECT * FROM scholars ORDER BY name').all(),
+  const [cats, videos, popular, scholars] = await Promise.all([
+    getCategories(c.env),
+    getHomeVideos(c.env),
+    getPopularVideos(c.env),
+    getScholars(c.env),
   ]);
-  const videos = all.results;
   const byCategory = {};
   videos.forEach(v => {
     const s = v.category_slug || 'other';
@@ -43,11 +41,11 @@ pages.get('/', async (c) => {
   return c.html(rp(c,'Home', renderHome({
     featured: videos[0] || null,
     videos,
-    popular: popular.results,
-    categories: cats.results,
+    popular,
+    categories: cats,
     byCategory,
-    scholars: scholars.results,
-  }), cats.results));
+    scholars,
+  }), cats));
 });
 
 pages.get('/watch/:slug', async (c) => {
@@ -114,12 +112,8 @@ pages.get('/symposium', async (c) => {
 });
 
 pages.get('/scholars', async (c) => {
-  const db = readDB(c.env);
-  const [scholars, cats] = await Promise.all([
-    db.prepare('SELECT s.*, (SELECT COUNT(*) FROM videos v WHERE v.scholar_id = s.id) as video_count, (SELECT SUM(views) FROM videos v WHERE v.scholar_id = s.id) as total_views FROM scholars s ORDER BY s.name').all(),
-    getCategories(c.env).then(r=>({results:r})),
-  ]);
-  return c.html(rp(c,'Scholars', renderScholars({ scholars: scholars.results }), cats.results, 'scholars'));
+  const [scholars, cats] = await Promise.all([getScholars(c.env), getCategories(c.env)]);
+  return c.html(rp(c,'Scholars', renderScholars({ scholars }), cats, 'scholars'));
 });
 
 pages.get('/scholar/:slug', async (c) => {
@@ -140,8 +134,7 @@ pages.get('/history', async (c) => {
 });
 
 pages.get('/about', async (c) => {
-  const cats = await getCategories(c.env);
-  const stats = await readDB(c.env).prepare('SELECT COUNT(*) as count, SUM(views) as views FROM videos').first();
+  const [cats, stats] = await Promise.all([getCategories(c.env), getPlatformStats(c.env)]);
   return c.html(rp(c,'About', renderAbout({ stats }), cats));
 });
 
