@@ -181,24 +181,119 @@ admin.post('/admin/bulk-delete-comments', async (c) => {
 });
 
 // AI Chat endpoint for admin
+// AI tool definitions
+const AI_TOOLS = [
+  { type: 'function', function: { name: 'query_database', description: 'Run a read-only SQL SELECT query on the DeenSubs database. Tables: videos, users, comments, categories, scholars, analytics, search_logs, fingerprints, watch_events. Example: SELECT title, views FROM videos ORDER BY views DESC LIMIT 5', parameters: { type: 'object', properties: { query: { type: 'string', description: 'SQL SELECT query' } }, required: ['query'] } } },
+  { type: 'function', function: { name: 'get_video_stats', description: 'Get detailed stats for a video including views, likes, comments, watch events', parameters: { type: 'object', properties: { slug: { type: 'string' } }, required: ['slug'] } } },
+  { type: 'function', function: { name: 'generate_description', description: 'Generate an SEO-optimized video description given the title and context', parameters: { type: 'object', properties: { title: { type: 'string' }, context: { type: 'string', description: 'Any additional context about the video' } }, required: ['title'] } } },
+  { type: 'function', function: { name: 'get_platform_stats', description: 'Get current platform overview stats', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'get_top_searches', description: 'Get the most popular search queries', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of results (default 10)' } } } } },
+  { type: 'function', function: { name: 'get_visitor_countries', description: 'Get visitor distribution by country', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'moderate_comment', description: 'Delete a comment by ID', parameters: { type: 'object', properties: { comment_id: { type: 'number' } }, required: ['comment_id'] } } },
+  { type: 'function', function: { name: 'update_video', description: 'Update a video field (title, description, source, category_id)', parameters: { type: 'object', properties: { slug: { type: 'string' }, field: { type: 'string', enum: ['title', 'description', 'source', 'category_id'] }, value: { type: 'string' } }, required: ['slug', 'field', 'value'] } } },
+];
+
+// AI tool execution
+async function executeTool(db, name, args) {
+  switch (name) {
+    case 'query_database': {
+      if (!args.query?.trim().toLowerCase().startsWith('select')) return { error: 'Only SELECT queries' };
+      const r = await db.prepare(args.query).all();
+      return { results: r.results?.slice(0, 20), count: r.results?.length };
+    }
+    case 'get_video_stats': {
+      const v = await db.prepare('SELECT v.*, c.name as category FROM videos v LEFT JOIN categories c ON v.category_id=c.id WHERE v.slug=?').bind(args.slug).first();
+      if (!v) return { error: 'Video not found' };
+      const comments = await db.prepare('SELECT COUNT(*) as c FROM comments WHERE video_id=?').bind(v.id).first();
+      const watches = await db.prepare("SELECT COUNT(*) as c FROM watch_events WHERE video_slug=?").bind(args.slug).first();
+      return { title: v.title, views: v.views, likes: v.likes, comments: comments?.c, watch_events: watches?.c, category: v.category, source: v.source, duration: v.duration, has_subs: !!v.srt_key };
+    }
+    case 'get_platform_stats': {
+      return await db.prepare('SELECT (SELECT COUNT(*) FROM videos) as videos, (SELECT COUNT(*) FROM users) as users, (SELECT COUNT(*) FROM comments) as comments, (SELECT SUM(views) FROM videos) as views, (SELECT SUM(likes) FROM videos) as likes, (SELECT COUNT(DISTINCT country) FROM fingerprints) as countries').first();
+    }
+    case 'get_top_searches': {
+      const r = await db.prepare('SELECT query, COUNT(*) as times, MAX(results) as results FROM search_logs GROUP BY query ORDER BY times DESC LIMIT ?').bind(args.limit || 10).all();
+      return r.results;
+    }
+    case 'get_visitor_countries': {
+      const r = await db.prepare("SELECT country, COUNT(*) as hits FROM analytics WHERE country!='' GROUP BY country ORDER BY hits DESC LIMIT 20").all();
+      return r.results;
+    }
+    case 'moderate_comment': {
+      await db.prepare('DELETE FROM comments WHERE id=?').bind(args.comment_id).run();
+      return { deleted: true, comment_id: args.comment_id };
+    }
+    case 'update_video': {
+      const allowed = ['title', 'description', 'source', 'category_id'];
+      if (!allowed.includes(args.field)) return { error: 'Field not allowed' };
+      await db.prepare(`UPDATE videos SET ${args.field}=? WHERE slug=?`).bind(args.value, args.slug).run();
+      return { updated: true, slug: args.slug, field: args.field };
+    }
+    case 'generate_description': {
+      return { note: 'Use AI to generate - this is handled by the model itself', title: args.title, context: args.context };
+    }
+    default: return { error: 'Unknown tool' };
+  }
+}
+
 admin.post('/admin/ai', async (c) => {
   if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
-  const { prompt, context } = await c.req.json();
+  const { prompt, context, history } = await c.req.json();
+  const db = c.env.DB;
+
+  const messages = [
+    { role: 'system', content: `You are the DeenSubs admin AI assistant with tool access. You help manage an Islamic content platform.
+
+You can:
+- Query the database directly (query_database)
+- Get video stats (get_video_stats)
+- Get platform overview (get_platform_stats)
+- See top searches (get_top_searches)
+- See visitor countries (get_visitor_countries)
+- Delete comments (moderate_comment)
+- Update video fields (update_video)
+- Generate SEO descriptions (generate_description)
+
+Platform context: ${context || 'DeenSubs - Arabic Islamic content with English subtitles'}
+
+Be concise and actionable. Use tools when the user asks for data rather than guessing.` },
+    ...(history || []),
+    { role: 'user', content: prompt }
+  ];
+
   try {
+    // First call - may return tool calls
     const res = await fetch(c.env.AI_BASE_URL + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + c.env.AI_API_KEY },
-      body: JSON.stringify({
-        model: 'cx/gpt-5.4',
-        messages: [
-          { role: 'system', content: 'You are the DeenSubs admin AI assistant. You help manage an Islamic content platform. You have access to platform stats and can help with content strategy, SEO, video descriptions, and moderation decisions. Be concise and actionable.' },
-          { role: 'user', content: (context ? 'Platform context: ' + context + '\n\n' : '') + prompt }
-        ],
-        max_tokens: 1000,
-      }),
+      body: JSON.stringify({ model: 'cx/gpt-5.4', messages, tools: AI_TOOLS, max_tokens: 1500 }),
     });
     const data = await res.json();
-    return c.json({ response: data.choices?.[0]?.message?.content || 'No response' });
+    const msg = data.choices?.[0]?.message;
+
+    if (msg?.tool_calls?.length) {
+      // Execute tools and send results back
+      const toolResults = [];
+      for (const tc of msg.tool_calls) {
+        const args = JSON.parse(tc.function.arguments || '{}');
+        const result = await executeTool(db, tc.function.name, args);
+        toolResults.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+      }
+
+      // Second call with tool results
+      const res2 = await fetch(c.env.AI_BASE_URL + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + c.env.AI_API_KEY },
+        body: JSON.stringify({ model: 'cx/gpt-5.4', messages: [...messages, msg, ...toolResults], max_tokens: 1500 }),
+      });
+      const data2 = await res2.json();
+      return c.json({
+        response: data2.choices?.[0]?.message?.content || 'No response',
+        tools_used: msg.tool_calls.map(tc => tc.function.name),
+      });
+    }
+
+    return c.json({ response: msg?.content || 'No response' });
   } catch (err) {
     return c.json({ error: 'AI request failed: ' + err.message }, 500);
   }
