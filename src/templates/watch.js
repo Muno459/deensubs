@@ -20,8 +20,10 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
 <div class="wl">
   <div class="wm">
     <div class="vp" id="vp">
-      <video id="vid" preload="auto" playsinline${th?` poster="${e(th)}"`:''}>
+      <video id="vid" crossorigin="anonymous" preload="auto" playsinline${th?` poster="${e(th)}"`:''}>
         <source src="${cdn(video.video_key)}" type="video/mp4">
+        ${video.srt_key?`<track kind="subtitles" src="${cdn('vtt/'+video.srt_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="en" label="English" default>`:''}
+        ${video.srt_ar_key?`<track kind="subtitles" src="${cdn('vtt/'+video.srt_ar_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="ar" label="العربية">`:''}
       </video>
       <div class="vp-spinner" id="vp-spin"></div>
       <button class="vp-mini-close" id="vp-mini-x">&times;</button>

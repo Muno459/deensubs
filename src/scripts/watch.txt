@@ -48,15 +48,14 @@ function renderSub(){
   else subEl.innerHTML='';
 }
 // Subtitle loading with language support + native TextTrack API for iOS
-var subCache={},curLang='en',nativeTracks={};
+var subCache={},curLang='en';
 
 function loadSubs(lang){
   curLang=lang;
   if(lang==='off'){
     ccOn=false;subCues=[];subEl.innerHTML='';cc.classList.remove('vb-on');
     document.querySelectorAll('.vb-lang-opt').forEach(function(b){b.classList.toggle('vb-lang-on',b.dataset.lang==='off')});
-    // Hide all native tracks
-    for(var k in nativeTracks) nativeTracks[k].mode='hidden';
+    var tracks=vid.textTracks;for(var i=0;i<tracks.length;i++)tracks[i].mode='hidden';
     return;
   }
   ccOn=true;cc.classList.add('vb-on');
@@ -64,43 +63,18 @@ function loadSubs(lang){
   var key=lang==='ar'?srtAr:srt;
   if(!key)return;
   if(subCache[lang]){subCues=subCache[lang];activateNativeTrack(lang);return}
-  fetch('https://cdn.deensubs.com/'+key).then(function(r){
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    return r.text();
-  }).then(function(s){
-    if(!s||s.length<10)throw new Error('Empty SRT');
+  fetch('https://cdn.deensubs.com/'+key).then(function(r){return r.text()}).then(function(s){
     subCache[lang]=parseSrt(s);
     subCues=subCache[lang];
-    createNativeTrack(lang, subCues);
     activateNativeTrack(lang);
-  }).catch(function(err){
-    // Fallback: try via worker API
-    fetch('/api/vtt/'+key).then(function(r){return r.text()}).then(function(s){
-      subCache[lang]=parseSrt(s.replace('WEBVTT\n\n',''));
-      subCues=subCache[lang];
-      createNativeTrack(lang, subCues);
-      activateNativeTrack(lang);
-    }).catch(function(){});
-  });
-}
-
-function createNativeTrack(lang, cues){
-  if(nativeTracks[lang])return; // already created
-  try{
-    var track=vid.addTextTrack('subtitles', lang==='ar'?'Arabic':'English', lang);
-    for(var i=0;i<cues.length;i++){
-      track.addCue(new VTTCue(cues[i].s, cues[i].e, cues[i].t));
-    }
-    track.mode='showing';
-    nativeTracks[lang]=track;
-  }catch(ex){
-    // VTTCue not supported in very old browsers - fall back silently
-  }
+  }).catch(function(){});
 }
 
 function activateNativeTrack(lang){
-  for(var k in nativeTracks){
-    nativeTracks[k].mode=(k===lang)?'showing':'hidden';
+  // Toggle the HTML <track> elements' text tracks
+  var tracks=vid.textTracks;
+  for(var i=0;i<tracks.length;i++){
+    tracks[i].mode=(tracks[i].language===lang)?'showing':'hidden';
   }
 }
 
