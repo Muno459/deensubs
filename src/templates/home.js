@@ -1,4 +1,4 @@
-import { e, fv, ft, thu, ago, cdn } from '../lib/helpers.js';
+import { e, fv, ft, thu, thuSrcset, ago, cdn } from '../lib/helpers.js';
 import { tsvg } from '../components/thumbnail.js';
 import { vcard, section } from '../components/video-card.js';
 import HOME_JS from '../scripts/home.txt';
@@ -12,7 +12,7 @@ ${featured ? `
 <section class="hero">
   <a href="/watch/${e(featured.slug)}" class="hero-card">
     <div class="hero-th">
-      ${thu(featured) ? `<img src="${e(thu(featured))}" alt="" class="hero-img" fetchpriority="high">` : tsvg(featured.title, featured.category_color || '#c4a44c', 900, 506)}
+      ${thu(featured) ? `<img src="${e(thu(featured))}" ${thuSrcset(featured) ? `srcset="${thuSrcset(featured)}" sizes="(max-width:768px) 100vw, 640px"` : ''} alt="" class="hero-img" fetchpriority="high">` : tsvg(featured.title, featured.category_color || '#c4a44c', 900, 506)}
       <div class="hero-ov">
         <div class="hero-pb"></div>
         <div class="hero-meta-ov">

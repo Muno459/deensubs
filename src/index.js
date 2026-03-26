@@ -60,29 +60,32 @@ export default {
     // 1. Clean expired sessions
     await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
 
-    // 2. Auto-convert JPG thumbnails to WebP
+    // 2. Auto-generate responsive WebP thumbnails (320w, 480w, 640w)
     const thumbs = await env.MEDIA_BUCKET.list({ prefix: 'thumbs/' });
-    const jpgs = thumbs.objects.filter(o => /\.(jpg|jpeg|png)$/i.test(o.key));
+    const originals = thumbs.objects.filter(o => /\.(jpg|jpeg|png)$/i.test(o.key) && !/-\d+w\./i.test(o.key));
 
-    for (const jpg of jpgs) {
-      const webpKey = jpg.key.replace(/\.(jpg|jpeg|png)$/i, '.webp');
-      // Check if WebP already exists
-      const existing = await env.MEDIA_BUCKET.head(webpKey);
-      if (existing) continue;
+    for (const orig of originals) {
+      const base = orig.key.replace(/\.(jpg|jpeg|png)$/i, '');
+      const sizes = [320, 480, 640];
 
-      // Fetch original via Cloudflare Image Resizing (converts to WebP)
-      try {
-        const cdnUrl = 'https://cdn.deensubs.com/' + jpg.key;
-        const resp = await fetch(cdnUrl, {
-          cf: { image: { format: 'webp', quality: 80 } }
-        });
-        if (resp.ok) {
-          const body = await resp.arrayBuffer();
-          await env.MEDIA_BUCKET.put(webpKey, body, {
-            httpMetadata: { contentType: 'image/webp' }
+      for (const w of sizes) {
+        const webpKey = `${base}-${w}w.webp`;
+        const existing = await env.MEDIA_BUCKET.head(webpKey);
+        if (existing) continue;
+
+        try {
+          const cdnUrl = 'https://cdn.deensubs.com/' + orig.key;
+          const resp = await fetch(cdnUrl, {
+            cf: { image: { format: 'webp', quality: 80, width: w, fit: 'cover' } }
           });
-        }
-      } catch {}
+          if (resp.ok) {
+            const body = await resp.arrayBuffer();
+            await env.MEDIA_BUCKET.put(webpKey, body, {
+              httpMetadata: { contentType: 'image/webp' }
+            });
+          }
+        } catch {}
+      }
     }
   }
 };

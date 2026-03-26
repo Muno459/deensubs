@@ -47,16 +47,17 @@ export function cdn(key) {
   return key ? CDN + '/' + key : null;
 }
 
-// Thumbnail URL — WebP from CDN (auto-generated)
+// Responsive thumbnail URLs — returns srcset-ready object
 export function thu(v) {
   if (!v.thumb_key) return null;
-  const webpKey = v.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '.webp');
-  return cdn(webpKey);
+  const base = v.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '');
+  return cdn(base + '-640w.webp');
 }
 
-// Original thumbnail URL (JPG fallback)
-export function thuOrig(v) {
-  return v.thumb_key ? cdn(v.thumb_key) : null;
+export function thuSrcset(v) {
+  if (!v.thumb_key) return null;
+  const base = v.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '');
+  return `${cdn(base + '-320w.webp')} 320w, ${cdn(base + '-480w.webp')} 480w, ${cdn(base + '-640w.webp')} 640w`;
 }
 
 // Check if video is new (less than 7 days)

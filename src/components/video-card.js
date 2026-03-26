@@ -1,4 +1,4 @@
-import { e, fv, fl, ft, thu, isNew, cdn } from '../lib/helpers.js';
+import { e, fv, fl, ft, thu, thuSrcset, isNew, cdn } from '../lib/helpers.js';
 import { tsvg } from './thumbnail.js';
 
 // Standard video card
@@ -9,9 +9,10 @@ export function vcard(v, opts) {
   const fresh = isNew(v.created_at);
 
   const eager = opts.eager;
+  const srcset = thuSrcset(v);
   return `<a href="/watch/${e(v.slug)}" class="card${opts.anim ? ' card-anim' : ''}">
-<div class="card-th"${th && !eager ? ` data-bg="${e(th)}"` : ''}>
-  ${!th ? tsvg(v.title, col) : eager ? `<img src="${e(th)}" alt="" class="card-img" loading="eager">` : ''}
+<div class="card-th">
+  ${!th ? tsvg(v.title, col) : `<img src="${e(th)}" ${srcset ? `srcset="${srcset}" sizes="(max-width:768px) 50vw, 280px"` : ''} alt="" class="card-img" loading="${eager ? 'eager' : 'lazy'}"${eager ? ' fetchpriority="high"' : ''}>`}
   <div class="card-hover"><div class="card-pi"></div></div>
   ${v.duration ? `<span class="dur">${ft(v.duration)}</span>` : ''}
   ${fresh ? '<span class="badge-new">NEW</span>' : ''}
