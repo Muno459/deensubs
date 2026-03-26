@@ -53,11 +53,8 @@ pages.get('/watch/:slug', async (c) => {
   const video = await getVideo(c.env, slug);
   if (!video) return c.html(rp(c,'Not Found', render404(), await getCategories(c.env)), 404);
 
-  const db = readDB(c.env);
-  const [, comments, related, cats, cues] = await Promise.all([
+  const [, cats, cues] = await Promise.all([
     writeDB(c.env).prepare('UPDATE videos SET views = views + 1 WHERE slug = ?').bind(slug).run(),
-    db.prepare('SELECT * FROM comments WHERE video_id = ? ORDER BY created_at DESC LIMIT 200').bind(video.id).all(),
-    getRelatedVideos(c.env, video.id, video.category_id),
     getCategories(c.env),
     parseSRT(c.env, video.srt_key),
   ]);
@@ -68,7 +65,7 @@ pages.get('/watch/:slug', async (c) => {
     type: 'video.other',
     image: video.thumb_key ? base + '/api/media/' + video.thumb_key : null,
   };
-  return c.html(rp(c,video.title, renderWatch({ video, comments: comments.results, related, cues, base }), cats, video.category_slug, meta));
+  return c.html(rp(c,video.title, renderWatch({ video, cues, base }), cats, video.category_slug, meta));
 });
 
 pages.get('/category/:slug', async (c) => {

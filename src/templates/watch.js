@@ -1,10 +1,8 @@
-import { e, fv, ft, thu, ago, jsStr, cdn } from '../lib/helpers.js';
+import { e, fv, ft, thu, thuSrcset, ago, jsStr, cdn } from '../lib/helpers.js';
 import { tsvg } from '../components/thumbnail.js';
-import { scard } from '../components/video-card.js';
-import { commentHTML } from '../components/comment.js';
 import WATCH_JS from '../scripts/watch.txt';
 
-export function renderWatch({ video, comments, related, cues, base }) {
+export function renderWatch({ video, cues, base }) {
   const th=thu(video);
   base = base || 'https://deensubs.mostafa0333.workers.dev';
   const jsonLd = JSON.stringify({
@@ -34,10 +32,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
       <div class="vp-end" id="vp-end">
         <div class="vp-end-inner">
           <button class="vp-end-replay" id="vp-replay"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg><span>Replay</span></button>
-          <div class="vp-end-next">${related.slice(0,3).map(r => {
-            const rth = thu(r);
-            return `<a href="/watch/${e(r.slug)}" class="vp-end-card"><div class="vp-end-card-th"${rth?` style="background-image:url('${e(rth)}');background-size:cover;background-position:center"`:''}></div><h5>${e(r.title)}</h5></a>`;
-          }).join('')}</div>
+          <div class="vp-end-next" id="vp-end-next"></div>
         </div>
       </div>
       <div class="vp-bar" id="vp-bar">
@@ -89,17 +84,25 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
       <div class="tr-ls" id="trl">${cues.map((c,i)=>`<div class="tl" data-i="${i}" data-s="${c.start}" data-e="${c.end}"><span class="tl-t">${ft(c.start)}</span><p>${e(c.text)}</p></div>`).join('')}</div>
     </details>`:''}
     <div class="cms">
-      <h2>${comments.length} Comment${comments.length!==1?'s':''}</h2>
+      <h2 id="cm-count">Comments</h2>
       <form id="cf" class="cf" data-slug="${e(video.slug)}">
         <div class="cf-r">${video._user?`<input name="author" type="hidden" value="${e(video._user.name)}"><div class="cf-user"><img src="${e(video._user.avatar)}" class="cf-user-av"><span>${e(video._user.name)}</span></div>`:`<input name="author" placeholder="Your name" maxlength="100" required autocomplete="off">`}<button type="submit">Post</button></div>
         <div class="cf-ta-wrap"><textarea name="content" placeholder="Share your thoughts..." maxlength="2000" rows="2" required id="cf-ta"></textarea><span class="cf-counter" id="cf-ct">2000</span></div>
       </form>
-      <div id="cl" class="cl">${comments.map(commentHTML).join('')}</div>
+      <div id="cl" class="cl">
+        <div class="skel-cm"><div class="skel-cm-av skel-shimmer"></div><div class="skel-cm-body"><div class="skel-line skel-shimmer" style="width:30%"></div><div class="skel-line skel-shimmer" style="width:80%"></div></div></div>
+        <div class="skel-cm"><div class="skel-cm-av skel-shimmer"></div><div class="skel-cm-body"><div class="skel-line skel-shimmer" style="width:25%"></div><div class="skel-line skel-shimmer" style="width:60%"></div></div></div>
+        <div class="skel-cm"><div class="skel-cm-av skel-shimmer"></div><div class="skel-cm-body"><div class="skel-line skel-shimmer" style="width:35%"></div><div class="skel-line skel-shimmer" style="width:70%"></div></div></div>
+      </div>
     </div>
   </div>
   <aside class="ws">
     <h3>Related</h3>
-    ${related.length?related.map(scard).join(''):'<p class="emp-s">More content soon.</p>'}
+    <div id="related-list">
+      <div class="skel-sc"><div class="skel-sc-th skel-shimmer"></div><div class="skel-sc-info"><div class="skel-line skel-shimmer" style="width:80%"></div><div class="skel-line skel-shimmer" style="width:50%"></div></div></div>
+      <div class="skel-sc"><div class="skel-sc-th skel-shimmer"></div><div class="skel-sc-info"><div class="skel-line skel-shimmer" style="width:70%"></div><div class="skel-line skel-shimmer" style="width:40%"></div></div></div>
+      <div class="skel-sc"><div class="skel-sc-th skel-shimmer"></div><div class="skel-sc-info"><div class="skel-line skel-shimmer" style="width:90%"></div><div class="skel-line skel-shimmer" style="width:55%"></div></div></div>
+    </div>
   </aside>
 </div>
 <div class="scroll-prog" id="scroll-prog"></div>

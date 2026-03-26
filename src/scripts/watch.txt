@@ -313,4 +313,57 @@ vid.addEventListener('seeking',function(){trackEvent('seek')});
 vid.addEventListener('waiting',function(){trackEvent('buffer')});
 // Track position every 30s
 setInterval(function(){if(!vid.paused&&vid.currentTime>0)trackEvent('progress')},30000);
+
+// ── Lazy load comments ──
+fetch('/api/videos/'+slug+'/comments').then(function(r){return r.json()}).then(function(d){
+  var cl=document.getElementById('cl');
+  var countEl=document.getElementById('cm-count');
+  if(!d.comments||!d.comments.length){cl.innerHTML='<p class="emp-s" style="padding:1rem 0;color:#4a4840">No comments yet. Be the first!</p>';countEl.textContent='0 Comments';return}
+  countEl.textContent=d.comments.length+' Comment'+(d.comments.length!==1?'s':'');
+  var cols=['#c4a44c','#4c8ac4','#4ca476','#8a4cc4','#4cb4a4','#c44c6e','#c48a4c'];
+  cl.innerHTML=d.comments.map(function(c){
+    var name=(c.author||'').replace(/</g,'&lt;');
+    var initials=name.split(' ').map(function(w){return w[0]}).join('').slice(0,2).toUpperCase();
+    var h=0;for(var i=0;i<name.length;i++)h=((h<<5)-h+name.charCodeAt(i))|0;
+    var col=cols[Math.abs(h)%cols.length];
+    var ago='';
+    var s=Math.floor((Date.now()-new Date(c.created_at+'Z').getTime())/1000);
+    if(s<60)ago='just now';else if(s<3600)ago=Math.floor(s/60)+'m ago';else if(s<86400)ago=Math.floor(s/3600)+'h ago';else if(s<2592000)ago=Math.floor(s/86400)+'d ago';else ago=new Date(c.created_at).toLocaleDateString('en',{month:'short',day:'numeric',year:'numeric'});
+    return'<div class="cm"><div class="cm-av" style="background:'+col+'">'+initials+'</div><div class="cm-body"><div class="cm-h"><strong>'+name+'</strong><time>'+ago+'</time></div><p>'+c.content.replace(/</g,'&lt;')+'</p></div></div>';
+  }).join('');
+  // Linkify timestamps
+  cl.querySelectorAll('.cm p').forEach(function(p){
+    p.innerHTML=p.innerHTML.replace(/(\d{1,2}):(\d{2})(?::(\d{2}))?/g,function(match,a,b,c){
+      var secs=c?parseInt(a)*3600+parseInt(b)*60+parseInt(c):parseInt(a)*60+parseInt(b);
+      return'<a class="cm-ts" data-t="'+secs+'">'+match+'</a>';
+    });
+  });
+  cl.querySelectorAll('.cm-ts').forEach(function(a){a.onclick=function(){vid.currentTime=+a.dataset.t;vid.play();window.scrollTo({top:0,behavior:'smooth'})}});
+}).catch(function(){document.getElementById('cl').innerHTML='<p class="emp-s">Failed to load comments.</p>'});
+
+// ── Lazy load related videos ──
+fetch('/api/videos/'+slug+'/related').then(function(r){return r.json()}).then(function(d){
+  var rl=document.getElementById('related-list');
+  var endNext=document.getElementById('vp-end-next');
+  if(!d.videos||!d.videos.length){rl.innerHTML='<p class="emp-s">More content soon.</p>';return}
+  rl.innerHTML=d.videos.map(function(v){
+    var th=v.thumb_key?'https://cdn.deensubs.com/'+v.thumb_key.replace(/\.(jpg|jpeg|png)$/i,'-320w.webp'):'';
+    return'<a href="/watch/'+v.slug+'" class="sc"><div class="sc-th"'+(th?' style="background-image:url(\''+th+'\');background-size:cover;background-position:center"':'')+'>'
+      +(v.duration?'<span class="dur dur-s">'+Math.floor(v.duration/60)+':'+String(Math.floor(v.duration%60)).padStart(2,'0')+'</span>':'')
+      +'</div><div class="sc-i"><h4>'+v.title.replace(/</g,'&lt;')+'</h4><span>'+(v.source||'').replace(/</g,'&lt;')+'</span></div></a>';
+  }).join('');
+  // Populate end screen
+  if(endNext){
+    endNext.innerHTML=d.videos.slice(0,3).map(function(v){
+      var th=v.thumb_key?'https://cdn.deensubs.com/'+v.thumb_key.replace(/\.(jpg|jpeg|png)$/i,'-320w.webp'):'';
+      return'<a href="/watch/'+v.slug+'" class="vp-end-card"><div class="vp-end-card-th"'+(th?' style="background-image:url(\''+th+'\');background-size:cover;background-position:center"':'')+'></div><h5>'+v.title.replace(/</g,'&lt;')+'</h5></a>';
+    }).join('');
+  }
+  // Prefetch on hover
+  rl.querySelectorAll('.sc').forEach(function(card){
+    var preloaded=false;
+    card.addEventListener('mouseenter',function(){if(preloaded)return;preloaded=true;
+      var link=document.createElement('link');link.rel='prefetch';link.href=card.href;document.head.appendChild(link)});
+  });
+}).catch(function(){document.getElementById('related-list').innerHTML='<p class="emp-s">More content soon.</p>'});
 })();

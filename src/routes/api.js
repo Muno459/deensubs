@@ -79,6 +79,27 @@ api.get('/api/media/*', async (c) => {
   return new Response(obj.body, { headers: h });
 });
 
+// Get comments for a video
+api.get('/api/videos/:slug/comments', async (c) => {
+  const slug = c.req.param('slug');
+  const db = readDB(c.env);
+  const video = await db.prepare('SELECT id FROM videos WHERE slug = ?').bind(slug).first();
+  if (!video) return c.json({ comments: [] });
+  const comments = (await db.prepare('SELECT * FROM comments WHERE video_id = ? ORDER BY created_at DESC LIMIT 200').bind(video.id).all()).results;
+  return c.json({ comments });
+});
+
+// Get related videos
+api.get('/api/videos/:slug/related', async (c) => {
+  const { getRelatedVideos } = await import('../lib/kv-cache.js');
+  const slug = c.req.param('slug');
+  const db = readDB(c.env);
+  const video = await db.prepare('SELECT id, category_id FROM videos WHERE slug = ?').bind(slug).first();
+  if (!video) return c.json({ videos: [] });
+  const videos = await getRelatedVideos(c.env, video.id, video.category_id);
+  return c.json({ videos });
+});
+
 // Search autocomplete
 api.get('/api/search/suggest', async (c) => {
   const q = (c.req.query('q') || '').trim();
