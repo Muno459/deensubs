@@ -528,30 +528,91 @@ ${!isEdit && tab === 'dashboard' ? `
 
 <!-- ── Interactive Map ── -->
 <div class="card" style="margin-bottom:1rem">
-  <div class="card-header"><h4>Visitor Map</h4></div>
+  <div class="card-header"><h4>Visitor Map</h4><span class="sh-badge">${countries.length} countries</span></div>
   <div class="card-body np">
-    <div id="admin-map" style="height:300px;border-radius:8px;background:#0a0a14"></div>
+    <div id="admin-map" style="height:360px;border-radius:8px;background:#080810;position:relative;z-index:1"></div>
   </div>
 </div>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<script src="https://unpkg.com/leaflet-choropleth@1.1.4/dist/choropleth.js"><\/script>
 <script>
 (function(){
-  var map=L.map('admin-map',{zoomControl:false,attributionControl:false,minZoom:2,maxZoom:6}).setView([25,40],2);
+  var hitData={};
+  var maxH=1;
+  ${JSON.stringify(countries)}.forEach(function(c){hitData[c.country]=c.hits;if(c.hits>maxH)maxH=c.hits});
+
+  var map=L.map('admin-map',{zoomControl:false,attributionControl:false,minZoom:2,maxZoom:6,worldCopyJump:true}).setView([20,30],2);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',{subdomains:'abcd'}).addTo(map);
-  // Country coords lookup
-  var cc={AF:[33,65],AL:[41,20],DZ:[28,3],AR:[-34,-64],AU:[-25,134],AT:[47,14],BD:[24,90],BE:[51,4],BR:[-14,-51],CA:[56,-106],CN:[35,105],CO:[4,-72],HR:[45,16],CZ:[50,15],DK:[56,10],EG:[27,30],FI:[64,26],FR:[46,2],DE:[51,10],GR:[39,22],HK:[22,114],HU:[47,20],IN:[20,77],ID:[-5,120],IQ:[33,44],IR:[32,53],IE:[53,-8],IL:[31,35],IT:[43,12],JP:[36,138],JO:[31,36],KW:[29,48],LB:[34,36],LY:[27,17],MY:[4,102],MX:[23,-102],MA:[32,-5],NL:[52,5],NZ:[-41,174],NG:[10,8],NO:[60,8],OM:[21,57],PK:[30,70],PH:[13,122],PL:[52,20],PT:[39,-8],QA:[25,51],RO:[46,25],RU:[62,105],SA:[24,45],SG:[1,104],ZA:[-29,24],KR:[37,128],ES:[40,-4],SE:[62,15],CH:[47,8],TW:[24,121],TH:[15,100],TR:[39,35],AE:[24,54],GB:[54,-2],US:[38,-97],VN:[16,108]};
-  var maxH=Math.max(${JSON.stringify(countries.map(c=>c.hits))}.reduce(function(a,b){return Math.max(a,b)},1));
-  ${JSON.stringify(countries)}.forEach(function(c){
-    var pos=cc[c.country];if(!pos)return;
-    var r=Math.max(4,Math.min(20,Math.sqrt(c.hits/maxH)*20));
-    L.circleMarker(pos,{radius:r,color:'#c4a44c',fillColor:'#c4a44c',fillOpacity:0.4,weight:1})
-      .bindTooltip(c.country+': '+c.hits+' hits',{className:'map-tip'})
-      .addTo(map);
-  });
+
+  // Load GeoJSON country boundaries and color them
+  fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
+    .then(function(r){return r.json()})
+    .then(function(geo){
+      L.geoJSON(geo,{
+        style:function(feature){
+          var iso=feature.properties.ISO_A2;
+          var hits=hitData[iso]||0;
+          if(!hits)return{fillColor:'transparent',color:'#1a1a2e',weight:.5,fillOpacity:0};
+          var intensity=Math.min(hits/maxH,1);
+          var r=Math.round(196*(0.3+intensity*0.7));
+          var g=Math.round(164*(0.3+intensity*0.7));
+          var b=Math.round(76*(0.3+intensity*0.7));
+          return{
+            fillColor:'rgb('+r+','+g+','+b+')',
+            color:'#c4a44c',
+            weight:intensity>0.3?1:.5,
+            fillOpacity:0.15+intensity*0.55
+          };
+        },
+        onEachFeature:function(feature,layer){
+          var iso=feature.properties.ISO_A2;
+          var hits=hitData[iso];
+          if(hits){
+            layer.bindTooltip('<strong>'+feature.properties.ADMIN+'</strong><br>'+hits+' hits',{className:'map-tip',sticky:true});
+            layer.on('mouseover',function(){this.setStyle({weight:2,fillOpacity:0.8})});
+            layer.on('mouseout',function(e){geo_layer.resetStyle(e.target)});
+          }
+        }
+      });
+      var geo_layer=L.geoJSON(geo,{
+        style:function(feature){
+          var iso=feature.properties.ISO_A2;
+          var hits=hitData[iso]||0;
+          if(!hits)return{fillColor:'transparent',color:'#1a1a2e',weight:.5,fillOpacity:0};
+          var intensity=Math.min(hits/maxH,1);
+          var r=Math.round(196*(0.3+intensity*0.7));
+          var g=Math.round(164*(0.3+intensity*0.7));
+          var b=Math.round(76*(0.3+intensity*0.7));
+          return{fillColor:'rgb('+r+','+g+','+b+')',color:'#c4a44c',weight:intensity>0.3?1:.5,fillOpacity:0.15+intensity*0.55};
+        },
+        onEachFeature:function(feature,layer){
+          var iso=feature.properties.ISO_A2;
+          var hits=hitData[iso];
+          if(hits){
+            layer.bindTooltip('<strong>'+feature.properties.ADMIN+'</strong><br>'+hits+' hits',{className:'map-tip',sticky:true});
+            layer.on('mouseover',function(){this.setStyle({weight:2,fillOpacity:0.8})});
+            layer.on('mouseout',function(e){geo_layer.resetStyle(e.target)});
+          }
+        }
+      }).addTo(map);
+    }).catch(function(){
+      // Fallback to circle markers if GeoJSON fails
+      var cc={DK:[56,10],US:[38,-97],SA:[24,45],AE:[24,54],GB:[54,-2],DE:[51,10],FR:[46,2],NL:[52,5],SE:[62,15],NO:[60,8],CA:[56,-106],AU:[-25,134],IN:[20,77],PK:[30,70],EG:[27,30],TR:[39,35],MY:[4,102],ID:[-5,120],JP:[36,138],KR:[37,128],BR:[-14,-51],IT:[43,12],ES:[40,-4]};
+      ${JSON.stringify(countries)}.forEach(function(c){
+        var pos=cc[c.country];if(!pos)return;
+        var r=Math.max(5,Math.min(22,Math.sqrt(c.hits/maxH)*22));
+        L.circleMarker(pos,{radius:r,color:'#c4a44c',fillColor:'#c4a44c',fillOpacity:0.5,weight:1})
+          .bindTooltip(c.country+': '+c.hits+' hits',{className:'map-tip'}).addTo(map);
+      });
+    });
 })();
 <\/script>
-<style>.map-tip{background:#1a1a2e!important;color:#e0e0e0!important;border:1px solid #2a2a3e!important;font-family:inherit;font-size:.72rem}.leaflet-container{background:#0a0a14!important}</style>
+<style>
+.map-tip{background:rgba(10,10,20,.92)!important;color:#e0e0e0!important;border:1px solid rgba(196,164,76,.3)!important;font-family:inherit;font-size:.75rem;padding:6px 10px!important;border-radius:6px!important;box-shadow:0 4px 16px rgba(0,0,0,.4)!important}
+.map-tip strong{color:#c4a44c}
+.leaflet-container{background:#080810!important}
+</style>
 
 <!-- ── Countries Table ── -->
 <div class="card" style="margin-bottom:1.5rem">
