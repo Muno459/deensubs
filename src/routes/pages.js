@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { VIDEO_COLS, VIDEO_JOIN, VIDEO_WITH_SCHOLAR, VIDEO_SCHOLAR_JOIN } from '../lib/db.js';
+import { VIDEO_COLS, VIDEO_JOIN, VIDEO_WITH_SCHOLAR, VIDEO_SCHOLAR_JOIN, readDB, writeDB } from '../lib/db.js';
 import { parseSRT } from '../lib/srt.js';
 import { renderPage } from '../templates/layout.js';
 import { renderHome } from '../templates/home.js';
@@ -25,7 +25,7 @@ function rp(c, title, body, cats, activeCat, meta) {
 }
 
 pages.get('/', async (c) => {
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const [cats, all, popular, scholars] = await Promise.all([
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug != 'symposium' ORDER BY v.created_at DESC LIMIT 30`).all(),
@@ -51,12 +51,12 @@ pages.get('/', async (c) => {
 
 pages.get('/watch/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const video = await db.prepare(`SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} WHERE v.slug = ?`).bind(slug).first();
   if (!video) return c.html(rp(c,'Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
 
   const [, comments, related, cats, cues] = await Promise.all([
-    db.prepare('UPDATE videos SET views = views + 1 WHERE slug = ?').bind(slug).run(),
+    writeDB(c.env).prepare('UPDATE videos SET views = views + 1 WHERE slug = ?').bind(slug).run(),
     db.prepare('SELECT * FROM comments WHERE video_id = ? ORDER BY created_at DESC LIMIT 200').bind(video.id).all(),
     db.prepare(`SELECT ${VC} ${VJ} WHERE v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 12`).bind(video.id, video.category_id).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
@@ -74,7 +74,7 @@ pages.get('/watch/:slug', async (c) => {
 
 pages.get('/category/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const sort = c.req.query('sort') || 'newest';
   const orderBy = sort === 'popular' ? 'v.views DESC' : 'v.created_at DESC';
   const [category, videos, cats] = await Promise.all([
@@ -88,7 +88,7 @@ pages.get('/category/:slug', async (c) => {
 
 pages.get('/search', async (c) => {
   const q = (c.req.query('q') || '').trim();
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const cats = (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results;
   let videos = [];
   if (q) {
@@ -99,12 +99,12 @@ pages.get('/search', async (c) => {
     }
   }
   // Log search query
-  if (q) { try { const user = c.get('user'); c.executionCtx.waitUntil(c.env.DB.prepare('INSERT INTO search_logs (query, results, user_id) VALUES (?, ?, ?)').bind(q, videos.length, user?.id || null).run()); } catch {} }
+  if (q) { try { const user = c.get('user'); c.executionCtx.waitUntil(writeDB(c.env).prepare('INSERT INTO search_logs (query, results, user_id) VALUES (?, ?, ?)').bind(q, videos.length, user?.id || null).run()); } catch {} }
   return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos }), cats));
 });
 
 pages.get('/symposium', async (c) => {
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const [videos, cats] = await Promise.all([
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = 'symposium' ORDER BY v.id`).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
@@ -113,7 +113,7 @@ pages.get('/symposium', async (c) => {
 });
 
 pages.get('/scholars', async (c) => {
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const [scholars, cats] = await Promise.all([
     db.prepare('SELECT s.*, (SELECT COUNT(*) FROM videos v WHERE v.scholar_id = s.id) as video_count, (SELECT SUM(views) FROM videos v WHERE v.scholar_id = s.id) as total_views FROM scholars s ORDER BY s.name').all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
@@ -123,7 +123,7 @@ pages.get('/scholars', async (c) => {
 
 pages.get('/scholar/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const scholar = await db.prepare('SELECT * FROM scholars WHERE slug = ?').bind(slug).first();
   if (!scholar) return c.html(rp(c,'Not Found', render404(), (await db.prepare('SELECT * FROM categories ORDER BY name').all()).results), 404);
   const [videos, cats] = await Promise.all([
@@ -134,25 +134,25 @@ pages.get('/scholar/:slug', async (c) => {
 });
 
 pages.get('/history', async (c) => {
-  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
   return c.html(rp(c,'Watch History', renderHistory(), cats));
 });
 
 pages.get('/about', async (c) => {
-  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
-  const stats = await c.env.DB.prepare('SELECT COUNT(*) as count, SUM(views) as views FROM videos').first();
+  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const stats = await readDB(c.env).prepare('SELECT COUNT(*) as count, SUM(views) as views FROM videos').first();
   return c.html(rp(c,'About', renderAbout({ stats }), cats));
 });
 
 pages.get('/bookmarks', async (c) => {
-  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
   return c.html(rp(c,'Bookmarks', renderBookmarks(), cats));
 });
 
 pages.get('/profile', async (c) => {
   const user = c.get('user');
   if (!user) return c.redirect('/auth/google');
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const [cats, comments, stats] = await Promise.all([
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
     db.prepare('SELECT c.*, v.title as video_title, v.slug as video_slug FROM comments c LEFT JOIN videos v ON c.video_id = v.id WHERE c.user_id = ? ORDER BY c.created_at DESC LIMIT 20').bind(user.id).all(),

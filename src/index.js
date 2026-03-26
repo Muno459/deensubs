@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { authMiddleware } from './middleware/auth.js';
+import { readDB, writeDB } from './lib/db.js';
 import { renderPage } from './templates/layout.js';
 import { render404 } from './templates/error.js';
 import pages from './routes/pages.js';
@@ -71,7 +72,7 @@ app.use('*', async (c, next) => {
   try {
     const slug = path.match(/\/watch\/([^/]+)/)?.[1] || null;
     c.executionCtx.waitUntil(
-      c.env.DB.prepare(
+      writeDB(c.env).prepare(
         'INSERT INTO analytics (type, path, slug, user_id, ip, country, user_agent, referer) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
       ).bind(
         slug ? 'watch' : 'pageview',
@@ -96,7 +97,7 @@ app.route('/', pages);
 
 // 404 handler
 app.notFound(async (c) => {
-  const cats = (await c.env.DB.prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
   return c.html(renderPage('Not Found', render404(), cats, null, null, c.get('user')), 404);
 });
 

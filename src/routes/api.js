@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { VIDEO_COLS, VIDEO_JOIN } from '../lib/db.js';
+import { VIDEO_COLS, VIDEO_JOIN, readDB, writeDB } from '../lib/db.js';
 
 const api = new Hono();
 
@@ -7,28 +7,29 @@ const VC = VIDEO_COLS;
 const VJ = VIDEO_JOIN;
 
 api.get('/api/videos', async (c) => {
-  const videos = (await c.env.DB.prepare(`SELECT ${VC} ${VJ} ORDER BY v.created_at DESC LIMIT 100`).all()).results;
+  const videos = (await readDB(c.env).prepare(`SELECT ${VC} ${VJ} ORDER BY v.created_at DESC LIMIT 100`).all()).results;
   return c.json({ videos });
 });
 
 api.post('/api/videos/:slug/like', async (c) => {
   const slug = c.req.param('slug');
-  await c.env.DB.prepare('UPDATE videos SET likes = likes + 1 WHERE slug = ?').bind(slug).run();
-  const video = await c.env.DB.prepare('SELECT likes FROM videos WHERE slug = ?').bind(slug).first();
+  await writeDB(c.env).prepare('UPDATE videos SET likes = likes + 1 WHERE slug = ?').bind(slug).run();
+  const video = await readDB(c.env).prepare('SELECT likes FROM videos WHERE slug = ?').bind(slug).first();
   return c.json({ likes: video?.likes || 0 });
 });
 
 api.post('/api/videos/:slug/comments', async (c) => {
   const slug = c.req.param('slug');
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const video = await db.prepare('SELECT id FROM videos WHERE slug = ?').bind(slug).first();
   if (!video) return c.json({ error: 'Not found' }, 404);
   const body = await c.req.json();
   const author = (body.author || '').trim();
   const content = (body.content || '').trim();
   if (!author || !content || author.length > 100 || content.length > 2000) return c.json({ error: 'Invalid' }, 400);
-  const r = await db.prepare('INSERT INTO comments (video_id, author, content) VALUES (?, ?, ?)').bind(video.id, author, content).run();
-  const comment = await db.prepare('SELECT * FROM comments WHERE id = ?').bind(r.meta.last_row_id).first();
+  const wdb = writeDB(c.env);
+  const r = await wdb.prepare('INSERT INTO comments (video_id, author, content) VALUES (?, ?, ?)').bind(video.id, author, content).run();
+  const comment = await wdb.prepare('SELECT * FROM comments WHERE id = ?').bind(r.meta.last_row_id).first();
   return c.json({ comment }, 201);
 });
 
@@ -81,7 +82,7 @@ api.get('/api/media/*', async (c) => {
 api.get('/api/search/suggest', async (c) => {
   const q = (c.req.query('q') || '').trim();
   if (!q || q.length < 2) return c.json({ results: [] });
-  const db = c.env.DB;
+  const db = readDB(c.env);
   const videos = (await db.prepare(
     "SELECT title, slug, source, thumb_key FROM videos WHERE title LIKE ? ORDER BY views DESC LIMIT 6"
   ).bind('%' + q + '%').all()).results;
@@ -97,7 +98,7 @@ api.post('/api/watch-event', async (c) => {
     const data = await c.req.json();
     const user = c.get('user');
     c.executionCtx.waitUntil(
-      c.env.DB.prepare(
+      writeDB(c.env).prepare(
         'INSERT INTO watch_events (video_slug, fingerprint_id, user_id, event_type, position, duration, buffered, connection, bandwidth) VALUES (?,?,?,?,?,?,?,?,?)'
       ).bind(
         data.slug || '', data.fp || null, user?.id || null,
@@ -132,7 +133,7 @@ api.post('/api/fingerprint', async (c) => {
     const hashArr = Array.from(new Uint8Array(hashBuf));
     const fpId = hashArr.slice(0, 12).map(b => b.toString(16).padStart(2, '0')).join('');
 
-    const db = c.env.DB;
+    const db = readDB(c.env);
     const existing = await db.prepare('SELECT id, visit_count FROM fingerprints WHERE id = ?').bind(fpId).first();
 
     if (existing) {
