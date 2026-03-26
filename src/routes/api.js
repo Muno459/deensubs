@@ -20,16 +20,17 @@ api.post('/api/videos/:slug/like', async (c) => {
 });
 
 api.post('/api/videos/:slug/comments', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Sign in to comment' }, 401);
   const slug = c.req.param('slug');
   const db = readDB(c.env);
   const video = await db.prepare('SELECT id FROM videos WHERE slug = ?').bind(slug).first();
   if (!video) return c.json({ error: 'Not found' }, 404);
   const body = await c.req.json();
-  const author = (body.author || '').trim();
   const content = (body.content || '').trim();
-  if (!author || !content || author.length > 100 || content.length > 2000) return c.json({ error: 'Invalid' }, 400);
+  if (!content || content.length > 2000) return c.json({ error: 'Invalid' }, 400);
   const wdb = writeDB(c.env);
-  const r = await wdb.prepare('INSERT INTO comments (video_id, author, content) VALUES (?, ?, ?)').bind(video.id, author, content).run();
+  const r = await wdb.prepare('INSERT INTO comments (video_id, author, content, user_id) VALUES (?, ?, ?, ?)').bind(video.id, user.name, content, user.id).run();
   const comment = await wdb.prepare('SELECT * FROM comments WHERE id = ?').bind(r.meta.last_row_id).first();
   return c.json({ comment }, 201);
 });

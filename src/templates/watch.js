@@ -2,7 +2,9 @@ import { e, fv, ft, thu, thuSrcset, ago, jsStr, cdn } from '../lib/helpers.js';
 import { tsvg } from '../components/thumbnail.js';
 import WATCH_JS from '../scripts/watch.txt';
 
-export function renderWatch({ video, cues, base }) {
+import { scard } from '../components/video-card.js';
+
+export function renderWatch({ video, related, cues, base }) {
   const th=thu(video);
   base = base || 'https://deensubs.mostafa0333.workers.dev';
   const jsonLd = JSON.stringify({
@@ -85,10 +87,11 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
     </details>`:''}
     <div class="cms">
       <h2 id="cm-count">Comments</h2>
+      ${video._user ? `
       <form id="cf" class="cf" data-slug="${e(video.slug)}">
-        <div class="cf-r">${video._user?`<input name="author" type="hidden" value="${e(video._user.name)}"><div class="cf-user"><img src="${e(video._user.avatar)}" class="cf-user-av"><span>${e(video._user.name)}</span></div>`:`<input name="author" placeholder="Your name" maxlength="100" required autocomplete="off">`}<button type="submit">Post</button></div>
+        <div class="cf-r"><input name="author" type="hidden" value="${e(video._user.name)}"><div class="cf-user"><img src="${e(video._user.avatar)}" class="cf-user-av"><span>${e(video._user.name)}</span></div><button type="submit">Post</button></div>
         <div class="cf-ta-wrap"><textarea name="content" placeholder="Share your thoughts..." maxlength="2000" rows="2" required id="cf-ta"></textarea><span class="cf-counter" id="cf-ct">2000</span></div>
-      </form>
+      </form>` : `<div class="cm-login"><a href="/auth/google" class="cm-login-btn">Sign in to comment</a></div>`}
       <div id="cl" class="cl">
         <div class="skel-cm"><div class="skel-cm-av skel-shimmer"></div><div class="skel-cm-body"><div class="skel-line skel-shimmer" style="width:30%"></div><div class="skel-line skel-shimmer" style="width:80%"></div></div></div>
         <div class="skel-cm"><div class="skel-cm-av skel-shimmer"></div><div class="skel-cm-body"><div class="skel-line skel-shimmer" style="width:25%"></div><div class="skel-line skel-shimmer" style="width:60%"></div></div></div>
@@ -98,11 +101,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
   </div>
   <aside class="ws">
     <h3>Related</h3>
-    <div id="related-list">
-      <div class="skel-sc"><div class="skel-sc-th skel-shimmer"></div><div class="skel-sc-info"><div class="skel-line skel-shimmer" style="width:80%"></div><div class="skel-line skel-shimmer" style="width:50%"></div></div></div>
-      <div class="skel-sc"><div class="skel-sc-th skel-shimmer"></div><div class="skel-sc-info"><div class="skel-line skel-shimmer" style="width:70%"></div><div class="skel-line skel-shimmer" style="width:40%"></div></div></div>
-      <div class="skel-sc"><div class="skel-sc-th skel-shimmer"></div><div class="skel-sc-info"><div class="skel-line skel-shimmer" style="width:90%"></div><div class="skel-line skel-shimmer" style="width:55%"></div></div></div>
-    </div>
+    ${related && related.length ? related.map(scard).join('') : '<p class="emp-s">More content soon.</p>'}
   </aside>
 </div>
 <div class="scroll-prog" id="scroll-prog"></div>

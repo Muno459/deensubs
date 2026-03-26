@@ -341,29 +341,22 @@ fetch('/api/videos/'+slug+'/comments').then(function(r){return r.json()}).then(f
   cl.querySelectorAll('.cm-ts').forEach(function(a){a.onclick=function(){vid.currentTime=+a.dataset.t;vid.play();window.scrollTo({top:0,behavior:'smooth'})}});
 }).catch(function(){document.getElementById('cl').innerHTML='<p class="emp-s">Failed to load comments.</p>'});
 
-// ── Lazy load related videos ──
-fetch('/api/videos/'+slug+'/related').then(function(r){return r.json()}).then(function(d){
-  var rl=document.getElementById('related-list');
-  var endNext=document.getElementById('vp-end-next');
-  if(!d.videos||!d.videos.length){rl.innerHTML='<p class="emp-s">More content soon.</p>';return}
-  rl.innerHTML=d.videos.map(function(v){
-    var th=v.thumb_key?'https://cdn.deensubs.com/'+v.thumb_key.replace(/\.(jpg|jpeg|png)$/i,'-320w.webp'):'';
-    return'<a href="/watch/'+v.slug+'" class="sc"><div class="sc-th"'+(th?' style="background-image:url(\''+th+'\');background-size:cover;background-position:center"':'')+'>'
-      +(v.duration?'<span class="dur dur-s">'+Math.floor(v.duration/60)+':'+String(Math.floor(v.duration%60)).padStart(2,'0')+'</span>':'')
-      +'</div><div class="sc-i"><h4>'+v.title.replace(/</g,'&lt;')+'</h4><span>'+(v.source||'').replace(/</g,'&lt;')+'</span></div></a>';
-  }).join('');
-  // Populate end screen
-  if(endNext){
-    endNext.innerHTML=d.videos.slice(0,3).map(function(v){
-      var th=v.thumb_key?'https://cdn.deensubs.com/'+v.thumb_key.replace(/\.(jpg|jpeg|png)$/i,'-320w.webp'):'';
-      return'<a href="/watch/'+v.slug+'" class="vp-end-card"><div class="vp-end-card-th"'+(th?' style="background-image:url(\''+th+'\');background-size:cover;background-position:center"':'')+'></div><h5>'+v.title.replace(/</g,'&lt;')+'</h5></a>';
-    }).join('');
+// Populate end screen from SSR related cards
+var endNext=document.getElementById('vp-end-next');
+var relCards=document.querySelectorAll('.sc');
+if(endNext&&relCards.length){
+  var endHtml='';
+  for(var ri=0;ri<Math.min(relCards.length,3);ri++){
+    var rc=relCards[ri],rth=rc.querySelector('.sc-th'),rh=rc.querySelector('h4');
+    var bgImg=rth?rth.style.backgroundImage:'';
+    endHtml+='<a href="'+rc.href+'" class="vp-end-card"><div class="vp-end-card-th"'+(bgImg?' style="background-image:'+bgImg+';background-size:cover;background-position:center"':'')+'></div><h5>'+(rh?rh.textContent:'')+'</h5></a>';
   }
-  // Prefetch on hover
-  rl.querySelectorAll('.sc').forEach(function(card){
-    var preloaded=false;
-    card.addEventListener('mouseenter',function(){if(preloaded)return;preloaded=true;
-      var link=document.createElement('link');link.rel='prefetch';link.href=card.href;document.head.appendChild(link)});
-  });
-}).catch(function(){document.getElementById('related-list').innerHTML='<p class="emp-s">More content soon.</p>'});
+  endNext.innerHTML=endHtml;
+}
+// Prefetch related on hover
+document.querySelectorAll('.sc').forEach(function(card){
+  var preloaded=false;
+  card.addEventListener('mouseenter',function(){if(preloaded)return;preloaded=true;
+    var link=document.createElement('link');link.rel='prefetch';link.href=card.href;document.head.appendChild(link)});
+});
 })();

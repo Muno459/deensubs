@@ -221,6 +221,9 @@ details[open] .tr-hd::after{transform:rotate(180deg)}
 .cf{margin-bottom:1rem}.cf-r{display:flex;gap:.4rem;margin-bottom:.4rem}
 .cf input,.cf textarea{flex:1;background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:.5rem .65rem;color:var(--tx);font:inherit;font-size:.78rem;transition:border-color .2s;resize:vertical}
 .cf input:focus,.cf textarea:focus{outline:none;border-color:var(--gold)}
+.cm-login{padding:.75rem 0;margin-bottom:.75rem}
+.cm-login-btn{display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1.25rem;background:var(--gd);border:1px solid rgba(196,164,76,.12);border-radius:8px;color:var(--gold);font-size:.8rem;font-weight:500;transition:all .2s}
+.cm-login-btn:hover{background:rgba(196,164,76,.12);border-color:var(--gold)}
 .cf input::placeholder,.cf textarea::placeholder{color:var(--t3)}
 .cf-user{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:var(--tx);flex:1}
 .cf-user-av{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--bd)}
