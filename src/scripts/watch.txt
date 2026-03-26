@@ -64,13 +64,24 @@ function loadSubs(lang){
   var key=lang==='ar'?srtAr:srt;
   if(!key)return;
   if(subCache[lang]){subCues=subCache[lang];activateNativeTrack(lang);return}
-  fetch('https://cdn.deensubs.com/'+key).then(function(r){return r.text()}).then(function(s){
+  fetch('https://cdn.deensubs.com/'+key).then(function(r){
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.text();
+  }).then(function(s){
+    if(!s||s.length<10)throw new Error('Empty SRT');
     subCache[lang]=parseSrt(s);
     subCues=subCache[lang];
-    // Create native TextTrack with VTTCue objects (works on iOS native player)
     createNativeTrack(lang, subCues);
     activateNativeTrack(lang);
-  }).catch(function(){});
+  }).catch(function(err){
+    // Fallback: try via worker API
+    fetch('/api/vtt/'+key).then(function(r){return r.text()}).then(function(s){
+      subCache[lang]=parseSrt(s.replace('WEBVTT\n\n',''));
+      subCues=subCache[lang];
+      createNativeTrack(lang, subCues);
+      activateNativeTrack(lang);
+    }).catch(function(){});
+  });
 }
 
 function createNativeTrack(lang, cues){
