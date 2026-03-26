@@ -15,7 +15,7 @@ export function renderWatch({ video, comments, related, cues, base }) {
     duration:video.duration?'PT'+Math.floor(video.duration/60)+'M'+Math.floor(video.duration%60)+'S':'',
   });
   return `
-${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
+${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
 <script type="application/ld+json">${jsonLd}</script>
 <div class="wl">
   <div class="wm">

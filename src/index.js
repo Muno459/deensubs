@@ -49,7 +49,8 @@ app.route('/', pages);
 
 // 404 handler
 app.notFound(async (c) => {
-  const cats = (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results;
+  const { getCategories: gc } = await import('./lib/kv-cache.js');
+  const cats = await gc(c.env);
   return c.html(renderPage('Not Found', render404(), cats, null, null, c.get('user')), 404);
 });
 

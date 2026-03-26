@@ -104,6 +104,57 @@ export async function getSitemapData(env) {
   }, TTL_LONG);
 }
 
+// ── Videos by category (1 min cache) ──
+export async function getCategoryVideos(env, slug, sort) {
+  const orderBy = sort === 'popular' ? 'v.views DESC' : 'v.created_at DESC';
+  return kvGet(env, `cat:${slug}:${sort || 'newest'}`, async () => {
+    return (await readDB(env).prepare(
+      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE c.slug = ? ORDER BY ${orderBy}`
+    ).bind(slug).all()).results;
+  }, TTL_SHORT);
+}
+
+// ── Single category by slug (1 hour cache) ──
+export async function getCategory(env, slug) {
+  return kvGet(env, 'cat-info:' + slug, async () => {
+    return await readDB(env).prepare('SELECT * FROM categories WHERE slug = ?').bind(slug).first();
+  }, TTL_LONG);
+}
+
+// ── Videos by scholar (1 min cache) ──
+export async function getScholarVideos(env, scholarId) {
+  return kvGet(env, 'scholar-vids:' + scholarId, async () => {
+    return (await readDB(env).prepare(
+      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE v.scholar_id = ? ORDER BY v.created_at DESC`
+    ).bind(scholarId).all()).results;
+  }, TTL_SHORT);
+}
+
+// ── Single scholar by slug (5 min cache) ──
+export async function getScholar(env, slug) {
+  return kvGet(env, 'scholar:' + slug, async () => {
+    return await readDB(env).prepare('SELECT * FROM scholars WHERE slug = ?').bind(slug).first();
+  }, TTL_MEDIUM);
+}
+
+// ── Related videos (5 min cache) ──
+export async function getRelatedVideos(env, videoId, categoryId) {
+  return kvGet(env, `related:${videoId}`, async () => {
+    return (await readDB(env).prepare(
+      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 12`
+    ).bind(videoId, categoryId).all()).results;
+  }, TTL_MEDIUM);
+}
+
+// ── Symposium videos (5 min cache) ──
+export async function getSymposiumVideos(env) {
+  return kvGet(env, 'symposium:videos', async () => {
+    return (await readDB(env).prepare(
+      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} WHERE c.slug = 'symposium' ORDER BY v.id`
+    ).all()).results;
+  }, TTL_MEDIUM);
+}
+
 // ── Platform stats (5 min cache) ──
 export async function getPlatformStats(env) {
   return kvGet(env, 'stats:platform', async () => {

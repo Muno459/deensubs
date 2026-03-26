@@ -90,7 +90,8 @@ api.get('/api/search/suggest', async (c) => {
 // Watch event tracking (sendBeacon)
 api.post('/api/watch-event', async (c) => {
   try {
-    const data = await c.req.json();
+    const text = await c.req.text();
+    const data = JSON.parse(text);
     const user = c.get('user');
     c.executionCtx.waitUntil(
       writeDB(c.env).prepare(
