@@ -77,6 +77,24 @@ api.get('/api/media/*', async (c) => {
   return new Response(obj.body, { headers: h });
 });
 
+// Watch event tracking (sendBeacon)
+api.post('/api/watch-event', async (c) => {
+  try {
+    const data = await c.req.json();
+    const user = c.get('user');
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare(
+        'INSERT INTO watch_events (video_slug, fingerprint_id, user_id, event_type, position, duration, buffered, connection, bandwidth) VALUES (?,?,?,?,?,?,?,?,?)'
+      ).bind(
+        data.slug || '', data.fp || null, user?.id || null,
+        data.type || '', data.pos || 0, data.dur || 0, data.buf || 0,
+        data.conn || '', data.bw || 0
+      ).run()
+    );
+    return new Response('ok', { status: 204 });
+  } catch { return new Response('ok', { status: 204 }); }
+});
+
 // Device fingerprint collection
 api.post('/api/fingerprint', async (c) => {
   try {

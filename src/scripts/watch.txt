@@ -293,4 +293,24 @@ cf.onsubmit=function(ev){ev.preventDefault();var btn=cf.querySelector('button');
     cl.insertBefore(div,cl.firstChild);cf.reset();var h=document.querySelector('.cms h2'),n=cl.children.length;h.textContent=n+' Comment'+(n!==1?'s':'')}
   }).catch(function(){toast('Failed to post comment. Try again.')}).finally(function(){btn.disabled=false});
   if(cfCt)cfCt.textContent='2000'};
+
+// Watch analytics - track engagement
+var lastTrack=0;
+function trackEvent(type){
+  if(Date.now()-lastTrack<5000&&type==='progress')return;
+  lastTrack=Date.now();
+  var conn=navigator.connection||navigator.mozConnection;
+  var data={slug:slug,type:type,pos:vid.currentTime||0,dur:vid.duration||0,
+    buf:vid.buffered.length?vid.buffered.end(vid.buffered.length-1):0,
+    conn:conn?(conn.effectiveType||conn.type||''):'',
+    bw:conn?conn.downlink||0:0,fp:localStorage.getItem('ds_fp')||''};
+  navigator.sendBeacon('/api/watch-event',JSON.stringify(data));
+}
+vid.addEventListener('play',function(){trackEvent('play')});
+vid.addEventListener('pause',function(){trackEvent('pause')});
+vid.addEventListener('ended',function(){trackEvent('ended')});
+vid.addEventListener('seeking',function(){trackEvent('seek')});
+vid.addEventListener('waiting',function(){trackEvent('buffer')});
+// Track position every 30s
+setInterval(function(){if(!vid.paused&&vid.currentTime>0)trackEvent('progress')},30000);
 })();
