@@ -47,9 +47,12 @@ export function cdn(key) {
   return key ? CDN + '/' + key : null;
 }
 
-// Thumbnail URL from video object
+// Thumbnail URL — prefer WebP if available
 export function thu(v) {
-  return v.thumb_key ? cdn(v.thumb_key) : null;
+  if (!v.thumb_key) return null;
+  // Swap .jpg/.png extension to .webp
+  const webpKey = v.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '.webp');
+  return cdn(webpKey);
 }
 
 // Check if video is new (less than 7 days)
