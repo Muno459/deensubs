@@ -1097,69 +1097,98 @@ function quickSql(q){
 
 ${!isEdit && tab === 'ai' ? `
 <div class="ai-container">
+  <div class="ai-tools-bar">
+    <span style="font-size:.68rem;color:var(--text-muted)">Tools:</span>
+    <span class="ai-tool-tag">query_database</span>
+    <span class="ai-tool-tag">get_video_stats</span>
+    <span class="ai-tool-tag">get_platform_stats</span>
+    <span class="ai-tool-tag">get_top_searches</span>
+    <span class="ai-tool-tag">moderate_comment</span>
+    <span class="ai-tool-tag">update_video</span>
+  </div>
   <div class="ai-messages" id="ai-chat">
-    <div class="ai-msg ai-bot">How can I help manage DeenSubs? I can help with content strategy, video descriptions, SEO, moderation decisions, or analytics insights. Ask me anything about the platform.</div>
+    <div class="ai-msg ai-bot">I'm your DeenSubs admin assistant with <strong>direct database access</strong>. I can:<br><br>
+    &bull; Query any data — "Show me the top 5 videos by views"<br>
+    &bull; Moderate — "Delete comment #42"<br>
+    &bull; Update content — "Update the description of ruling-praying-asr-at-home"<br>
+    &bull; Analyze — "What are people searching for?"<br>
+    &bull; Strategize — "What content should we add next?"</div>
   </div>
   <div class="ai-input-wrap">
-    <input type="text" id="ai-input" placeholder="Ask about content, SEO, analytics..." autocomplete="off">
+    <input type="text" id="ai-input" placeholder="e.g. Show me the most watched videos this week..." autocomplete="off">
     <button id="ai-send">Send</button>
   </div>
 </div>
 <script>
 var chat=document.getElementById('ai-chat'),inp=document.getElementById('ai-input'),btn=document.getElementById('ai-send');
 var context='Platform stats: ${stats?.video_count||0} videos, ${stats?.user_count||0} users, ${stats?.comment_count||0} comments, ${stats?.total_views||0} views. Top countries: ${countries.slice(0,5).map(c=>c.country+'('+c.hits+')').join(', ')}. Top searches: ${searchLogs.slice(0,5).map(s=>s.query+'('+s.times+'x)').join(', ')}';
+var history=[];
 function send(){
   var q=inp.value.trim();if(!q)return;
   chat.innerHTML+='<div class="ai-msg ai-user">'+q.replace(/</g,'&lt;')+'</div>';
-  chat.innerHTML+='<div class="ai-msg ai-bot ai-typing">Thinking...</div>';
+  chat.innerHTML+='<div class="ai-msg ai-bot ai-typing"><div class="ai-dots"><span></span><span></span><span></span></div></div>';
   chat.scrollTop=chat.scrollHeight;inp.value='';btn.disabled=true;
-  fetch('/admin/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:q,context:context})})
+  history.push({role:'user',content:q});
+  fetch('/admin/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:q,context:context,history:history.slice(-10)})})
     .then(function(r){return r.json()}).then(function(d){
-      chat.querySelector('.ai-typing').remove();
+      var typing=chat.querySelector('.ai-typing');if(typing)typing.remove();
       var resp=(d.response||d.error||'No response').replace(/</g,'&lt;');
       resp=resp.replace(/\`\`\`([\\s\\S]*?)\`\`\`/g,'<pre>$1</pre>');
       resp=resp.replace(/\`([^\`]+)\`/g,'<code>$1</code>');
       resp=resp.replace(/\\n/g,'<br>');
-      chat.innerHTML+='<div class="ai-msg ai-bot">'+resp+'</div>';
+      var toolsHtml=d.tools_used?'<div class="ai-tools-used">Used: '+d.tools_used.map(function(t){return'<span class="ai-tool-tag ai-tool-used">'+t+'</span>'}).join('')+'</div>':'';
+      chat.innerHTML+='<div class="ai-msg ai-bot">'+toolsHtml+resp+'</div>';
+      history.push({role:'assistant',content:d.response||''});
       chat.scrollTop=chat.scrollHeight;
-    }).catch(function(e){chat.querySelector('.ai-typing').remove();chat.innerHTML+='<div class="ai-msg ai-bot" style="color:var(--red)">Error: '+e.message+'</div>'})
+    }).catch(function(ex){var typing=chat.querySelector('.ai-typing');if(typing)typing.remove();chat.innerHTML+='<div class="ai-msg ai-bot" style="color:#c44">Error: '+ex.message+'</div>'})
     .finally(function(){btn.disabled=false;inp.focus()});
 }
 btn.onclick=send;inp.onkeydown=function(e){if(e.key==='Enter')send()};
 </script>
+<style>
+.ai-tools-bar{display:flex;gap:.3rem;align-items:center;padding:.5rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.ai-tool-tag{font-size:.6rem;padding:.1rem .4rem;background:rgba(196,164,76,.06);border:1px solid rgba(196,164,76,.12);border-radius:4px;color:#c4a44c;font-family:monospace}
+.ai-tool-used{background:rgba(76,164,76,.08)!important;border-color:rgba(76,164,76,.2)!important;color:#4ca44c!important}
+.ai-tools-used{margin-bottom:.5rem;display:flex;gap:.25rem;flex-wrap:wrap}
+.ai-dots{display:flex;gap:4px;padding:4px 0}
+.ai-dots span{width:6px;height:6px;border-radius:50%;background:#555;animation:dotBounce 1.4s infinite ease-in-out}
+.ai-dots span:nth-child(2){animation-delay:.2s}
+.ai-dots span:nth-child(3){animation-delay:.4s}
+@keyframes dotBounce{0%,80%,100%{transform:scale(0);opacity:.3}40%{transform:scale(1);opacity:1}}
+</style>
 ` : ''}
 
 ${!isEdit && tab === 'add' ? `
 <div class="form-card">
-  <form method="post" action="/admin/video?${q.slice(1)}">
+  <form method="post" action="/admin/video?${q.slice(1)}" id="add-form">
     <div class="form-section">
-      <div class="form-section-title"><span class="num">1</span> Basic Information</div>
+      <div class="form-section-title"><span class="num">1</span> Title & Description</div>
       <label>Title *</label>
-      <input name="title" required placeholder="Enter video title">
+      <input name="title" id="add-title" required placeholder="e.g. Ruling on Praying Asr at Home">
+      <label>Slug <span style="color:var(--text-muted);font-weight:400">(auto-generated from title)</span></label>
+      <input name="slug" id="add-slug" required pattern="[a-z0-9-]+" placeholder="auto-generated">
+      <label>Description <button type="button" class="ai-gen-btn" id="ai-desc-btn">✨ Generate with AI</button></label>
+      <textarea name="description" id="add-desc" rows="3" placeholder="AI can generate this for you"></textarea>
       <label>Arabic Title</label>
-      <input name="title_ar" dir="rtl" placeholder="Enter Arabic title">
-      <label>Slug *</label>
-      <input name="slug" required pattern="[a-z0-9-]+" placeholder="my-video-slug">
-      <label>Description</label>
-      <textarea name="description" rows="3" placeholder="Brief description of the video content"></textarea>
+      <input name="title_ar" dir="rtl" placeholder="Optional">
     </div>
     <div class="form-section">
       <div class="form-section-title"><span class="num">2</span> Categorization</div>
-      <label>Category</label>
-      <select name="category_id">${categories.map(c => `<option value="${c.id}">${e(c.name)}</option>`).join('')}</select>
-      <label>Source</label>
-      <input name="source" placeholder="Original source or credit">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+        <div><label>Category</label><select name="category_id">${categories.map(c => `<option value="${c.id}">${e(c.name)}</option>`).join('')}</select></div>
+        <div><label>Source / Scholar</label><input name="source" placeholder="e.g. Sheikh Salih al-Fawzan"></div>
+      </div>
       <label>Duration (seconds)</label>
       <input name="duration" type="number" placeholder="360">
     </div>
     <div class="form-section">
-      <div class="form-section-title"><span class="num">3</span> Media Files</div>
-      <label>R2 Video Key *</label>
-      <input name="video_key" required placeholder="videos/filename.mp4">
-      <label>R2 Subtitle Key</label>
-      <input name="srt_key" placeholder="subs/filename.srt">
-      <label>R2 Thumbnail Key</label>
-      <input name="thumb_key" placeholder="thumbs/filename.jpg">
+      <div class="form-section-title"><span class="num">3</span> R2 Media Keys</div>
+      <p style="font-size:.72rem;color:var(--text-muted);margin-bottom:.5rem">Upload files to R2 first via CLI or S3 API, then enter the keys below.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem">
+        <div><label>Video Key *</label><input name="video_key" required placeholder="videos/file.mp4"></div>
+        <div><label>Subtitle Key</label><input name="srt_key" placeholder="subs/file.srt"></div>
+        <div><label>Thumbnail Key</label><input name="thumb_key" placeholder="thumbs/file.jpg"></div>
+      </div>
     </div>
     <div class="form-section" style="display:flex;justify-content:flex-end;gap:.75rem;align-items:center">
       <a href="/admin?tab=videos${q}" style="font-size:.82rem;color:var(--text-muted)">Cancel</a>
@@ -1167,6 +1196,26 @@ ${!isEdit && tab === 'add' ? `
     </div>
   </form>
 </div>
+<script>
+// Auto-generate slug from title
+document.getElementById('add-title').addEventListener('input',function(){
+  var slug=this.value.toLowerCase().replace(/[^a-z0-9\\s-]/g,'').replace(/\\s+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+  document.getElementById('add-slug').value=slug;
+});
+
+// AI description generation
+document.getElementById('ai-desc-btn').addEventListener('click',function(){
+  var title=document.getElementById('add-title').value.trim();
+  if(!title){alert('Enter a title first');return}
+  var btn=this;btn.textContent='Generating...';btn.disabled=true;
+  fetch('/admin/ai',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt:'Generate a concise, SEO-optimized description (2-3 sentences) for an Islamic video titled: "'+title+'". Focus on what viewers will learn. Do not use markdown.',context:'DeenSubs platform - Arabic Islamic content with English subtitles'})
+  }).then(function(r){return r.json()}).then(function(d){
+    document.getElementById('add-desc').value=d.response||'';
+  }).catch(function(){}).finally(function(){btn.textContent='✨ Generate with AI';btn.disabled=false});
+});
+<\/script>
+<style>.ai-gen-btn{background:none;border:1px solid rgba(196,164,76,.2);color:#c4a44c;font-size:.65rem;padding:.15rem .5rem;border-radius:4px;cursor:pointer;margin-left:.5rem;transition:all .2s;font-family:inherit}.ai-gen-btn:hover{background:rgba(196,164,76,.08);border-color:#c4a44c}</style>
 ` : ''}
 
 </div><!-- .content -->
