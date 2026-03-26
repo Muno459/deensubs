@@ -77,4 +77,45 @@ api.get('/api/media/*', async (c) => {
   return new Response(obj.body, { headers: h });
 });
 
+// Device fingerprint collection
+api.post('/api/fingerprint', async (c) => {
+  try {
+    const data = await c.req.json();
+    const ip = c.req.header('CF-Connecting-IP') || '';
+    const country = c.req.header('CF-IPCountry') || '';
+    const city = c.req.header('CF-IPCity') || '';
+    const ua = (c.req.header('User-Agent') || '').slice(0, 300);
+    const user = c.get('user');
+
+    // Parse user agent for device/browser/OS
+    const isM = /Mobile|Android|iPhone|iPad/i.test(ua);
+    const deviceType = /iPad|Tablet/i.test(ua) ? 'tablet' : isM ? 'mobile' : 'desktop';
+    const os = /Windows/i.test(ua) ? 'Windows' : /Mac/i.test(ua) ? 'macOS' : /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iOS' : /Linux/i.test(ua) ? 'Linux' : 'Other';
+    const browser = /Edg/i.test(ua) ? 'Edge' : /Chrome/i.test(ua) ? 'Chrome' : /Firefox/i.test(ua) ? 'Firefox' : /Safari/i.test(ua) ? 'Safari' : 'Other';
+
+    // Generate fingerprint ID from stable attributes
+    const raw = `${ip}|${ua}|${data.sw}x${data.sh}|${data.gpu}|${data.tz}|${data.cores}|${data.plt}`;
+    const encoder = new TextEncoder();
+    const hashBuf = await crypto.subtle.digest('SHA-256', encoder.encode(raw));
+    const hashArr = Array.from(new Uint8Array(hashBuf));
+    const fpId = hashArr.slice(0, 12).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    const db = c.env.DB;
+    const existing = await db.prepare('SELECT id, visit_count FROM fingerprints WHERE id = ?').bind(fpId).first();
+
+    if (existing) {
+      await db.prepare("UPDATE fingerprints SET last_seen = datetime('now'), visit_count = visit_count + 1, user_id = COALESCE(?, user_id) WHERE id = ?")
+        .bind(user?.id || null, fpId).run();
+    } else {
+      await db.prepare(
+        'INSERT INTO fingerprints (id, user_id, ip, country, city, user_agent, device_type, os, browser, screen_w, screen_h, gpu, timezone, language, cores, memory, touch) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+      ).bind(fpId, user?.id || null, ip, country, city || '', ua, deviceType, os, browser, data.sw || 0, data.sh || 0, (data.gpu || '').slice(0, 200), data.tz || '', data.lang || '', data.cores || 0, data.mem || 0, data.touch || 0).run();
+    }
+
+    return c.json({ id: fpId });
+  } catch (err) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 export default api;

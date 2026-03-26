@@ -8,3 +8,28 @@ document.addEventListener('keydown',function(e){if(e.key==='/'&&e.target.tagName
   var co=new IntersectionObserver(function(en){en.forEach(function(e){if(e.isIntersecting){e.target.classList.add('card-vis');co.unobserve(e.target)}})},{threshold:.05,rootMargin:'0px 0px -20px 0px'});
   document.querySelectorAll('.card-anim').forEach(function(c){co.observe(c)});
 })();
+
+// Device fingerprinting
+(function(){
+  try{
+    var fp=localStorage.getItem('ds_fp');
+    if(fp&&Date.now()-parseInt(localStorage.getItem('ds_fp_ts')||'0')<3600000)return;
+    var c=document.createElement('canvas'),gl=c.getContext('webgl')||c.getContext('experimental-webgl');
+    var gpu='';
+    if(gl){var dbg=gl.getExtension('WEBGL_debug_renderer_info');if(dbg)gpu=gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)||''}
+    var data={
+      sw:screen.width,sh:screen.height,dpr:devicePixelRatio||1,
+      gpu:gpu.slice(0,200),
+      tz:Intl.DateTimeFormat().resolvedOptions().timeZone||'',
+      lang:navigator.language||'',
+      cores:navigator.hardwareConcurrency||0,
+      mem:navigator.deviceMemory||0,
+      touch:'ontouchstart' in window?1:0,
+      plt:navigator.platform||''
+    };
+    fetch('/api/fingerprint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+      .then(function(r){return r.json()}).then(function(d){
+        if(d.id){localStorage.setItem('ds_fp',d.id);localStorage.setItem('ds_fp_ts',String(Date.now()))}
+      }).catch(function(){});
+  }catch(e){}
+})();

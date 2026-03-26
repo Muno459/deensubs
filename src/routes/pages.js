@@ -109,7 +109,7 @@ pages.get('/symposium', async (c) => {
     db.prepare(`SELECT ${VC} ${VJ} WHERE c.slug = 'symposium' ORDER BY v.id`).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos: videos.results }), cats.results));
+  return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos: videos.results }), cats.results, 'symposium'));
 });
 
 pages.get('/scholars', async (c) => {
@@ -118,7 +118,7 @@ pages.get('/scholars', async (c) => {
     db.prepare('SELECT s.*, (SELECT COUNT(*) FROM videos v WHERE v.scholar_id = s.id) as video_count, (SELECT SUM(views) FROM videos v WHERE v.scholar_id = s.id) as total_views FROM scholars s ORDER BY s.name').all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  return c.html(rp(c,'Scholars', renderScholars({ scholars: scholars.results }), cats.results));
+  return c.html(rp(c,'Scholars', renderScholars({ scholars: scholars.results }), cats.results, 'scholars'));
 });
 
 pages.get('/scholar/:slug', async (c) => {
@@ -130,7 +130,7 @@ pages.get('/scholar/:slug', async (c) => {
     db.prepare(`SELECT ${VC} ${VJ} WHERE v.scholar_id = ? ORDER BY v.created_at DESC`).bind(scholar.id).all(),
     db.prepare('SELECT * FROM categories ORDER BY name').all(),
   ]);
-  return c.html(rp(c,scholar.name, renderScholar({ scholar, videos: videos.results }), cats.results));
+  return c.html(rp(c,scholar.name, renderScholar({ scholar, videos: videos.results }), cats.results, 'scholars'));
 });
 
 pages.get('/history', async (c) => {

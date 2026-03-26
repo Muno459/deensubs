@@ -31,7 +31,7 @@ admin.get('/admin', async (c) => {
     db.prepare("SELECT slug, COUNT(*) as hits FROM analytics WHERE type='watch' AND slug IS NOT NULL GROUP BY slug ORDER BY hits DESC LIMIT 15").all(),
     db.prepare("SELECT DATE(created_at) as day, COUNT(*) as hits FROM analytics GROUP BY day ORDER BY day DESC LIMIT 14").all(),
     db.prepare("SELECT query, results, COUNT(*) as times FROM search_logs GROUP BY query ORDER BY times DESC LIMIT 30").all(),
-    db.prepare("SELECT ip, country, COUNT(*) as hits, MAX(created_at) as last_seen FROM analytics GROUP BY ip ORDER BY hits DESC LIMIT 30").all(),
+    db.prepare("SELECT f.*, u.name as user_name, u.email as user_email, u.avatar as user_avatar FROM fingerprints f LEFT JOIN users u ON f.user_id = u.id ORDER BY f.last_seen DESC LIMIT 50").all(),
     db.prepare("SELECT user_agent, COUNT(*) as hits FROM analytics GROUP BY user_agent ORDER BY hits DESC LIMIT 20").all(),
     db.prepare("SELECT referer, COUNT(*) as hits FROM analytics WHERE referer != '' GROUP BY referer ORDER BY hits DESC LIMIT 20").all(),
   ];
@@ -102,6 +102,19 @@ admin.post('/admin/user-role/:id', async (c) => {
   const body = await c.req.parseBody();
   await c.env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(body.role, parseInt(c.req.param('id'))).run();
   return c.redirect('/admin?tab=users' + (c.req.query('key') ? '&key=' + c.req.query('key') : ''));
+});
+
+// Fingerprint detail
+admin.get('/admin/fingerprint/:id', async (c) => {
+  if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 401);
+  const fpId = c.req.param('id');
+  const db = c.env.DB;
+  const [fp, pages, user] = await Promise.all([
+    db.prepare('SELECT * FROM fingerprints WHERE id = ?').bind(fpId).first(),
+    db.prepare("SELECT path, slug, created_at FROM analytics WHERE ip = (SELECT ip FROM fingerprints WHERE id = ?) ORDER BY created_at DESC LIMIT 100").bind(fpId).all(),
+    db.prepare('SELECT u.* FROM users u JOIN fingerprints f ON u.id = f.user_id WHERE f.id = ?').bind(fpId).first(),
+  ]);
+  return c.json({ fingerprint: fp, pages: pages.results, user });
 });
 
 // SQL Console (read-only)
