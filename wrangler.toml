@@ -2,23 +2,73 @@ name = "deensubs"
 main = "src/index.js"
 compatibility_date = "2024-12-01"
 
+[build]
+command = "node build.js"
+
 [[rules]]
 type = "Text"
 globs = ["**/*.css", "**/*.txt"]
+fallthrough = false
+
+[[rules]]
+type = "Data"
+globs = ["**/*.woff2"]
 fallthrough = false
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "deensubs-media-weur"
 
+[[r2_buckets]]
+binding = "MEDIA_ENAM"
+bucket_name = "deensubs-media-enam"
+
+[[r2_buckets]]
+binding = "MEDIA_WNAM"
+bucket_name = "deensubs-media-wnam"
+
+[[r2_buckets]]
+binding = "MEDIA_EEUR"
+bucket_name = "deensubs-media-eeur"
+
+[[r2_buckets]]
+binding = "MEDIA_APAC"
+bucket_name = "deensubs-media-apac"
+
+[[r2_buckets]]
+binding = "MEDIA_OC"
+bucket_name = "deensubs-media-oc"
+
 [[kv_namespaces]]
 binding = "CACHE"
 id = "c025d769b8584d02aedcdaca9ba9edc0"
+
+[[kv_namespaces]]
+binding = "MEDIA_KV"
+id = "3f3865624af74750b17c9aa3826f3d28"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "deensubs-db-weur"
 database_id = "e90d776f-5d7a-4b8e-8e3a-3c0b5e9dd0aa"
+
+# Analytics Engine — high-write analytics (pageviews, watch events)
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "deensubs_analytics"
+
+# Queue — async tasks (view increments, search logs)
+[[queues.producers]]
+queue = "deensubs-tasks"
+binding = "TASKS"
+
+[[queues.consumers]]
+queue = "deensubs-tasks"
+max_batch_size = 100
+max_batch_timeout = 15
+max_retries = 3
+retry_delay = 30
+dead_letter_queue = "deensubs-tasks-dlq"
 
 # Daily cron: optimize images + clean expired sessions
 [triggers]

@@ -1,6 +1,6 @@
-import { e, fv, ft, thu, thuSrcset, ago, jsStr, cdn } from '../lib/helpers.js';
+import { e, fv, ft, thu, thuSrcset, ago, jsStr, cdn, schImg } from '../lib/helpers.js';
 import { tsvg } from '../components/thumbnail.js';
-import WATCH_JS from '../scripts/watch.txt';
+import WATCH_JS from '../scripts/watch.min.txt';
 
 import { scard } from '../components/video-card.js';
 
@@ -12,18 +12,33 @@ export function renderWatch({ video, related, cues, base }) {
     name:video.title, description:video.description||'',
     uploadDate:video.created_at?.split(' ')[0]||'',
     thumbnailUrl:th?base+th:'',
+    contentUrl:base+'/api/media/'+video.video_key,
+    embedUrl:base+'/watch/'+video.slug,
     duration:video.duration?'PT'+Math.floor(video.duration/60)+'M'+Math.floor(video.duration%60)+'S':'',
+    interactionStatistic:[
+      {'@type':'InteractionCounter',interactionType:{'@type':'WatchAction'},userInteractionCount:video.views||0},
+      {'@type':'InteractionCounter',interactionType:{'@type':'LikeAction'},userInteractionCount:video.likes||0},
+    ],
+    ...(video.source||video.scholar_name?{author:{'@type':'Person',name:video.source||video.scholar_name}}:{}),
+    inLanguage:'ar',
+    subtitleLanguage:'en',
   });
+  const breadcrumb = JSON.stringify({'@context':'https://schema.org','@type':'BreadcrumbList',itemListElement:[
+    {'@type':'ListItem',position:1,name:'Home',item:base+'/'},
+    ...(video.category_name?[{'@type':'ListItem',position:2,name:video.category_name,item:base+'/category/'+video.category_slug}]:[]),
+    {'@type':'ListItem',position:video.category_name?3:2,name:video.title},
+  ]});
   return `
-${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
+${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
 <script type="application/ld+json">${jsonLd}</script>
+<script type="application/ld+json">${breadcrumb}</script>
 <div class="wl">
   <div class="wm">
     <div class="vp" id="vp">
-      <video id="vid" crossorigin="anonymous" preload="auto" playsinline${th?` poster="${e(th)}"`:''}>
+      <video id="vid" preload="metadata" playsinline${th?` poster="${e(th)}"`:''} aria-label="${e(video.title)}">
         <source src="${cdn(video.video_key)}" type="video/mp4">
-        ${video.srt_key?`<track kind="subtitles" src="${cdn('vtt/'+video.srt_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="en" label="English" default>`:''}
-        ${video.srt_ar_key?`<track kind="subtitles" src="${cdn('vtt/'+video.srt_ar_key.replace('subs/','').replace('.srt','.vtt'))}" srclang="ar" label="العربية">`:''}
+        ${video.srt_key?`<track kind="subtitles" src="/api/vtt/${e(video.srt_key)}" srclang="en" label="English" default>`:''}
+        ${video.srt_ar_key?`<track kind="subtitles" src="/api/vtt/${e(video.srt_ar_key)}" srclang="ar" label="العربية">`:''}
       </video>
       <div class="vp-spinner" id="vp-spin"></div>
       <button class="vp-mini-close" id="vp-mini-x">&times;</button>
@@ -39,7 +54,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
       </div>
       <div class="vp-bar" id="vp-bar">
         <button class="vb" id="vpp" title="Play (k)"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path id="ppi" d="M8 5v14l11-7z"/></svg></button>
-        <div class="vp-sk" id="vsk"><div class="vp-bf" id="vbf"></div><div class="vp-pg" id="vpg"><div class="vp-dot"></div></div></div>
+        <div class="vp-sk" id="vsk"><div class="vp-bf" id="vbf"></div><div class="vp-pg" id="vpg"><div class="vp-dot"></div></div><div class="sk-tip" id="sk-tip"></div></div>
         <span class="vp-tm" id="vtm">0:00 / 0:00</span>
         <button class="vb" id="vvol" title="Mute (m)"><svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path id="voli" d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
         <input type="range" class="vb-vr" id="vvr" min="0" max="1" step=".05" value="1" title="Volume">
@@ -62,36 +77,41 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
           <h1>${e(video.title)}</h1>
         </div>
         <div class="wi-acts">
-          <button class="wa" id="lk-btn" title="Like"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg><span id="lk-ct">${video.likes||0}</span></button>
-          <button class="wa" id="bk-btn" title="Bookmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg><span>Save</span></button>
-          <button class="wa" id="sh-btn" title="Share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span>Share</span></button>
-          <button class="wa" id="dl-btn" title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span></button>
+          <button class="wa" id="lk-btn" title="Like" aria-label="Like this video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg><span id="lk-ct">${video.likes||0}</span></button>
+          <button class="wa" id="bk-btn" title="Bookmark" aria-label="Save to bookmarks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg><span>Save</span></button>
+          <button class="wa" id="sh-btn" title="Share" aria-label="Share this video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span>Share</span></button>
+          <button class="wa" id="dl-btn" title="Download" aria-label="Download video and subtitles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span></button>
         </div>
       </div>
       <div class="wi-mt">
         <span>${fv(video.views)}</span>
         <span>${ago(video.created_at)}</span>
+        ${video.duration?`<span>${Math.floor(video.duration/60)} min</span>`:''}
         ${video.category_name?`<a href="/category/${e(video.category_slug)}" class="tag" style="--tc:${e(video.category_color)}">${e(video.category_name)}</a>`:''}
-        <span class="tag tag-s">Arabic &rarr; English</span>
+        ${video.srt_key?'<span class="tag tag-s">EN subs</span>':''}
+        ${video.srt_ar_key?'<span class="tag tag-s">AR subs</span>':''}
       </div>
-      ${video.scholar_slug?`<a href="/scholar/${e(video.scholar_slug)}" class="wi-sch-card">
-        <div class="wi-sch-av">${video.scholar_photo?`<img src="${cdn(video.scholar_photo)}" alt="">`:e((video.source||video.scholar_name||'').split(' ').pop().charAt(0))}</div>
-        <div class="wi-sch-info"><span class="wi-sch-name">${e(video.source||video.scholar_name)}</span>${video.scholar_title?`<span class="wi-sch-title">${e(video.scholar_title)}</span>`:''}</div>
-      </a>`:video.source?`<div class="wi-source">${e(video.source)}</div>`:''}
-      ${video.description?`<div class="wi-desc">${e(video.description)}</div>`:''}
+      <div class="wi-info-card">
+        ${video.scholar_slug?`<a href="/scholar/${e(video.scholar_slug)}" class="wi-sch">
+          <div class="wi-sch-av">${video.scholar_photo?`<img src="${schImg(video.scholar_photo)}" alt="">`:e((video.source||video.scholar_name||'').split(' ').pop().charAt(0))}</div>
+          <div class="wi-sch-info"><span class="wi-sch-name">${e(video.source||video.scholar_name)}</span>${video.scholar_title?`<span class="wi-sch-title">${e(video.scholar_title)}</span>`:''}</div>
+        </a>`:video.source?`<div class="wi-sch"><div class="wi-sch-av">${e((video.source||'').split(' ').pop().charAt(0))}</div><div class="wi-sch-info"><span class="wi-sch-name">${e(video.source)}</span></div></div>`:''}
+        ${video.description?`<p class="wi-desc">${e(video.description)}</p>`:''}
+      </div>
     </div>
     ${cues&&cues.length?`
-    <details class="tr" open>
-      <summary class="tr-hd">Transcript <span class="tr-ct">${cues.length} lines</span></summary>
+    <div class="tr">
+      <div class="tr-top"><span class="tr-hd">Transcript</span><span class="tr-ct">${cues.length} lines</span><button type="button" class="tr-copy" id="tr-copy" title="Copy transcript">Copy</button></div>
+      <div class="tr-search"><input type="search" id="tr-q" placeholder="Search transcript..." autocomplete="off"><span id="tr-match"></span></div>
       <div class="tr-ls" id="trl">${cues.map((c,i)=>`<div class="tl" data-i="${i}" data-s="${c.start}" data-e="${c.end}"><span class="tl-t">${ft(c.start)}</span><p>${e(c.text)}</p></div>`).join('')}</div>
-    </details>`:''}
+    </div>`:''}
     <div class="cms">
-      <h2 id="cm-count">Comments</h2>
+      <div style="display:flex;align-items:baseline;justify-content:space-between"><h2 id="cm-count">Comments</h2><div class="cm-sort"><button class="cm-sort-btn cm-sort-on" id="cm-new">Newest</button><button class="cm-sort-btn" id="cm-old">Oldest</button></div></div>
       ${video._user ? `
       <form id="cf" class="cf" data-slug="${e(video.slug)}">
         <div class="cf-r"><input name="author" type="hidden" value="${e(video._user.name)}"><div class="cf-user"><img src="${e(video._user.avatar)}" class="cf-user-av"><span>${e(video._user.name)}</span></div><button type="submit">Post</button></div>
         <div class="cf-ta-wrap"><textarea name="content" placeholder="Share your thoughts..." maxlength="2000" rows="2" required id="cf-ta"></textarea><span class="cf-counter" id="cf-ct">2000</span></div>
-      </form>` : `<div class="cm-login"><a href="/auth/google" class="cm-login-btn">Sign in to comment</a></div>`}
+      </form>` : `<div class="cm-login"><a href="/auth/google" class="cm-login-btn" rel="nofollow">Sign in to comment</a></div>`}
       <div id="cl" class="cl">
         <div class="skel-cm"><div class="skel-cm-av skel-shimmer"></div><div class="skel-cm-body"><div class="skel-line skel-shimmer" style="width:30%"></div><div class="skel-line skel-shimmer" style="width:80%"></div></div></div>
         <div class="skel-cm"><div class="skel-cm-av skel-shimmer"></div><div class="skel-cm-body"><div class="skel-line skel-shimmer" style="width:25%"></div><div class="skel-line skel-shimmer" style="width:60%"></div></div></div>
@@ -100,6 +120,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
     </div>
   </div>
   <aside class="ws">
+    ${related && related.length ? `<div class="ws-next"><span class="ws-next-label">Up Next</span><a href="/watch/${e(related[0].slug)}" class="ws-next-title">${e(related[0].title)}</a></div>` : ''}
     <h3>Related</h3>
     ${related && related.length ? related.map(scard).join('') : '<p class="emp-s">More content soon.</p>'}
   </aside>
@@ -111,6 +132,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}" crossorigin>`:''}
 <a href="${cdn(video.video_key)}" download class="dl-item"><div class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><div><div class="dl-label">Video</div><div class="dl-sub">MP4 · Original quality</div></div></a>
 ${video.srt_key?`<a href="${cdn(video.srt_key)}" download class="dl-item"><div class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div><div><div class="dl-label">English Subtitles</div><div class="dl-sub">SRT format</div></div></a>`:''}
 ${video.srt_ar_key?`<a href="${cdn(video.srt_ar_key)}" download class="dl-item"><div class="dl-icon dl-icon-ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div><div><div class="dl-label">Arabic Subtitles</div><div class="dl-sub">SRT · العربية</div></div></a>`:''}
+<button class="dl-item" id="dl-embed" type="button"><div class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div><div><div class="dl-label">Embed Code</div><div class="dl-sub">Copy HTML to embed on your site</div></div></button>
 </div></div></div>
 <script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__SRT_AR__',video.srt_ar_key?e(video.srt_ar_key):'').replace('__TITLE__',jsStr(video.title)).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',jsStr(video.source||''))}</script>`;
 }

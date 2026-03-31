@@ -40,14 +40,16 @@ function deviceIcon(type) {
   }
 }
 
-export function renderAdmin({ videos, categories, key, editing, tab, users, comments, stats, countries, topPages, topVideos, dailyHits, searchLogs, visitors, agents, referers }) {
+export function renderAdmin({ videos, categories, key, editing, tab, users, comments, stats, countries, topPages, topVideos, dailyHits, searchLogs, visitors, agents, referers, watchEvents, watchCompletion, watchConnections, scholars }) {
   const v = editing || {};
   const isEdit = !!editing;
   const q = key ? '&key=' + e(key) : '';
   const formAction = isEdit ? `/admin/edit/${v.id}?${q.slice(1)}` : `/admin/video?${q.slice(1)}`;
   countries = countries || []; topPages = topPages || []; topVideos = topVideos || [];
   dailyHits = dailyHits || []; searchLogs = searchLogs || []; visitors = visitors || [];
-  agents = agents || []; referers = referers || [];
+  agents = agents || []; referers = referers || []; watchEvents = watchEvents || [];
+  watchCompletion = watchCompletion || []; watchConnections = watchConnections || [];
+  scholars = scholars || [];
 
   const tabs = [
     ['dashboard',  'Dashboard',  '<path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>'],
@@ -57,6 +59,7 @@ export function renderAdmin({ videos, categories, key, editing, tab, users, comm
     ['users',      'Users',      '<path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m9 5.197v-1"/>'],
     ['searches',   'Searches',   '<path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>'],
     ['visitors',   'Visitors',   '<path d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'],
+    ['watch',      'Watch Events','<path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'],
     ['sql',        'SQL Console', '<path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>'],
     ['tools',      'Tools',      '<path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>'],
     ['ai',         'AI Assistant','<path d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 3.3a.75.75 0 01-.588.307H8.058a.75.75 0 01-.588-.307L5 14.5m14 0H5m5.25 5.25v1.5m3.5-1.5v1.5"/>'],
@@ -776,7 +779,7 @@ ${!isEdit && tab === 'videos' ? `
       <th style="width:120px">Actions</th>
     </tr>
     ${videos.map(vi => {
-      const thumbUrl = vi.thumb_key ? `https://cdn.deensubs.com/${vi.thumb_key}` : '';
+      const thumbUrl = vi.thumb_key ? `/img/${vi.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '')}-640w.avif` : '';
       return `<tr>
         <td>${thumbUrl ? `<img src="${e(thumbUrl)}" class="thumb-sm" alt="" loading="lazy">` : '<div class="thumb-sm" style="background:var(--bg-deep)"></div>'}</td>
         <td><a href="/watch/${e(vi.slug)}" style="font-weight:500">${e(vi.title)}</a></td>
@@ -955,10 +958,139 @@ ${!isEdit && tab === 'visitors' ? `
       <div class="device-expand-row"><span class="lbl">First Seen</span><span class="val">${vi.first_seen || 'N/A'}</span></div>
       <div class="device-expand-row"><span class="lbl">Last Seen</span><span class="val">${vi.last_seen || 'N/A'}</span></div>
       <div class="device-expand-row"><span class="lbl">User ID</span><span class="val">${vi.user_id || 'Anonymous'}</span></div>
+      <div style="margin-top:.65rem"><button class="btn-sm btn-ghost vj-btn" onclick="event.stopPropagation();showVisitorJourney('${e(vi.id)}')">View Full Journey</button></div>
     </div>
   </div>`).join('')}
 </div>
 ${!visitors.length ? '<div class="empty-state">No visitor fingerprints yet</div>' : ''}
+
+<!-- Visitor Journey Modal -->
+<div id="vj-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);overflow-y:auto">
+  <div style="max-width:680px;margin:3rem auto;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h3 style="font-size:.95rem;font-weight:600">Visitor Journey</h3>
+      <button onclick="document.getElementById('vj-modal').style.display='none'" style="background:none;border:none;color:var(--text-dim);font-size:1.2rem;cursor:pointer">&times;</button>
+    </div>
+    <div id="vj-content"><div style="color:var(--text-muted);font-size:.78rem">Loading...</div></div>
+  </div>
+</div>
+<script>
+function showVisitorJourney(fpId){
+  var modal=document.getElementById('vj-modal');
+  var content=document.getElementById('vj-content');
+  modal.style.display='block';content.innerHTML='<div style="color:var(--text-muted);font-size:.78rem">Loading journey data...</div>';
+  fetch('/admin/visitor-journey/'+fpId).then(function(r){return r.json()}).then(function(d){
+    if(!d.fingerprint){content.innerHTML='<p style="color:var(--red)">Fingerprint not found</p>';return}
+    var fp=d.fingerprint;var html='';
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem">';
+    html+='<div style="font-size:.72rem"><span style="color:var(--text-muted)">Device:</span> '+fp.os+' / '+fp.browser+'</div>';
+    html+='<div style="font-size:.72rem"><span style="color:var(--text-muted)">Screen:</span> '+fp.screen_w+'x'+fp.screen_h+'</div>';
+    html+='<div style="font-size:.72rem"><span style="color:var(--text-muted)">Location:</span> '+(fp.country||'??')+' '+(fp.city||'')+'</div>';
+    html+='<div style="font-size:.72rem"><span style="color:var(--text-muted)">Visits:</span> '+fp.visit_count+'</div>';
+    html+='</div>';
+    if(d.user){html+='<div style="padding:.65rem;background:rgba(196,164,76,.06);border-radius:8px;margin-bottom:1rem;font-size:.78rem"><strong style="color:var(--gold)">Linked user:</strong> '+d.user.name+' ('+d.user.email+')</div>';}
+    if(d.watchEvents&&d.watchEvents.length){
+      html+='<h4 style="font-size:.8rem;color:var(--text-dim);margin-bottom:.5rem">Watch History</h4>';
+      html+='<div style="max-height:300px;overflow-y:auto">';
+      var seen={};d.watchEvents.forEach(function(w){
+        if(seen[w.video_slug])return;seen[w.video_slug]=true;
+        var title=d.videoMap[w.video_slug]||w.video_slug;
+        var pct=w.duration>0?Math.round(w.position*100/w.duration):0;
+        html+='<div style="display:flex;align-items:center;gap:.65rem;padding:.45rem 0;border-bottom:1px solid rgba(255,255,255,.03)">';
+        html+='<div style="flex:1;min-width:0"><div style="font-size:.75rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+title+'</div>';
+        html+='<div style="font-size:.62rem;color:var(--text-muted)">'+w.created_at+'</div></div>';
+        html+='<div style="width:60px;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--gold);border-radius:3px"></div></div>';
+        html+='<span style="font-size:.65rem;color:var(--text-muted);min-width:30px;text-align:right">'+pct+'%</span></div>';
+      });
+      html+='</div>';
+    } else {html+='<p style="color:var(--text-muted);font-size:.75rem">No watch events recorded for this device</p>';}
+    content.innerHTML=html;
+  }).catch(function(ex){content.innerHTML='<p style="color:var(--red)">'+ex.message+'</p>'});
+}
+</script>
+` : ''}
+
+${!isEdit && tab === 'watch' ? `
+<!-- ── Watch Events Analytics ── -->
+<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:1.5rem">
+  ${(() => {
+    const totalEvents = watchEvents.reduce((s, e) => s + e.count, 0);
+    const playEvents = watchEvents.find(e => e.event_type === 'play')?.count || 0;
+    const endEvents = watchEvents.find(e => e.event_type === 'end')?.count || 0;
+    const uniqueVids = watchCompletion.length;
+    return `
+    <div class="stat-card"><div class="stat-label">Total Events</div><div class="stat-value">${fmt(totalEvents)}</div></div>
+    <div class="stat-card"><div class="stat-label">Play Events</div><div class="stat-value">${fmt(playEvents)}</div></div>
+    <div class="stat-card"><div class="stat-label">Completions</div><div class="stat-value">${fmt(endEvents)}</div></div>
+    <div class="stat-card"><div class="stat-label">Videos Watched</div><div class="stat-value">${fmt(uniqueVids)}</div></div>`;
+  })()}
+</div>
+
+<!-- Event Type Distribution -->
+<div class="grid-2" style="margin-bottom:1.5rem">
+  <div class="card">
+    <div class="card-header"><h4>Event Distribution</h4></div>
+    <div class="card-body">
+      <div class="hbar">
+      ${(() => {
+        const maxE = Math.max(...watchEvents.map(e => e.count), 1);
+        const colors = { play: 'green', pause: 'gold', seek: 'blue', end: 'purple', buffer: 'gold' };
+        return watchEvents.map(ev => `<div class="hbar-row">
+          <div class="hbar-label">${e(ev.event_type)}</div>
+          <div class="hbar-track"><div class="hbar-fill ${colors[ev.event_type] || 'gold'}" style="width:${Math.max((ev.count / maxE) * 100, 2)}%"></div></div>
+          <div class="hbar-val">${fmt(ev.count)}</div>
+        </div>`).join('');
+      })()}
+      ${!watchEvents.length ? '<div class="empty-state">No watch events yet</div>' : ''}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h4>Connection Types</h4></div>
+    <div class="card-body">
+      <div class="hbar">
+      ${(() => {
+        const maxC = Math.max(...(watchConnections || []).map(c => c.count), 1);
+        return (watchConnections || []).map(c => `<div class="hbar-row">
+          <div class="hbar-label">${e(c.connection || 'unknown')}</div>
+          <div class="hbar-track"><div class="hbar-fill blue" style="width:${Math.max((c.count / maxC) * 100, 2)}%"></div></div>
+          <div class="hbar-val">${fmt(c.count)}</div>
+        </div>`).join('');
+      })()}
+      ${!watchConnections?.length ? '<div class="empty-state">No connection data</div>' : ''}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Video Completion Rates -->
+<div class="card" style="margin-bottom:1.5rem">
+  <div class="card-header"><h4>Video Engagement</h4><span class="sh-badge">${watchCompletion.length} videos tracked</span></div>
+  <div class="card-body np">
+    <table>
+      <tr><th>Video</th><th>Unique Viewers</th><th>Events</th><th style="width:180px">Avg. Completion</th></tr>
+      ${watchCompletion.map(w => {
+        const title = resolveTitle(w.video_slug, videos);
+        const pct = Math.min(w.avg_pct || 0, 100);
+        return `<tr>
+          <td><a href="/watch/${e(w.video_slug)}" style="font-size:.78rem">${e(title)}</a></td>
+          <td style="font-weight:500">${fmt(w.viewers)}</td>
+          <td>${fmt(w.events)}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:.5rem">
+              <div style="flex:1;height:8px;background:rgba(255,255,255,.04);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:${pct > 50 ? 'var(--green)' : pct > 25 ? 'var(--gold)' : 'var(--red)'};border-radius:4px;transition:width .6s"></div>
+              </div>
+              <span style="font-size:.7rem;color:var(--text-dim);min-width:35px;text-align:right">${pct.toFixed(0)}%</span>
+            </div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </table>
+    ${!watchCompletion.length ? '<div class="empty-state">No watch data yet. Watch events are recorded as users play videos.</div>' : ''}
+  </div>
+</div>
 ` : ''}
 
 ${!isEdit && tab === 'sql' ? `
@@ -1133,21 +1265,38 @@ function quickSql(q){
 ${!isEdit && tab === 'ai' ? `
 <div class="ai-container">
   <div class="ai-tools-bar">
-    <span style="font-size:.68rem;color:var(--text-muted)">Tools:</span>
+    <span style="font-size:.68rem;color:var(--text-muted)">18 tools:</span>
     <span class="ai-tool-tag">query_database</span>
     <span class="ai-tool-tag">get_video_stats</span>
     <span class="ai-tool-tag">get_platform_stats</span>
+    <span class="ai-tool-tag">get_engagement_report</span>
+    <span class="ai-tool-tag">get_watch_analytics</span>
+    <span class="ai-tool-tag">get_traffic_trends</span>
     <span class="ai-tool-tag">get_top_searches</span>
+    <span class="ai-tool-tag">get_zero_result_searches</span>
+    <span class="ai-tool-tag">get_content_gaps</span>
+    <span class="ai-tool-tag">get_visitor_countries</span>
+    <span class="ai-tool-tag">get_visitor_devices</span>
+    <span class="ai-tool-tag">get_user_activity</span>
+    <span class="ai-tool-tag">get_scholar_stats</span>
+    <span class="ai-tool-tag">get_category_stats</span>
     <span class="ai-tool-tag">moderate_comment</span>
     <span class="ai-tool-tag">update_video</span>
+    <span class="ai-tool-tag">purge_cache</span>
+    <span class="ai-tool-tag">list_r2_files</span>
   </div>
   <div class="ai-messages" id="ai-chat">
-    <div class="ai-msg ai-bot">I'm your DeenSubs admin assistant with <strong>direct database access</strong>. I can:<br><br>
-    &bull; Query any data — "Show me the top 5 videos by views"<br>
-    &bull; Moderate — "Delete comment #42"<br>
-    &bull; Update content — "Update the description of ruling-praying-asr-at-home"<br>
-    &bull; Analyze — "What are people searching for?"<br>
-    &bull; Strategize — "What content should we add next?"</div>
+    <div class="ai-msg ai-bot">I'm your DeenSubs admin assistant with <strong>18 tools</strong> and <strong>direct database access</strong>.<br><br>
+    <strong>Data &amp; Analytics</strong><br>
+    &bull; "Show platform stats" &bull; "What are the engagement rates?" &bull; "Show watch analytics"<br>
+    &bull; "Traffic trends for the last 30 days" &bull; "Which videos have zero views?"<br><br>
+    <strong>Content Strategy</strong><br>
+    &bull; "What content gaps do we have?" &bull; "What are people searching for but not finding?"<br>
+    &bull; "Scholar performance breakdown" &bull; "Category stats"<br><br>
+    <strong>Visitor Intelligence</strong><br>
+    &bull; "Where are visitors from?" &bull; "Device breakdown" &bull; "Show activity for user #3"<br><br>
+    <strong>Actions</strong><br>
+    &bull; "Update description of [slug]" &bull; "Delete comment #42" &bull; "Purge cache" &bull; "List R2 files"</div>
   </div>
   <div class="ai-input-wrap">
     <input type="text" id="ai-input" placeholder="e.g. Show me the most watched videos this week..." autocomplete="off">
@@ -1209,9 +1358,10 @@ ${!isEdit && tab === 'add' ? `
     </div>
     <div class="form-section">
       <div class="form-section-title"><span class="num">2</span> Categorization</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem">
         <div><label>Category</label><select name="category_id">${categories.map(c => `<option value="${c.id}">${e(c.name)}</option>`).join('')}</select></div>
-        <div><label>Source / Scholar</label><input name="source" placeholder="e.g. Sheikh Salih al-Fawzan"></div>
+        <div><label>Scholar</label><select name="scholar_id"><option value="">— None —</option>${scholars.map(s => `<option value="${s.id}">${e(s.name)}</option>`).join('')}</select></div>
+        <div><label>Source Label</label><input name="source" placeholder="e.g. Sheikh Salih al-Fawzan"></div>
       </div>
       <label>Duration (seconds)</label>
       <input name="duration" type="number" placeholder="360">
@@ -1219,11 +1369,14 @@ ${!isEdit && tab === 'add' ? `
     <div class="form-section">
       <div class="form-section-title"><span class="num">3</span> R2 Media Keys</div>
       <p style="font-size:.72rem;color:var(--text-muted);margin-bottom:.5rem">Upload files to R2 first via CLI or S3 API, then enter the keys below.</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem">
-        <div><label>Video Key *</label><input name="video_key" required placeholder="videos/file.mp4"></div>
-        <div><label>Subtitle Key</label><input name="srt_key" placeholder="subs/file.srt"></div>
-        <div><label>Thumbnail Key</label><input name="thumb_key" placeholder="thumbs/file.jpg"></div>
+      <label>Video Key * <button type="button" class="ai-gen-btn" onclick="browseR2('video_key','videos/')">Browse R2</button></label>
+      <input name="video_key" id="add-video-key" required placeholder="videos/file.mp4">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+        <div><label>English Subtitle <button type="button" class="ai-gen-btn" onclick="browseR2('srt_key','subs/')">Browse</button></label><input name="srt_key" id="add-srt-key" placeholder="subs/file.srt"></div>
+        <div><label>Arabic Subtitle <button type="button" class="ai-gen-btn" onclick="browseR2('srt_ar_key','subs/')">Browse</button></label><input name="srt_ar_key" id="add-srt-ar-key" placeholder="subs/file-ar.srt"></div>
       </div>
+      <label>Thumbnail Key <button type="button" class="ai-gen-btn" onclick="browseR2('thumb_key','thumbs/')">Browse</button></label>
+      <input name="thumb_key" id="add-thumb-key" placeholder="thumbs/file.jpg">
     </div>
     <div class="form-section" style="display:flex;justify-content:flex-end;gap:.75rem;align-items:center">
       <a href="/admin?tab=videos${q}" style="font-size:.82rem;color:var(--text-muted)">Cancel</a>
@@ -1237,6 +1390,33 @@ document.getElementById('add-title').addEventListener('input',function(){
   var slug=this.value.toLowerCase().replace(/[^a-z0-9\\s-]/g,'').replace(/\\s+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
   document.getElementById('add-slug').value=slug;
 });
+
+// R2 file browser
+function browseR2(targetField, prefix){
+  var modal=document.createElement('div');
+  modal.style.cssText='position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;max-width:540px;width:90%;max-height:70vh;overflow-y:auto';
+  inner.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem"><h3 style="font-size:.85rem">R2: '+prefix+'</h3><button onclick="this.closest(\'div[style]\').parentElement.remove()" style="background:none;border:none;color:var(--text-dim);font-size:1.2rem;cursor:pointer">&times;</button></div><div style="color:var(--text-muted);font-size:.75rem">Loading...</div>';
+  modal.appendChild(inner);document.body.appendChild(modal);
+  modal.addEventListener('click',function(e){if(e.target===modal)modal.remove()});
+  fetch('/admin/r2-list?prefix='+encodeURIComponent(prefix)).then(function(r){return r.json()}).then(function(d){
+    if(!d.objects||!d.objects.length){inner.innerHTML='<p style="color:var(--text-muted);font-size:.78rem">No files found in '+prefix+'</p>';return}
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem"><h3 style="font-size:.85rem">R2: '+prefix+'</h3><button onclick="this.closest(\'div[style]\').parentElement.remove()" style="background:none;border:none;color:var(--text-dim);font-size:1.2rem;cursor:pointer">&times;</button></div>';
+    d.objects.forEach(function(o){
+      var sizeStr=o.size_kb>1024?(o.size_kb/1024).toFixed(1)+' MB':o.size_kb+' KB';
+      html+='<div class="r2-file" data-key="'+o.key+'" style="display:flex;justify-content:space-between;align-items:center;padding:.45rem .65rem;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer;border-radius:6px;transition:all .15s">';
+      html+='<span style="font-size:.75rem;font-family:var(--mono);color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+o.key+'</span>';
+      html+='<span style="font-size:.65rem;color:var(--text-muted);margin-left:.5rem;white-space:nowrap">'+sizeStr+'</span></div>';
+    });
+    inner.innerHTML=html;
+    inner.querySelectorAll('.r2-file').forEach(function(el){
+      el.onmouseenter=function(){this.style.background='rgba(196,164,76,.08)'};
+      el.onmouseleave=function(){this.style.background='none'};
+      el.onclick=function(){document.querySelector('[name="'+targetField+'"]').value=this.dataset.key;modal.remove()};
+    });
+  }).catch(function(){inner.innerHTML='<p style="color:var(--red);font-size:.78rem">Failed to list R2 files</p>'});
+}
 
 // AI description generation
 document.getElementById('ai-desc-btn').addEventListener('click',function(){

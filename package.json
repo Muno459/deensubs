@@ -2,12 +2,15 @@
   "name": "deensubs",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "build": "node build.js",
     "deploy": "wrangler deploy",
     "r2:create": "wrangler r2 bucket create deensubs-media"
   },
   "devDependencies": {
+    "esbuild": "^0.27.4",
     "wrangler": "^4.76.0"
   },
   "dependencies": {

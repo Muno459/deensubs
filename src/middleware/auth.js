@@ -16,11 +16,24 @@ export function genId() {
 export async function getUser(c) {
   const sid = getCookie(c, 'sid');
   if (!sid) return null;
+
+  // Check KV cache first (avoids D1 on every request)
+  const cacheKey = 'session:' + sid;
+  try {
+    const cached = await c.env.CACHE.get(cacheKey, 'json');
+    if (cached) return cached;
+  } catch {}
+
   const db = c.env.DB.withSession ? c.env.DB.withSession() : c.env.DB;
   const session = await db.prepare(
     "SELECT s.*, u.id as uid, u.name, u.email, u.avatar, u.google_id, u.role, u.created_at as user_created FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime('now')"
   ).bind(sid).first();
-  return session ? { id: session.uid, name: session.name, email: session.email, avatar: session.avatar, role: session.role || 'user', created: session.user_created } : null;
+  if (!session) return null;
+
+  const user = { id: session.uid, name: session.name, email: session.email, avatar: session.avatar, role: session.role || 'user', created_at: session.user_created };
+  // Cache for 5 minutes
+  try { await c.env.CACHE.put(cacheKey, JSON.stringify(user), { expirationTtl: 300 }); } catch {}
+  return user;
 }
 
 export async function authMiddleware(c, next) {

@@ -10,11 +10,12 @@ export function vcard(v, opts) {
 
   const eager = opts.eager;
   const srcset = thuSrcset(v);
-  return `<a href="/watch/${e(v.slug)}" class="card${opts.anim ? ' card-anim' : ''}">
+  return `<a href="/watch/${e(v.slug)}" class="card${opts.anim ? ' card-anim' : ''}" title="${e(v.title)}${v.source ? ' — ' + e(v.source) : ''}">
 <div class="card-th">
-  ${!th ? tsvg(v.title, col) : `<img src="${e(th)}" ${srcset ? `srcset="${srcset}" sizes="(max-width:768px) 50vw, 280px"` : ''} alt="" class="card-img" loading="${eager ? 'eager' : 'lazy'}"${eager ? ' fetchpriority="high"' : ''}>`}
+  ${!th ? tsvg(v.title, col) : `<img src="${e(th)}" ${srcset ? `srcset="${srcset}" sizes="(max-width:768px) 50vw, 280px"` : ''} alt="${e(v.title)}" class="card-img" width="640" height="360" loading="${eager ? 'eager' : 'lazy'}" decoding="async"${eager ? ' fetchpriority="high"' : ''}>`}
   <div class="card-hover"><div class="card-pi"></div></div>
   ${v.duration ? `<span class="dur">${ft(v.duration)}</span>` : ''}
+  ${v.srt_key ? '<span class="badge-cc">CC</span>' : ''}
   ${fresh ? '<span class="badge-new">NEW</span>' : ''}
 </div>
 <div class="card-bd">
@@ -36,8 +37,8 @@ export function scard(v) {
   const th = thu(v);
   const col = v.category_color || '#c4a44c';
   return `<a href="/watch/${e(v.slug)}" class="sc">
-<div class="sc-th"${th ? ` style="background-image:url('${e(th)}');background-size:cover;background-position:center"` : ''}>
-  ${!th ? tsvg(v.title, col, 140, 79) : ''}
+<div class="sc-th">
+  ${th ? `<img src="${e(th)}" alt="${e(v.title)}" loading="lazy" decoding="async" class="sc-img">` : tsvg(v.title, col, 140, 79)}
   ${v.duration ? `<span class="dur dur-s">${ft(v.duration)}</span>` : ''}
 </div>
 <div class="sc-i"><h4>${e(v.title)}</h4><span>${v.source ? e(v.source) : ''}</span><span>${fv(v.views)}</span></div></a>`;
@@ -47,7 +48,13 @@ export function scard(v) {
 export function section(title, titleAr, items, opts) {
   opts = opts || {};
   if (!items.length) return '';
-  return `<section class="sec${opts.scroll ? ' sec-scroll' : ''}">
+  const cards = items.map((v, i) => vcard(v, { anim: true, eager: opts.eager && i < 5 })).join('');
+  if (opts.scroll) {
+    return `<section class="sec sec-scroll">
 <div class="sec-hd">${titleAr ? `<span class="sec-ar">${e(titleAr)}</span>` : ''}<h2>${title}</h2>${opts.link ? `<a href="${e(opts.link)}" class="sec-more">View all &rarr;</a>` : ''}</div>
-<div class="${opts.scroll ? 'hscroll' : 'grid'}">${items.map((v, i) => vcard(v, { anim: true, eager: opts.eager && i < 5 })).join('')}</div></section>`;
+<div class="hscroll-wrap"><button class="hscroll-arr hscroll-arr-l" aria-label="Scroll left"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><div class="hscroll">${cards}</div><button class="hscroll-arr hscroll-arr-r" aria-label="Scroll right"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button></div></section>`;
+  }
+  return `<section class="sec">
+<div class="sec-hd">${titleAr ? `<span class="sec-ar">${e(titleAr)}</span>` : ''}<h2>${title}</h2>${opts.link ? `<a href="${e(opts.link)}" class="sec-more">View all &rarr;</a>` : ''}</div>
+<div class="grid">${cards}</div></section>`;
 }

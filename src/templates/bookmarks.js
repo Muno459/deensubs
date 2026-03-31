@@ -16,15 +16,14 @@ export function renderBookmarks() {
     var found=bks.map(function(s){return map[s]}).filter(Boolean);
     if(!found.length){grid.innerHTML='<p class="emp">No saved videos found.</p>';return}
     grid.innerHTML=found.map(function(v){
-      return '<a href="/watch/'+v.slug+'" class="card"><div class="card-th"'+(v.thumb_key?' data-bg="/api/media/'+v.thumb_key+'"':'')+'>'
+      var base=v.thumb_key?v.thumb_key.replace(/\.(jpg|jpeg|png)$/i,''):'';
+      var thumb=base?'/img/'+base+'-640w.avif':'';
+      return '<a href="/watch/'+v.slug+'" class="card card-anim"><div class="card-th">'
+        +(thumb?'<img src="'+thumb+'" alt="" class="card-img" loading="lazy">':'')
         +(v.duration?'<span class="dur">'+Math.floor(v.duration/60)+':'+String(Math.floor(v.duration%60)).padStart(2,'0')+'</span>':'')
         +'</div><div class="card-bd"><h3>'+v.title.replace(/</g,'&lt;')+'</h3>'
         +'<div class="card-mt"><span>'+(v.source||'').replace(/</g,'&lt;')+'</span></div></div></a>';
     }).join('');
-    // Lazy load
-    grid.querySelectorAll('[data-bg]').forEach(function(el){
-      el.style.backgroundImage="url('"+el.dataset.bg+"')";el.style.backgroundSize='cover';el.style.backgroundPosition='center';
-    });
   }).catch(function(){grid.innerHTML='<p class="emp">Failed to load bookmarks.</p>'});
 })();
 </script>`;

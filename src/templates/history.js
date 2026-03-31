@@ -15,8 +15,9 @@ export function renderHistory() {
   grid.innerHTML=items.map(function(it){
     var pct=it.d?Math.round(it.t/it.d*100):0;
     var done=pct>95;
-    return '<a href="/watch/'+it.slug+'" class="card">'
-      +'<div class="card-th"'+(it.thumb?' style="background-image:url(\\''+it.thumb+'\\');background-size:cover;background-position:center"':'')+'>'
+    return '<a href="/watch/'+it.slug+'" class="card card-anim">'
+      +'<div class="card-th">'
+      +(it.thumb?'<img src="'+it.thumb+'" alt="" class="card-img" loading="lazy">':'')
       +'<div class="cw-prog" style="width:'+pct+'%"></div>'
       +(done?'<div class="hist-done"><svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>':'')
       +'</div><div class="card-bd"><h3>'+it.title.replace(/</g,'&lt;')+'</h3>'

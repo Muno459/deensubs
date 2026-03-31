@@ -1,12 +1,12 @@
 import { e, ago } from '../lib/helpers.js';
 
 export function renderProfile({ user, comments, stats }) {
-  const memberSince = user.created ? new Date(user.created + 'Z').toLocaleDateString('en', { month: 'long', year: 'numeric' }) : '';
+  const memberSince = user.created_at ? new Date(user.created_at + 'Z').toLocaleDateString('en', { month: 'long', year: 'numeric' }) : '';
   return `
 <div class="prof">
   <div class="prof-hero">
     <div class="prof-av-wrap">
-      <img src="${e(user.avatar)}" class="prof-av" alt="">
+      <img src="${e(user.avatar)}" class="prof-av" alt="${e(user.name)}">
       ${user.role === 'admin' ? '<span class="prof-badge">Admin</span>' : ''}
     </div>
     <div class="prof-info">
@@ -15,9 +15,15 @@ export function renderProfile({ user, comments, stats }) {
       ${memberSince ? `<p class="prof-since">Member since ${memberSince}</p>` : ''}
       <div class="prof-stats">
         <div class="prof-stat"><span>${stats?.comment_count || 0}</span>Comments</div>
+        <div class="prof-stat"><span id="prof-watched">-</span>Watched</div>
+        <div class="prof-stat"><span id="prof-time">-</span>Minutes</div>
       </div>
     </div>
   </div>
+<script>
+(function(){try{var w=0,t=0;for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k.startsWith('p_')){w++;try{var d=JSON.parse(localStorage.getItem(k));t+=Math.round((d.t||0)/60)}catch(e){}}}
+var we=document.getElementById('prof-watched'),te=document.getElementById('prof-time');if(we)we.textContent=w;if(te)te.textContent=t}catch(e){}})();
+</script>
 
   <div class="prof-section">
     <h2>Your Comments</h2>

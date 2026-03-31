@@ -67,7 +67,10 @@ auth.get('/auth/callback', async (c) => {
 
 auth.get('/auth/logout', async (c) => {
   const sid = getCookie(c, 'sid');
-  if (sid) await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run();
+  if (sid) {
+    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run();
+    try { await c.env.CACHE.delete('session:' + sid); } catch {}
+  }
   return new Response(null, {
     status: 302,
     headers: {

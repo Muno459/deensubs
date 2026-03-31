@@ -1,5 +1,9 @@
 node_modules/
 .wrangler/
 .dev.vars
+.env
 dist/
 .DS_Store
+*.min.css
+*.min.txt
+src/scripts/build-version.txt
