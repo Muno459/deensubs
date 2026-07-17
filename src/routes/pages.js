@@ -56,7 +56,7 @@ pages.get('/', async (c) => {
     categories: cats,
     byCategory,
     scholars,
-  }), cats));
+  }), cats, null, { pattern: true }));
   if (featured?.thumb_key) {
     const base = featured.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '');
     resp.headers.set('Link', `</img/${base}-640w.avif>; rel=preload; as=image`);
@@ -106,7 +106,7 @@ pages.get('/category/:slug', async (c) => {
     { key: 'categories', fetcher: async () => (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results, stale: 86400 },
   ]);
   if (!category) return c.html(rp(c,'Not Found', render404(), cats), 404);
-  const catMeta = { description: `Browse ${videos.length} ${category.name.toLowerCase()} videos with English subtitles — translated from Arabic by AI.` };
+  const catMeta = { description: `Browse ${videos.length} ${category.name.toLowerCase()} videos with English subtitles — translated from Arabic by AI.`, pattern: true };
   return c.html(rp(c,category.name, renderCategory({ category, videos, sort }), cats, slug, catMeta));
 });
 
@@ -132,7 +132,7 @@ pages.get('/search', async (c) => {
 
 pages.get('/symposium', async (c) => {
   const [videos, cats] = await Promise.all([getSymposiumVideos(c.env), getCategories(c.env)]);
-  return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos }), cats, 'symposium'));
+  return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos }), cats, 'symposium', { pattern: true }));
 });
 
 pages.get('/scholars', async (c) => {

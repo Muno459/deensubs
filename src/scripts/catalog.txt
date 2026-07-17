@@ -1,0 +1,64 @@
+// Catalog grid: scholar/length/subtitle filtering + client-side sort.
+// Used by category and scholar pages via initCatalog(cfg).
+// cfg: { grid, count, empty, scholars, dur, subs, sort }
+function initCatalog(cfg) {
+  var grid = document.getElementById(cfg.grid);
+  if (!grid) return;
+  var cards = [].slice.call(grid.children);
+  cards.forEach(function(c, i) { c._i = i; });
+  var fs = { scholar: '', dur: '', subs: false };
+
+  function apply() {
+    var n = 0;
+    cards.forEach(function(c) {
+      var ok = true;
+      if (fs.scholar && c.getAttribute('data-scholar') !== fs.scholar) ok = false;
+      if (ok && fs.subs && c.getAttribute('data-subs') !== '1') ok = false;
+      if (ok && fs.dur) {
+        var d = +c.getAttribute('data-dur') || 0;
+        if (fs.dur === 's') ok = d < 600;
+        else if (fs.dur === 'm') ok = d >= 600 && d <= 1800;
+        else if (fs.dur === 'l') ok = d > 1800;
+      }
+      c.style.display = ok ? '' : 'none';
+      if (ok) n++;
+    });
+    if (cfg.count) {
+      var ct = document.getElementById(cfg.count);
+      if (ct) ct.textContent = n + (n === 1 ? ' video' : ' videos');
+    }
+    if (cfg.empty) {
+      var em = document.getElementById(cfg.empty);
+      if (em) em.style.display = n ? 'none' : '';
+    }
+  }
+
+  function chipRow(id, fn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', function(ev) {
+      var b = ev.target.closest('.tb-chip');
+      if (!b) return;
+      el.querySelectorAll('.tb-chip').forEach(function(x) { x.classList.remove('tb-chip-on'); });
+      b.classList.add('tb-chip-on');
+      fn(b);
+      apply();
+    });
+  }
+
+  if (cfg.scholars) chipRow(cfg.scholars, function(b) { fs.scholar = b.getAttribute('data-scholar') || ''; });
+  if (cfg.dur) chipRow(cfg.dur, function(b) { fs.dur = b.getAttribute('data-dur') || ''; });
+  if (cfg.sort) chipRow(cfg.sort, function(b) {
+    var s = b.getAttribute('data-sort');
+    cards.sort(function(a, c) {
+      if (s === 'popular') return (+c.getAttribute('data-views') || 0) - (+a.getAttribute('data-views') || 0);
+      if (s === 'longest') return (+c.getAttribute('data-dur') || 0) - (+a.getAttribute('data-dur') || 0);
+      return a._i - c._i; // server renders newest first
+    });
+    cards.forEach(function(c) { grid.appendChild(c); });
+  });
+  if (cfg.subs) {
+    var sb = document.getElementById(cfg.subs);
+    if (sb) sb.addEventListener('change', function() { fs.subs = sb.checked; apply(); });
+  }
+}

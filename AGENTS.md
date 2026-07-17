@@ -24,7 +24,7 @@ DeenSubs is an Islamic content platform serving Arabic lectures with AI-powered 
 src/index.js          → Middleware chain (maintenance gate, security headers, auth, analytics)
 src/routes/pages.js   → HTML pages (SSR templates)
 src/routes/api.js     → API endpoints + /img/* thumbnail serving
-src/routes/feeds.js   → Fonts, favicon, robots, sitemap, RSS, service worker, manifest
+src/routes/feeds.js   → Fonts, favicon, robots, sitemap, RSS, service worker, manifest, /bg/* assets
 src/routes/auth.js    → Google OAuth + One Tap
 src/routes/admin.js   → Admin panel
 ```
@@ -94,9 +94,15 @@ Thumbnail sizes: 320w, 480w, 640w AVIF. Scholar photos: lossless AVIF (quality 1
 `build.js` runs before every deploy (configured in wrangler.toml `[build]`):
 - Minifies CSS → `.min.css`
 - Minifies JS → `.min.txt` (strips console/debugger, targets modern browsers)
-- Generates build version hash → `build-version.txt` (used by service worker)
+- Generates build version hash → `build-version.txt` (content hash of built assets, used by service worker). Build is idempotent — safe for `wrangler dev` watch mode.
 
 Templates import `.min.*` versions. Source files stay readable.
+
+## Background Pattern
+
+`src/artifacts/pattern-t.png` / `pattern-b.png` — Islamic lattice rendered from a Vecteezy EPS (Free License). The artwork is gold; CSS re-tints it to the teal brand accent via `hue-rotate(131deg)` on `.bgp img`. Served via `/bg/*` (Data import rule in wrangler.toml). Opt-in per page via `meta.pattern: true` — currently only the main browsing pages (home, `/category/*`, `/symposium`). All other pages (watch, search, scholars, etc.) render without it. Images fade in on load (`.bgp img.ld` in main.css).
+
+**License requires attribution** — the "Vecteezy.com" link in the footer (`ft-attr`) must stay. Full license text is commented in `src/templates/layout.js`.
 
 ## Maintenance Mode
 

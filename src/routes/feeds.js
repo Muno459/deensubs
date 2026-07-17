@@ -13,6 +13,9 @@ import cormorantLatExt from '../fonts/cormorant-latin-ext.woff2';
 import cormorantLat from '../fonts/cormorant-latin.woff2';
 import outfitLatExt from '../fonts/outfit-latin-ext.woff2';
 import outfitLat from '../fonts/outfit-latin.woff2';
+import patternT from '../artifacts/pattern-t.png';
+import patternB from '../artifacts/pattern-b.png';
+import { FAVICON_SVG } from '../components/logo.js';
 
 const FONT_MAP = {
   'amiri-400-arabic': amiri400arabic,
@@ -31,7 +34,6 @@ const feeds = new Hono();
 const VC = VIDEO_COLS;
 const VJ = VIDEO_JOIN;
 
-const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0a0a10"/><rect x="7" y="7" width="18" height="18" fill="none" stroke="#c4a44c" stroke-width="1.2"/><rect x="7" y="7" width="18" height="18" fill="none" stroke="#c4a44c" stroke-width="1.2" transform="rotate(45 16 16)"/><circle cx="16" cy="16" r="3" fill="none" stroke="#c4a44c" stroke-width="0.8"/></svg>`;
 
 // Fonts served from Worker edge
 feeds.get('/fonts/:name', (c) => {
@@ -41,16 +43,24 @@ feeds.get('/fonts/:name', (c) => {
   return new Response(data, { headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable', 'Access-Control-Allow-Origin': '*' } });
 });
 
-feeds.get('/favicon.svg', (c) => new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
+// Background pattern artwork (see layout.js for Vecteezy license/attribution)
+const BG_MAP = { 'pattern-t': patternT, 'pattern-b': patternB };
+feeds.get('/bg/:name', (c) => {
+  const data = BG_MAP[c.req.param('name').replace('.png', '')];
+  if (!data) return c.text('Not found', 404);
+  return new Response(data, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+});
 
-feeds.get('/favicon.ico', (c) => new Response(FAVICON, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
+feeds.get('/favicon.svg', (c) => new Response(FAVICON_SVG, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
+
+feeds.get('/favicon.ico', (c) => new Response(FAVICON_SVG, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
 
 feeds.get('/robots.txt', (c) => new Response(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /auth/\nDisallow: /api/fingerprint\nDisallow: /api/watch-event\nSitemap: ${new URL(c.req.url).origin}/sitemap.xml\n`, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'public, max-age=86400' } }));
 
 // Service Worker — auto-versioned per deploy
 import BUILD_VERSION from '../scripts/build-version.txt';
 
-const OFFLINE_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline — DeenSubs</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#050507;color:#eae6da;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}.c{max-width:360px}h1{color:#c4a44c;font-size:1.4rem;margin-bottom:.5rem}p{color:#807c72;font-size:.85rem;line-height:1.6;margin-bottom:1.5rem}a{color:#c4a44c;text-decoration:none;padding:.5rem 1.5rem;border:1px solid rgba(196,164,76,.2);border-radius:8px;font-size:.85rem;transition:border-color .2s}a:hover{border-color:#c4a44c}</style></head><body><div class="c"><h1>You\u2019re offline</h1><p>Check your connection and try again. Previously visited pages may still be available.</p><a href="/">Retry</a></div></body></html>`;
+const OFFLINE_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline — DeenSubs</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#050507;color:#eae6da;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}.c{max-width:360px}h1{color:#45b3a2;font-size:1.4rem;margin-bottom:.5rem}p{color:#807c72;font-size:.85rem;line-height:1.6;margin-bottom:1.5rem}a{color:#45b3a2;text-decoration:none;padding:.5rem 1.5rem;border:1px solid rgba(62,166,152,.2);border-radius:8px;font-size:.85rem;transition:border-color .2s}a:hover{border-color:#45b3a2}</style></head><body><div class="c"><h1>You\u2019re offline</h1><p>Check your connection and try again. Previously visited pages may still be available.</p><a href="/">Retry</a></div></body></html>`;
 
 function buildSW(version) {
   return `var V='ds-${version}',IC='ds-img-${version}',MAX=500,
@@ -82,7 +92,7 @@ self.addEventListener('fetch',function(e){
   if(e.request.method!=='GET'||u.origin!==self.location.origin)return;
   if(u.pathname.startsWith('/api/media/')||u.pathname.startsWith('/api/vtt/'))return;
 
-  if(u.pathname.startsWith('/fonts/')||u.pathname==='/favicon.svg'){
+  if(u.pathname.startsWith('/fonts/')||u.pathname.startsWith('/bg/')||u.pathname==='/favicon.svg'){
     e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request).then(function(res){if(res.ok){var cl=res.clone();caches.open(V).then(function(c){c.put(e.request,cl)})}return res})}));
     return;
   }
@@ -132,8 +142,8 @@ feeds.get('/manifest.json', (c) => new Response(JSON.stringify({
   start_url: '/',
   display: 'standalone',
   orientation: 'any',
-  background_color: '#050507',
-  theme_color: '#c4a44c',
+  background_color: '#f6f4ee',
+  theme_color: '#0e6b63',
   categories: ['education', 'entertainment'],
   icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
   shortcuts: [

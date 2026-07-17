@@ -195,7 +195,7 @@ api.get('/api/videos/:slug/comments', async (c) => {
   if (!video) return c.json({ comments: [] });
   const comments = (await db.prepare('SELECT c.*, u.avatar as user_avatar FROM comments c LEFT JOIN users u ON c.user_id = u.id WHERE c.video_id = ? ORDER BY c.created_at DESC LIMIT 200').bind(video.id).all()).results;
   const result = { comments };
-  c.executionCtx.waitUntil(c.env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 30 }));
+  c.executionCtx.waitUntil(c.env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 60 }));
   return c.json(result);
 });
 
