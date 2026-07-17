@@ -1,3 +1,12 @@
+// Theme toggle (dark / light)
+document.querySelectorAll('.theme-toggle').forEach(function(b){
+  b.onclick=function(){
+    var d=document.documentElement,n=d.dataset.theme==='light'?'dark':'light';
+    d.dataset.theme=n;
+    try{localStorage.setItem('ds_theme',n)}catch(e){}
+  };
+});
+
 document.getElementById('hb').onclick=function(){document.getElementById('mob').classList.toggle('open');document.body.classList.toggle('no-scroll')};
 document.getElementById('mob').onclick=function(e){if(e.target===this){this.classList.remove('open');document.body.classList.remove('no-scroll')}};
 var kbC=document.getElementById('kb-close');if(kbC)kbC.onclick=function(){document.getElementById('kb-modal').classList.remove('kb-open')};
@@ -11,7 +20,7 @@ document.addEventListener('keydown',function(e){
 // Navigation progress bar (YouTube-like)
 (function(){
   var bar=document.createElement('div');
-  bar.style.cssText='position:fixed;top:0;left:0;height:2px;background:var(--gold);z-index:9999;width:0;transition:width .3s;pointer-events:none';
+  bar.style.cssText='position:fixed;top:0;left:0;height:2px;background:var(--accent);z-index:9999;width:0;transition:width .3s;pointer-events:none';
   document.body.appendChild(bar);
   document.addEventListener('click',function(ev){
     var a=ev.target.closest('a[href]');

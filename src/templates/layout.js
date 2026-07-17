@@ -1,7 +1,33 @@
 import { e, CDN } from '../lib/helpers.js';
+import { LOGO_SVG } from '../components/logo.js';
 import FONTS_CSS from '../styles/fonts.min.css';
 import CSS from '../styles/main.min.css';
 import GLOBAL_JS from '../scripts/global.min.txt';
+
+/*
+ * Background pattern artwork (src/artifacts/pattern-t.png, pattern-b.png)
+ * Derived from: "Vector Arabic Ramadan Pattern Islamic Background Ornament" — Vecteezy.com
+ * https://www.vecteezy.com/vector-art/20504124-vector-arabic-ramadan-pattern-islamic-background-ornament
+ *
+ * License information (Vecteezy Free License):
+ * Thank you for downloading from Vecteezy!
+ * The license agreement outlines how the resource may be used in various settings.
+ * Different rules apply based on whether you’re using a resource in a digital project
+ * versus a print project. In addition, you will have different responsibilities if you
+ * downloaded this resource under our Free License versus our Pro License.
+ * If you downloaded this resource under the Free License, remember to always
+ * attribute the author which can be done by adding “Vecteezy.com” to your design and
+ * linking to vecteezy.com where possible. If you don’t want to give attribution, upgrade
+ * to a Pro License for additional benefits.
+ * For detailed insight into how this resource may be used in your project, head over to
+ * the licensing section of our website or contact our support team.
+ * As always, the Vecteezy Terms of Use supersede any terms outlined in this
+ * document.
+ * Thanks again!
+ * Vecteezy
+ *
+ * Attribution link lives in the footer (ft-attr).
+ */
 
 export function renderPage(title, body, categories, activeCat, meta, user, url) {
   meta = meta || {}; user = user || null;
@@ -26,13 +52,14 @@ ${meta.video ? `<meta name="twitter:player" content="${e(canonical)}"><meta name
 <link rel="alternate" type="application/rss+xml" title="DeenSubs" href="/feed.xml">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#c4a44c">
+<meta name="theme-color" content="#0e6b63">
+<script>try{var t=localStorage.getItem('ds_theme');var q=new URLSearchParams(location.search).get('theme');if(q==='light'||q==='dark')t=q;if(!t)t='light';document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme='light'}</script>
 <link rel="preconnect" href="${CDN}"><link rel="dns-prefetch" href="${CDN}">
 <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/cormorant-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>${FONTS_CSS}${CSS}</style></head><body>
 <a href="#main-content" class="skip-link">Skip to content</a>
-<div class="grain"></div>
+${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/bg/pattern-t.png" alt="" loading="lazy" fetchpriority="low" decoding="async" onload="this.classList.add('ld')"><img class="bgp-b" src="/bg/pattern-b.png" alt="" loading="lazy" fetchpriority="low" decoding="async" onload="this.classList.add('ld')"></div>` : ''}
 <div class="kb-modal" id="kb-modal"><div class="kb-inner"><h2>Keyboard Shortcuts</h2>
 <div class="kb-grid">
 <div class="kb-row"><kbd>Space</kbd><span>Play / Pause</span></div>
@@ -50,15 +77,18 @@ ${meta.video ? `<meta name="twitter:player" content="${e(canonical)}"><meta name
 </div><button class="kb-close" id="kb-close">Close</button></div></div>
 <nav class="nav" id="nav">
   <div class="nav-in">
-    <a href="/" class="logo"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.5)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span class="logo-t">DeenSubs</span></a>
-    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
+    <a href="/" class="logo" aria-label="DeenSubs home">${LOGO_SVG}</a>
+    <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search lectures, scholars, topics..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
     <div class="nav-right">
       <a href="/scholars" class="nav-link${activeCat==='scholars'?' nav-link-on':''}">Scholars</a>
       <button class="nav-link nav-random" id="nav-rand" title="Random video" aria-label="Watch a random video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></button>
-      <form action="/search" method="get" class="nav-sf"><svg class="nav-si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" name="q" placeholder="Search..." aria-label="Search" autocomplete="off"><kbd class="nav-kbd">/</kbd></form>
+      <button class="nav-theme theme-toggle" title="Toggle theme" aria-label="Toggle color theme"><svg class="th-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="th-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg></button>
       ${user?`<a href="/profile" class="nav-user-btn" title="Profile"><img src="${e(user.avatar)}" class="nav-user-av" alt="">${e(user.name.split(' ')[0])}</a>`:`<a href="/auth/google" class="nav-login" rel="nofollow">Sign in</a>`}
       <button class="nav-hb" id="hb" aria-label="Menu"><span></span><span></span><span></span></button>
     </div>
+  </div>
+  <div class="nav-cats">
+    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
   </div>
 </nav>
 <div class="mob-menu" id="mob">
@@ -67,15 +97,42 @@ ${meta.video ? `<meta name="twitter:player" content="${e(canonical)}"><meta name
     <form action="/search" method="get" class="mob-sf"><input type="search" name="q" placeholder="Search videos, scholars..." autocomplete="off"></form>
     <div class="mob-links"><a href="/"${!activeCat?' class="on"':''}>All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}"${activeCat===c.slug?' class="on"':''}>${e(c.name_ar)} ${e(c.name)}</a>`).join('')}
     <div class="mob-div"></div><a href="/scholars">Scholars</a><a href="/history">History</a><a href="/bookmarks">Saved</a><a href="/about">About</a>
-    <div class="mob-div"></div>${user?`<a href="/auth/logout" style="color:var(--red)">Sign Out</a>`:`<a href="/auth/google" rel="nofollow" style="color:var(--gold)">Sign In</a>`}</div>
+    <div class="mob-div"></div>${user?`<a href="/auth/logout" style="color:var(--red)">Sign Out</a>`:`<a href="/auth/google" rel="nofollow" style="color:var(--accent)">Sign In</a>`}</div>
   </div>
 </div>
 <main class="wrap" id="main-content">${body}</main>
 <footer class="ft"><div class="ft-in">
-  <div class="ft-brand"><div class="logo-m"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7"/><rect x="4" y="4" width="20" height="20" stroke="rgba(196,164,76,.3)" stroke-width=".7" transform="rotate(45 14 14)"/></svg><span>د</span></div><span>DeenSubs</span></div>
-  <span class="ft-copy">&copy; 2026 DeenSubs — Making Islamic knowledge accessible</span>
-  <div class="ft-links"><a href="/scholars">Scholars</a><a href="/history">History</a><a href="/bookmarks">Saved</a><a href="/about">About</a><a href="/feed.xml">RSS</a></div>
-  <div class="ft-social"><a href="https://x.com/deensubss" target="_blank" rel="noopener" title="X / Twitter"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a><a href="https://www.tiktok.com/@deensubs" target="_blank" rel="noopener" title="TikTok"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.27a8.16 8.16 0 004.77 1.52V7.36a4.85 4.85 0 01-1-.67z"/></svg></a><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener" title="GitHub"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg></a></div>
+  <div class="ft-grid">
+    <div class="ft-col">
+      <div class="ft-brand">${LOGO_SVG}</div>
+      <p class="ft-tag">Arabic Islamic lectures with accurate English subtitles, powered by AI.</p>
+    </div>
+    <div class="ft-col">
+      <h4>Browse</h4>
+      <a href="/">All videos</a>
+      ${categories.slice(0,5).map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}">${e(c.name)}</a>`).join('')}
+      <a href="/scholars">Scholars</a>
+    </div>
+    <div class="ft-col">
+      <h4>Library</h4>
+      <a href="/search">Search</a>
+      <a href="/history">Watch history</a>
+      <a href="/bookmarks">Saved videos</a>
+      <a href="/feed.xml">RSS feed</a>
+    </div>
+    <div class="ft-col">
+      <h4>DeenSubs</h4>
+      <a href="/about">About</a>
+      <a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener">Open source</a>
+      <a href="https://x.com/deensubss" target="_blank" rel="noopener">X / Twitter</a>
+      <a href="https://www.tiktok.com/@deensubs" target="_blank" rel="noopener">TikTok</a>
+    </div>
+  </div>
+  <div class="ft-bottom">
+    <span class="ft-copy">&copy; 2026 DeenSubs — Making Islamic knowledge accessible</span>
+    <span class="ft-attr">Background pattern: <a href="https://vecteezy.com" target="_blank" rel="noopener">Vecteezy.com</a></span>
+    <div class="ft-social"><a href="https://x.com/deensubss" target="_blank" rel="noopener" title="X / Twitter"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a><a href="https://www.tiktok.com/@deensubs" target="_blank" rel="noopener" title="TikTok"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.27a8.16 8.16 0 004.77 1.52V7.36a4.85 4.85 0 01-1-.67z"/></svg></a><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener" title="GitHub"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg></a></div>
+  </div>
 </div></footer>
 <nav class="bnav" aria-label="Mobile navigation">
   <a href="/" class="bnav-item${path==='/'?' bnav-on':''}"${path==='/'?' aria-current="page"':''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4"/></svg><span>Home</span></a>

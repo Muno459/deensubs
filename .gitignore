@@ -7,3 +7,6 @@ dist/
 *.min.css
 *.min.txt
 src/scripts/build-version.txt
+*.eps
+tools/logo/*.ttf
+venv/
