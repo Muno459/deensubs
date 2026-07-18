@@ -131,12 +131,10 @@ Set via `echo "value" | npx wrangler secret put NAME`:
 
 ## R2 S3 API Access
 
-For uploading large files (>300MB) via `aws s3 cp`:
+For uploading large files (>300MB) via `aws s3 cp` — credentials live in a local
+`.env` (gitignored), NEVER in this file:
 ```bash
-export AWS_ACCESS_KEY_ID=***REMOVED***
-export AWS_SECRET_ACCESS_KEY=***REMOVED***
-export R2_ENDPOINT=https://a04f68eb4a3c42642bb23718c532d0b4.r2.cloudflarestorage.com
-
+source .env  # provides AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / R2_ENDPOINT
 aws s3 cp video.mp4 s3://deensubs-media-weur/videos/slug.mp4 --endpoint-url $R2_ENDPOINT
 ```
 
