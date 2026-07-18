@@ -6,7 +6,7 @@ import { scard } from '../components/video-card.js';
 
 export function renderWatch({ video, related, cues, base }) {
   const th=thu(video);
-  base = base || 'https://deensubs.mostafa0333.workers.dev';
+  base = base || 'https://deensubs.com';
   const jsonLd = JSON.stringify({
     '@context':'https://schema.org','@type':'VideoObject',
     name:video.title, description:video.description||'',
@@ -20,6 +20,7 @@ export function renderWatch({ video, related, cues, base }) {
       {'@type':'InteractionCounter',interactionType:{'@type':'LikeAction'},userInteractionCount:video.likes||0},
     ],
     ...(video.source||video.scholar_name?{author:{'@type':'Person',name:video.source||video.scholar_name}}:{}),
+    publisher:{'@type':'Organization',name:'DeenSubs',url:'https://deensubs.com',logo:{'@type':'ImageObject',url:'https://deensubs.com/web-app-manifest-512x512.png'}},
     inLanguage:'ar',
     subtitleLanguage:'en',
   });
@@ -110,7 +111,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
       <div style="display:flex;align-items:baseline;justify-content:space-between"><h2 id="cm-count">Comments</h2><div class="cm-sort"><button class="cm-sort-btn cm-sort-on" id="cm-new">Newest</button><button class="cm-sort-btn" id="cm-old">Oldest</button></div></div>
       ${video._user ? `
       <form id="cf" class="cf" data-slug="${e(video.slug)}">
-        <div class="cf-r"><input name="author" type="hidden" value="${e(video._user.name)}"><div class="cf-user"><img src="${e(video._user.avatar)}" class="cf-user-av"><span>${e(video._user.name)}</span></div><button type="submit">Post</button></div>
+        <div class="cf-r"><input name="author" type="hidden" value="${e(video._user.name)}"><div class="cf-user"><img src="${e(video._user.avatar)}" class="cf-user-av" alt=""><span>${e(video._user.name)}</span></div><button type="submit">Post</button></div>
         <div class="cf-ta-wrap"><textarea name="content" placeholder="Share your thoughts..." maxlength="2000" rows="2" required id="cf-ta"></textarea><span class="cf-counter" id="cf-ct">2000</span></div>
       </form>` : `<div class="cm-login"><a href="/auth/google" class="cm-login-btn" rel="nofollow">Sign in to comment</a></div>`}
       <div id="cl" class="cl">

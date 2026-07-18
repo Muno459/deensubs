@@ -60,7 +60,7 @@ export function renderScholar({ scholar, videos }) {
       ${scholar.bio ? `<p class="sp-hero-bio">${e(scholar.bio)}</p>` : ''}
       <p class="page-meta">${videos.length} video${videos.length !== 1 ? 's' : ''} &middot; ${fv(totalViews)} &middot; ${hrs} total${subtitled ? ` &middot; ${subtitled} subtitled` : ''}</p>
       <button class="sp-share" id="sp-share" title="Share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> Share</button>
-      <script>document.getElementById('sp-share').onclick=function(){if(navigator.share)navigator.share({title:'${e(scholar.name)} — DeenSubs',url:location.href}).catch(function(){});else{navigator.clipboard.writeText(location.href).then(function(){var t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.className='toast';document.body.appendChild(t)}t.textContent='Link copied';t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2500)}).catch(function(){})}}</script>
+      <script>document.getElementById('sp-share').onclick=function(){if(navigator.share)navigator.share({title:'${e(scholar.name)} | DeenSubs',url:location.href}).catch(function(){});else{navigator.clipboard.writeText(location.href).then(function(){var t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.className='toast';document.body.appendChild(t)}t.textContent='Link copied';t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2500)}).catch(function(){})}}</script>
     </div>
   </div>
 

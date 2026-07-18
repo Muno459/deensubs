@@ -9,9 +9,9 @@ export function renderSymposium({ videos }) {
 <div class="sy">
   <header class="sy-hero">
     <p class="sy-over">Scholarly Symposium</p>
-    <h1 class="sy-ar">الفتوى في الحرمين الشريفين على ضوء المنهج النبوي</h1>
-    <p class="sy-en">Fatwa in the Two Holy Mosques, in Light of the Prophetic Methodology</p>
-    <p class="sy-lede">Selected highlights from a symposium on the principles and practice of fatwa in the Two Holy Mosques — featuring members of the Council of Senior Scholars and imams of the Haramain, translated with accurate English subtitles.</p>
+    <div class="sy-ar" lang="ar" dir="rtl">الفتوى في الحرمين الشريفين على ضوء المنهج النبوي</div>
+    <h1 class="sy-en">Fatwa in the Two Holy Mosques, in Light of the Prophetic Methodology</h1>
+    <p class="sy-lede">Selected highlights from a symposium on the principles and practice of fatwa in the Two Holy Mosques, featuring members of the Council of Senior Scholars and imams of the Haramain, translated with accurate English subtitles.</p>
     <p class="sy-meta">${videos.length} session${videos.length !== 1 ? 's' : ''} &middot; ${hrs} &middot; ${speakers.length} scholar${speakers.length !== 1 ? 's' : ''}</p>
   </header>
 
@@ -36,11 +36,11 @@ export function renderSymposium({ videos }) {
     }).join('')}
   </ol>
 
-  <p class="sy-note">The Two Holy Mosques — Masjid al-Haram in Makkah and Masjid an-Nabawi in Madinah — hold the highest station in Islam, and a fatwa issued within them carries weight across the entire Muslim world. These sessions examine how that responsibility is met: the qualifications required of the mufti, the controls that govern issuing rulings, and the methodology that traces every verdict back to the Prophet ﷺ and his Companions.</p>
+  <p class="sy-note">The Two Holy Mosques, Masjid al-Haram in Makkah and Masjid an-Nabawi in Madinah, hold the highest station in Islam, and a fatwa issued within them carries weight across the entire Muslim world. These sessions examine how that responsibility is met: the qualifications required of the mufti, the controls that govern issuing rulings, and the methodology that traces every verdict back to the Prophet ﷺ and his Companions.</p>
 
   <figure class="sy-ayah">
     <p class="sy-ayah-ar">يُرِيدُ ٱللَّهُ بِكُمُ ٱلْيُسْرَ وَلَا يُرِيدُ بِكُمُ ٱلْعُسْرَ</p>
-    <figcaption>&ldquo;Allah intends ease for you and does not intend hardship for you.&rdquo; &mdash; Al-Baqarah 2:185</figcaption>
+    <figcaption>&ldquo;Allah intends ease for you and does not intend hardship for you.&rdquo; (Al-Baqarah 2:185)</figcaption>
   </figure>
 </div>`;
 }

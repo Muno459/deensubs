@@ -1,5 +1,7 @@
 name = "deensubs"
+account_id = "a04f68eb4a3c42642bb23718c532d0b4"
 main = "src/index.js"
+workers_dev = false
 compatibility_date = "2024-12-01"
 
 [build]
@@ -7,12 +9,12 @@ command = "node build.js"
 
 [[rules]]
 type = "Text"
-globs = ["**/*.css", "**/*.txt"]
+globs = ["**/*.css", "**/*.txt", "**/*.svg"]
 fallthrough = false
 
 [[rules]]
 type = "Data"
-globs = ["**/*.woff2", "**/*.png"]
+globs = ["**/*.woff2", "**/*.png", "**/*.ico"]
 fallthrough = false
 
 [[r2_buckets]]

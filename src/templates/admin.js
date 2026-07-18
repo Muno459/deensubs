@@ -69,7 +69,7 @@ export function renderAdmin({ videos, categories, key, editing, tab, users, comm
   const totalHits = dailyHits.reduce((s, d) => s + d.hits, 0);
   const avgHits = dailyHits.length ? Math.round(totalHits / dailyHits.length) : 0;
 
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin — DeenSubs</title>
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin | DeenSubs</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -1360,7 +1360,7 @@ ${!isEdit && tab === 'add' ? `
       <div class="form-section-title"><span class="num">2</span> Categorization</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem">
         <div><label>Category</label><select name="category_id">${categories.map(c => `<option value="${c.id}">${e(c.name)}</option>`).join('')}</select></div>
-        <div><label>Scholar</label><select name="scholar_id"><option value="">— None —</option>${scholars.map(s => `<option value="${s.id}">${e(s.name)}</option>`).join('')}</select></div>
+        <div><label>Scholar</label><select name="scholar_id"><option value="">None</option>${scholars.map(s => `<option value="${s.id}">${e(s.name)}</option>`).join('')}</select></div>
         <div><label>Source Label</label><input name="source" placeholder="e.g. Sheikh Salih al-Fawzan"></div>
       </div>
       <label>Duration (seconds)</label>

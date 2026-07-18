@@ -9,16 +9,16 @@ export function renderAbout({ stats }) {
   </div>
   <div class="about-grid">
     <div class="about-card">
-      <h3>Mission</h3>
+      <h2>Mission</h2>
       <p>DeenSubs makes the words of Islamic scholars accessible to everyone. We use cutting-edge AI to transcribe Arabic lectures and translate them into English, preserving the depth and beauty of the original content.</p>
     </div>
     <div class="about-card">
-      <h3>Technology</h3>
+      <h2>Technology</h2>
       <p>Powered by ElevenLabs Scribe v2 for Arabic speech recognition and AI for translation. Deployed on Cloudflare's global edge network for fast, reliable access from anywhere in the world.</p>
     </div>
     <div class="about-card">
-      <h3>Content</h3>
-      <p>We source content from trusted scholars and masajid including Masjid al-Haram and Masjid an-Nabawi. Every subtitle is reviewed for accuracy in both language and Islamic terminology.</p>
+      <h2>Content</h2>
+      <p>We source content from <a href="/scholars">trusted scholars</a> and masajid including Masjid al-Haram and Masjid an-Nabawi. Every subtitle is reviewed for accuracy in both language and Islamic terminology.</p>
     </div>
   </div>
   ${stats ? `<div class="about-stats">
@@ -34,7 +34,7 @@ export function renderAbout({ stats }) {
   </div>
   <div class="about-ayah">
     <p class="about-ayah-ar">وَمَا أَرْسَلْنَاكَ إِلَّا رَحْمَةً لِّلْعَالَمِينَ</p>
-    <p class="about-ayah-en">"And We have not sent you except as a mercy to the worlds." — Quran 21:107</p>
+    <p class="about-ayah-en">"And We have not sent you except as a mercy to the worlds." (Quran 21:107)</p>
   </div>
 </div>`;
 }

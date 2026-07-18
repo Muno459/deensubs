@@ -85,7 +85,7 @@ pages.get('/watch/:slug', async (c) => {
   const meta = {
     description: video.description || `Watch ${video.title} with English subtitles on DeenSubs.`,
     type: 'video.other',
-    image: video.thumb_key ? base + '/img/' + video.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '') + '-640w.avif' : null,
+    image: video.thumb_key ? base + '/api/media/' + video.thumb_key : null,
     video: video.video_key ? cdn(video.video_key) : null,
   };
   const resp = c.html(rp(c,video.title, renderWatch({ video, related, cues, base }), cats, video.category_slug, meta));
@@ -106,7 +106,7 @@ pages.get('/category/:slug', async (c) => {
     { key: 'categories', fetcher: async () => (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results, stale: 86400 },
   ]);
   if (!category) return c.html(rp(c,'Not Found', render404(), cats), 404);
-  const catMeta = { description: `Browse ${videos.length} ${category.name.toLowerCase()} videos with English subtitles — translated from Arabic by AI.`, pattern: true };
+  const catMeta = { description: `Browse ${videos.length} ${category.name.toLowerCase()} videos with English subtitles, translated from Arabic by AI.`, pattern: true };
   return c.html(rp(c,category.name, renderCategory({ category, videos, sort }), cats, slug, catMeta));
 });
 
@@ -127,12 +127,12 @@ pages.get('/search', async (c) => {
   }
   // Log search query
   if (q) { try { const user = c.get('user'); c.executionCtx.waitUntil(c.env.TASKS.send({ type: 'search_log', query: q, results: videos.length, user_id: user?.id || null })); } catch {} }
-  return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos, scholars }), cats));
+  return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos, scholars }), cats, null, { noindex: true }));
 });
 
 pages.get('/symposium', async (c) => {
   const [videos, cats] = await Promise.all([getSymposiumVideos(c.env), getCategories(c.env)]);
-  return c.html(rp(c, 'Fatwa in the Haramain — Symposium', renderSymposium({ videos }), cats, 'symposium', { pattern: true }));
+  return c.html(rp(c, 'Fatwa in the Haramain Symposium', renderSymposium({ videos }), cats, 'symposium', { pattern: true, description: 'Selected sessions from a scholarly symposium on fatwa in the Two Holy Mosques, featuring members of the Council of Senior Scholars, translated with English subtitles.' }));
 });
 
 pages.get('/scholars', async (c) => {
@@ -147,7 +147,6 @@ pages.get('/scholar/:slug', async (c) => {
   const videos = await getScholarVideos(c.env, scholar.id);
   const schMeta = {
     description: `Watch ${videos.length} videos by ${scholar.name} with English subtitles.${scholar.title ? ' ' + scholar.title + '.' : ''}`,
-    image: scholar.photo ? new URL(c.req.url).origin + '/img/' + scholar.photo.replace(/\.(png|jpg|jpeg)$/i, '.avif') : null,
   };
   return c.html(rp(c,scholar.name, renderScholar({ scholar, videos }), cats, 'scholars', schMeta));
 });
@@ -159,7 +158,7 @@ pages.get('/history', async (c) => {
 
 pages.get('/about', async (c) => {
   const [cats, stats] = await Promise.all([getCategories(c.env), getPlatformStats(c.env)]);
-  return c.html(rp(c,'About', renderAbout({ stats }), cats));
+  return c.html(rp(c,'About', renderAbout({ stats }), cats, null, { description: 'DeenSubs makes Arabic Islamic scholarly lectures accessible to a wider audience through accurate English subtitles, sourced from trusted scholars and masajid.' }));
 });
 
 pages.get('/bookmarks', async (c) => {

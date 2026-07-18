@@ -18,8 +18,9 @@ export async function kvGet(env, key, fetcher, stale) {
   try {
     const raw = await env.CACHE.get(key, { type: 'json', cacheTtl: Math.min(s, 300) });
     if (raw != null) {
-      // New SWR format: { _d: data, _t: timestamp }
-      const data = raw._d != null ? raw._d : raw;
+      // New SWR format: { _d: data, _t: timestamp } — _d may legitimately be null (cached miss)
+      const wrapped = typeof raw === 'object' && '_t' in raw;
+      const data = wrapped ? (raw._d ?? null) : raw;
       const ts = raw._t || 0;
       // If stale, refresh in background (non-blocking)
       if ((!ts || Date.now() - ts > s * 1000) && _ctx?.waitUntil) {
@@ -54,7 +55,8 @@ export async function kvGetMulti(env, entries) {
   return Promise.all(entries.map(async (entry, i) => {
     const raw = cached.get(entry.key);
     if (raw != null) {
-      const data = raw._d != null ? raw._d : raw;
+      const wrapped = typeof raw === 'object' && '_t' in raw;
+      const data = wrapped ? (raw._d ?? null) : raw;
       const ts = raw._t || 0;
       const s = entry.stale || STALE_MEDIUM;
       if ((!ts || now - ts > s * 1000) && _ctx?.waitUntil) {
@@ -159,10 +161,10 @@ export async function getRSSVideos(env) {
 
 // ── Sitemap data (1 hour cache) ──
 export async function getSitemapData(env) {
-  return kvGet(env, 'sitemap:v2', async () => {
+  return kvGet(env, 'sitemap:v3', async () => {
     const db = readDB(env);
     const [videos, cats, scholars] = await Promise.all([
-      db.prepare('SELECT slug, created_at FROM videos WHERE enabled = 1 ORDER BY created_at DESC').all(),
+      db.prepare('SELECT slug, created_at, title, description, thumb_key, video_key, duration FROM videos WHERE enabled = 1 ORDER BY created_at DESC').all(),
       db.prepare('SELECT slug FROM categories ORDER BY name').all(),
       db.prepare('SELECT slug FROM scholars ORDER BY name').all(),
     ]);

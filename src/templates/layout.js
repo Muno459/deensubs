@@ -36,23 +36,29 @@ export function renderPage(title, body, categories, activeCat, meta, user, url) 
   const desc = meta.description || 'Arabic Islamic lectures with accurate English subtitles, powered by AI.';
   const canonical = url ? url.split('?')[0] : '';
   const path = canonical ? new URL(canonical).pathname : '';
+  const fullTitle = !title || title === 'Home' ? 'DeenSubs' : `${title} | DeenSubs`;
+  const ogDefault = (canonical ? new URL(canonical).origin : 'https://deensubs.com') + '/og-image.png';
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="view-transition" content="same-origin">
-<title>${e(title)} — DeenSubs</title>
+<title>${e(fullTitle)}</title>
 <meta name="description" content="${e(desc)}">
 ${meta.noindex ? '<meta name="robots" content="noindex">' : ''}
 ${canonical ? `<link rel="canonical" href="${e(canonical)}">` : ''}
 <meta property="og:site_name" content="DeenSubs">
 ${canonical ? `<meta property="og:url" content="${e(canonical)}">` : ''}
-<meta property="og:title" content="${e(title)} — DeenSubs"><meta property="og:type" content="${meta.type || 'website'}">
+<meta property="og:title" content="${e(fullTitle)}"><meta property="og:type" content="${meta.type || 'website'}">
 <meta property="og:description" content="${e(desc)}">
-${meta.image ? `<meta property="og:image" content="${e(meta.image)}"><meta property="og:image:width" content="640"><meta property="og:image:height" content="360">` : ''}
+${meta.image ? `<meta property="og:image" content="${e(meta.image)}"><meta property="og:image:width" content="640"><meta property="og:image:height" content="360">` : `<meta property="og:image" content="${e(ogDefault)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">`}
 ${meta.video ? `<meta property="og:video" content="${e(meta.video)}"><meta property="og:video:type" content="video/mp4">` : ''}
-${meta.image ? `<meta name="twitter:card" content="${meta.video ? 'player' : 'summary_large_image'}"><meta name="twitter:image" content="${e(meta.image)}"><meta name="twitter:title" content="${e(title)} — DeenSubs"><meta name="twitter:description" content="${e(desc)}">` : '<meta name="twitter:card" content="summary">'}
+${meta.image ? `<meta name="twitter:card" content="${meta.video ? 'player' : 'summary_large_image'}"><meta name="twitter:image" content="${e(meta.image)}"><meta name="twitter:title" content="${e(fullTitle)}"><meta name="twitter:description" content="${e(desc)}">` : `<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${e(ogDefault)}"><meta name="twitter:title" content="${e(fullTitle)}"><meta name="twitter:description" content="${e(desc)}">`}
 ${meta.video ? `<meta name="twitter:player" content="${e(canonical)}"><meta name="twitter:player:width" content="640"><meta name="twitter:player:height" content="360">` : ''}
 <link rel="alternate" type="application/rss+xml" title="DeenSubs" href="/feed.xml">
+<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="DeenSubs">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0e6b63">
 <script>try{var t=localStorage.getItem('ds_theme');var q=new URLSearchParams(location.search).get('theme');if(q==='light'||q==='dark')t=q;if(!t)t='light';document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme='light'}</script>
@@ -109,20 +115,20 @@ ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/b
       <p class="ft-tag">Arabic Islamic lectures with accurate English subtitles, powered by AI.</p>
     </div>
     <div class="ft-col">
-      <h4>Browse</h4>
+      <h2>Browse</h2>
       <a href="/">All videos</a>
       ${categories.slice(0,5).map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}">${e(c.name)}</a>`).join('')}
       <a href="/scholars">Scholars</a>
     </div>
     <div class="ft-col">
-      <h4>Library</h4>
+      <h2>Library</h2>
       <a href="/search">Search</a>
       <a href="/history">Watch history</a>
       <a href="/bookmarks">Saved videos</a>
       <a href="/feed.xml">RSS feed</a>
     </div>
     <div class="ft-col">
-      <h4>DeenSubs</h4>
+      <h2>DeenSubs</h2>
       <a href="/about">About</a>
       <a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener">Open source</a>
       <a href="https://x.com/deensubss" target="_blank" rel="noopener">X / Twitter</a>
@@ -130,7 +136,7 @@ ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/b
     </div>
   </div>
   <div class="ft-bottom">
-    <span class="ft-copy">&copy; 2026 DeenSubs — Making Islamic knowledge accessible</span>
+    <span class="ft-copy">&copy; 2026 DeenSubs. Making Islamic knowledge accessible.</span>
     <div class="ft-social"><a href="https://x.com/deensubss" target="_blank" rel="noopener" title="X / Twitter"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a><a href="https://www.tiktok.com/@deensubs" target="_blank" rel="noopener" title="TikTok"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.27a8.16 8.16 0 004.77 1.52V7.36a4.85 4.85 0 01-1-.67z"/></svg></a><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener" title="GitHub"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg></a></div>
   </div>
 </div></footer>

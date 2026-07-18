@@ -8,6 +8,7 @@ export function renderHome({ featured, videos, popular, categories, byCategory, 
   const newThisWeek = videos.filter(v => isNew(v.created_at)).length;
   return `
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"DeenSubs","url":"https://deensubs.com","potentialAction":{"@type":"SearchAction","target":"https://deensubs.com/search?q={search_term_string}","query-input":"required name=search_term_string"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"DeenSubs","url":"https://deensubs.com","logo":"https://deensubs.com/web-app-manifest-512x512.png","description":"Arabic Islamic scholarly lectures made accessible through accurate English subtitles.","sameAs":["https://github.com/Muno459/deensubs","https://x.com/deensubss","https://www.tiktok.com/@deensubs"]}</script>
 <div id="cw-slot"></div>
 
 <div class="home-body">
@@ -37,7 +38,11 @@ ${featured ? `
       </div>
     </div>
   </a>
-</section>` : ''}
+</section>` : `
+<header class="page-hd">
+  <h1 class="page-title">Arabic Islamic Lectures with English Subtitles</h1>
+  <p class="page-desc">Authentic lectures from trusted scholars, translated so English speakers can benefit from Arabic Islamic scholarship.</p>
+</header>`}
 
 ${scholars && scholars.length ? `
 <section class="home-scholars">

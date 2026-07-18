@@ -11,7 +11,7 @@ export function vcard(v, opts) {
   const eager = opts.eager;
   const srcset = thuSrcset(v);
   const data = opts.data ? ` data-scholar="${e(v.source || '')}" data-dur="${v.duration || 0}" data-subs="${v.srt_key ? 1 : 0}" data-views="${v.views || 0}"` : '';
-  return `<a href="/watch/${e(v.slug)}" class="card${opts.anim ? ' card-anim' : ''}"${data} title="${e(v.title)}${v.source ? ' — ' + e(v.source) : ''}">
+  return `<a href="/watch/${e(v.slug)}" class="card${opts.anim ? ' card-anim' : ''}"${data} title="${e(v.title)}${v.source ? ' · ' + e(v.source) : ''}">
 <div class="card-th">
   ${!th ? tsvg(v.title, col) : `<img src="${e(th)}" ${srcset ? `srcset="${srcset}" sizes="(max-width:768px) 50vw, 280px"` : ''} alt="${e(v.title)}" class="card-img" width="640" height="360" loading="${eager ? 'eager' : 'lazy'}" decoding="async"${eager ? ' fetchpriority="high"' : ''}>`}
   <div class="card-hover"><div class="card-pi"></div></div>

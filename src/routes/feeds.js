@@ -23,7 +23,15 @@ import patternB from '../artifacts/pattern-b.png';
  * (owner decision, July 2026) — the Free License expects visible credit; see AGENTS.md.
  */
 import patternF from '../artifacts/pattern-flat.png';
-import { FAVICON_SVG } from '../components/logo.js';
+
+// Favicon package (RealFaviconGenerator export, July 2026)
+import faviconSvg from '../artifacts/favicon/favicon.svg';
+import faviconIco from '../artifacts/favicon/favicon.ico';
+import favicon96 from '../artifacts/favicon/favicon-96x96.png';
+import appleTouchIcon from '../artifacts/favicon/apple-touch-icon.png';
+import manifestIcon192 from '../artifacts/favicon/web-app-manifest-192x192.png';
+import manifestIcon512 from '../artifacts/favicon/web-app-manifest-512x512.png';
+import ogImage from '../artifacts/og-image.png';
 
 const FONT_MAP = {
   'amiri-400-arabic': amiri400arabic,
@@ -59,9 +67,14 @@ feeds.get('/bg/:name', (c) => {
   return new Response(data, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' } });
 });
 
-feeds.get('/favicon.svg', (c) => new Response(FAVICON_SVG, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
-
-feeds.get('/favicon.ico', (c) => new Response(FAVICON_SVG, { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=604800' } }));
+const ICON_CACHE = { 'Cache-Control': 'public, max-age=604800' };
+feeds.get('/favicon.svg', (c) => new Response(faviconSvg, { headers: { 'Content-Type': 'image/svg+xml', ...ICON_CACHE } }));
+feeds.get('/favicon.ico', (c) => new Response(faviconIco, { headers: { 'Content-Type': 'image/x-icon', ...ICON_CACHE } }));
+feeds.get('/favicon-96x96.png', (c) => new Response(favicon96, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
+feeds.get('/apple-touch-icon.png', (c) => new Response(appleTouchIcon, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
+feeds.get('/web-app-manifest-192x192.png', (c) => new Response(manifestIcon192, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
+feeds.get('/web-app-manifest-512x512.png', (c) => new Response(manifestIcon512, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
+feeds.get('/og-image.png', (c) => new Response(ogImage, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
 
 feeds.get('/robots.txt', (c) => new Response(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /auth/\nDisallow: /api/fingerprint\nDisallow: /api/watch-event\nSitemap: ${new URL(c.req.url).origin}/sitemap.xml\n`, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'public, max-age=86400' } }));
 
@@ -153,7 +166,11 @@ feeds.get('/manifest.json', (c) => new Response(JSON.stringify({
   background_color: '#f6f4ee',
   theme_color: '#0e6b63',
   categories: ['education', 'entertainment'],
-  icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+  icons: [
+    { src: '/web-app-manifest-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+    { src: '/web-app-manifest-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+  ],
   shortcuts: [
     { name: 'Search', url: '/search', icons: [{ src: '/favicon.svg', sizes: 'any' }] },
     { name: 'Scholars', url: '/scholars', icons: [{ src: '/favicon.svg', sizes: 'any' }] },
@@ -189,13 +206,25 @@ feeds.get('/sitemap.xml', async (c) => {
   const urls = [
     `<url><loc>${base}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
     `<url><loc>${base}/scholars</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`,
+    `<url><loc>${base}/symposium</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`,
     `<url><loc>${base}/about</loc><changefreq>monthly</changefreq><priority>0.4</priority></url>`,
   ];
   data.categories.forEach(c => urls.push(`<url><loc>${base}/category/${c.slug}</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`));
   (data.scholars || []).forEach(s => urls.push(`<url><loc>${base}/scholar/${s.slug}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`));
-  data.videos.forEach(v => urls.push(`<url><loc>${base}/watch/${v.slug}</loc><lastmod>${v.created_at?.split(' ')[0] || ''}</lastmod><priority>0.9</priority></url>`));
+  data.videos.forEach(v => {
+    // Video sitemap extension: requires title + thumbnail; only emit when both exist
+    const vid = v.title && v.thumb_key ? `<video:video>
+<video:thumbnail_loc>${base}/api/media/${e(v.thumb_key)}</video:thumbnail_loc>
+<video:title>${e(v.title)}</video:title>
+<video:description>${e((v.description || v.title).slice(0, 2000))}</video:description>
+${v.video_key ? `<video:content_loc>${base}/api/media/${e(v.video_key)}</video:content_loc>` : ''}
+${v.duration ? `<video:duration>${Math.round(v.duration)}</video:duration>` : ''}
+${v.created_at ? `<video:publication_date>${v.created_at.split(' ')[0]}</video:publication_date>` : ''}
+</video:video>` : '';
+    urls.push(`<url><loc>${base}/watch/${v.slug}</loc><lastmod>${v.created_at?.split(' ')[0] || ''}</lastmod><priority>0.9</priority>${vid}</url>`);
+  });
   return new Response(`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('\n')}</urlset>`,
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">${urls.join('\n')}</urlset>`,
     { headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' } });
 });
 

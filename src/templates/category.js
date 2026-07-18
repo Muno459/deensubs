@@ -12,11 +12,11 @@ import CATALOG_JS from '../scripts/catalog.min.txt';
  *   (none) — just the catalog
  */
 const CATEGORY_META = {
-  aqeedah: { mode: 'study', desc: 'Islamic creed and theology — Tawheed, belief in Allah, and foundations of faith.', start: 'New to the science of creed? Begin with the most-watched foundation.' },
-  fiqh: { mode: 'study', desc: 'Islamic jurisprudence — rulings on prayer, transactions, worship, and daily life.', start: 'Fiqh builds on fundamentals. This is the most-watched place to begin.' },
+  aqeedah: { mode: 'study', desc: 'Islamic creed and theology: Tawheed, belief in Allah, and foundations of faith.', start: 'New to the science of creed? Begin with the most-watched foundation.' },
+  fiqh: { mode: 'study', desc: 'Islamic jurisprudence: rulings on prayer, transactions, worship, and daily life.', start: 'Fiqh builds on fundamentals. This is the most-watched place to begin.' },
   hadith: { mode: 'study', desc: 'Studies and discussions of Prophetic traditions and their narrators.', start: 'Start with the most-watched study before the detailed commentaries.' },
-  tafsir: { mode: 'study', desc: 'Quranic commentary and explanation — understanding the Book of Allah.', start: 'Begin your journey through the Quran with the most-watched explanation.' },
-  seerah: { mode: 'study', desc: 'The life and biography of the Prophet Muhammad ﷺ and his Companions.', start: 'The story is best from the beginning — start with the most-watched session.' },
+  tafsir: { mode: 'study', desc: 'Quranic commentary and explanation, understanding the Book of Allah.', start: 'Begin your journey through the Quran with the most-watched explanation.' },
+  seerah: { mode: 'study', desc: 'The life and biography of the Prophet Muhammad ﷺ and his Companions.', start: 'The story is best from the beginning. Start with the most-watched session.' },
   khutbah: { mode: 'timely', desc: 'Friday sermons (Jumuah Khutbahs) delivered at major mosques by senior scholars.', start: 'The most recent sermon, fresh from the minbar.' },
   reminder: { mode: 'short', desc: 'Short reminders and spiritual advice to strengthen faith and practice.' },
   lecture: { desc: 'In-depth lectures and talks on various Islamic topics by trusted scholars.' },
