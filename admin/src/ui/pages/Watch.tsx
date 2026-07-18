@@ -60,7 +60,7 @@ export default function Watch() {
           <SectionTitle>Completion by video</SectionTitle>
           <Table head={['Video', 'Viewers', 'Events', 'Avg completion']}>
             {(completion || []).map((r: any) => (
-              <tr key={r.video_slug} className="transition-colors hover:bg-white/[0.02]">
+              <tr key={r.video_slug} className="transition-colors hover:bg-hover">
                 <td className="max-w-md truncate px-3 py-2.5 text-cream/85" title={videoMap?.[r.video_slug] || r.video_slug}>
                   {videoMap?.[r.video_slug] || r.video_slug}
                 </td>
@@ -90,7 +90,7 @@ export default function Watch() {
             </SectionTitle>
             <Table head={['Video', 'Avg buffered (s)', 'Events']}>
               {bufferIssues.map((r: any) => (
-                <tr key={r.video_slug} className="transition-colors hover:bg-white/[0.02]">
+                <tr key={r.video_slug} className="transition-colors hover:bg-hover">
                   <td className="max-w-md truncate px-3 py-2.5 text-cream/85">{videoMap?.[r.video_slug] || r.video_slug}</td>
                   <td className="px-3 py-2.5 tabular-nums text-muted">{r.avg_buffer}</td>
                   <td className="px-3 py-2.5 tabular-nums text-muted">{r.events}</td>

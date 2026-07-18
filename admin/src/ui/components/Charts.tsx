@@ -40,12 +40,12 @@ export function GoldArea({
         </defs>
         <XAxis
           dataKey={x}
-          tick={{ fill: '#8f8a7c', fontSize: 11 }}
+          tick={{ fill: '#8d8779', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
           tickFormatter={(v: string) => (typeof v === 'string' ? v.slice(5) : v)}
         />
-        <YAxis tick={{ fill: '#8f8a7c', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
+        <YAxis tick={{ fill: '#8d8779', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
         <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: 'rgba(196,164,76,0.3)' }} />
         <Area
           type="monotone"
@@ -74,8 +74,8 @@ export function GoldBars({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-        <XAxis dataKey={x} tick={{ fill: '#8f8a7c', fontSize: 11 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: '#8f8a7c', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
+        <XAxis dataKey={x} tick={{ fill: '#8d8779', fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fill: '#8d8779', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
         <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(196,164,76,0.06)' }} />
         <Bar dataKey={y} fill="#45b3a2" radius={[4, 4, 0, 0]} animationDuration={900} />
       </BarChart>

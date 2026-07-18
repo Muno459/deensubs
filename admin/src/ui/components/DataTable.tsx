@@ -68,12 +68,12 @@ export function DataTable<T extends { [k: string]: any }>({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/[0.04]">
+        <tbody className="divide-y divide-hairline">
           {sorted.map((row) => (
             <tr
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={cn('transition-colors hover:bg-white/[0.025]', onRowClick && 'cursor-pointer')}
+              className={cn('transition-colors hover:bg-hover', onRowClick && 'cursor-pointer')}
             >
               {columns.map((c) => (
                 <td key={c.key} className={cn('px-3 py-2', c.align === 'right' && 'text-right')}>

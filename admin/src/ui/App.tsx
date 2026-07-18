@@ -101,7 +101,7 @@ function LiveChip() {
     : null;
   if (live == null) return null;
   return (
-    <span className="flex items-center gap-1.5 rounded-full border border-hairline bg-white/[0.02] px-2.5 py-1 text-[11px] font-medium text-muted">
+    <span className="flex items-center gap-1.5 rounded-full border border-hairline bg-soft px-2.5 py-1 text-[11px] font-medium text-muted">
       <span className="relative flex h-1.5 w-1.5">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -148,6 +148,12 @@ function Login({ denied }: { denied?: string }) {
 export default function App() {
   const [me, setMe] = useState<Me | null | 'loading'>('loading');
   const [route, nav] = useHashRoute();
+  const [theme, setTheme] = useState<string>(() => localStorage.getItem('ds-admin-theme') || 'light');
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('ds-admin-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     api<Me>('/api/me')
@@ -181,7 +187,7 @@ export default function App() {
           <div className="px-4 pb-3 pt-5">
             <a href="#/dashboard" className="flex items-baseline gap-2">
               <span className="text-[15px] font-semibold tracking-tight text-cream">DeenSubs</span>
-              <span className="rounded border border-hairline bg-white/[0.03] px-1 py-px text-[9px] font-semibold uppercase tracking-[0.14em] text-faint">
+              <span className="rounded border border-hairline bg-soft px-1 py-px text-[9px] font-semibold uppercase tracking-[0.14em] text-faint">
                 Admin
               </span>
             </a>
@@ -199,13 +205,13 @@ export default function App() {
                       onClick={() => nav(item.id)}
                       className={cn(
                         'group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] transition-colors duration-150',
-                        route === item.id ? 'text-cream' : 'text-muted hover:bg-white/[0.03] hover:text-cream'
+                        route === item.id ? 'text-cream' : 'text-muted hover:bg-hover hover:text-cream'
                       )}
                     >
                       {route === item.id && (
                         <motion.span
                           layoutId="nav-active"
-                          className="absolute inset-0 rounded-lg bg-white/[0.05]"
+                          className="absolute inset-0 rounded-lg bg-soft"
                           transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                         />
                       )}
@@ -250,18 +256,25 @@ export default function App() {
             <div className="flex items-center gap-2">
               <LiveChip />
               <button
+                onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                title={theme === 'light' ? 'Switch to dark' : 'Switch to light'}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-hairline bg-soft text-muted transition-colors hover:text-cream"
+              >
+                <Icon name={theme === 'light' ? 'moon' : 'sun'} className="h-3.5 w-3.5" />
+              </button>
+              <button
                 onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-                className="flex items-center gap-2 rounded-lg border border-hairline bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-faint transition-colors hover:border-hairline-strong hover:text-muted"
+                className="flex items-center gap-2 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] text-faint transition-colors hover:border-hairline-strong hover:text-muted"
               >
                 <Icon name="search" className="h-3 w-3" />
                 Search
-                <kbd className="rounded border border-hairline bg-white/[0.03] px-1 font-mono text-[9px]">⌘K</kbd>
+                <kbd className="rounded border border-hairline bg-soft px-1 font-mono text-[9px]">⌘K</kbd>
               </button>
               <a
                 href="https://deensubs.com"
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-cream"
+                className="flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-cream"
               >
                 <Icon name="external" className="h-3 w-3" />
                 Site

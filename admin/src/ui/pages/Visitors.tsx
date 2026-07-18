@@ -26,7 +26,7 @@ function VisitorJourney({ id }: { id: string }) {
           ['Visits', String(fp.visit_count ?? '?')],
           ['Last seen', fmtAgo(fp.last_seen)],
         ].map(([k, v]) => (
-          <div key={k} className="rounded-lg border border-hairline bg-white/[0.02] p-2">
+          <div key={k} className="rounded-lg border border-hairline bg-soft p-2">
             <p className="text-[10px] uppercase tracking-wider text-muted">{k}</p>
             <p className="mt-0.5 text-cream/90">{v}</p>
           </div>
@@ -86,7 +86,7 @@ export default function Visitors() {
         <p className="mb-3 text-[13px] text-muted">{visitors.length} most recent visitors (fingerprints)</p>
         <Table head={['Visitor', 'Location', 'Device', 'Visits', 'Last seen']}>
           {visitors.map((v: any) => (
-            <tr key={v.id} className="cursor-pointer transition-colors hover:bg-white/[0.02]" onClick={() => setOpen(v)}>
+            <tr key={v.id} className="cursor-pointer transition-colors hover:bg-hover" onClick={() => setOpen(v)}>
               <td className="px-3 py-2.5">
                 <div className="flex items-center gap-2">
                   {v.user_name ? (

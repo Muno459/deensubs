@@ -109,7 +109,7 @@ export default function Catalog() {
           </SectionTitle>
           <div className="space-y-1">
             {cats.map((c: any) => (
-              <div key={c.id} className="group flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.02]">
+              <div key={c.id} className="group flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-hover">
                 <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.color || '#45b3a2' }} />
                 <span className="text-[13px] text-cream">{c.name}</span>
                 {c.name_ar && <span dir="rtl" className="font-arabic text-[13px] text-muted">{c.name_ar}</span>}
@@ -140,7 +140,7 @@ export default function Catalog() {
           </SectionTitle>
           <div className="space-y-1">
             {scholars.map((s: any) => (
-              <div key={s.id} className="group flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.02]">
+              <div key={s.id} className="group flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-hover">
                 {s.photo ? (
                   <img src={`https://cdn.deensubs.com/${s.photo}`} alt="" className="h-7 w-7 rounded-full border border-hairline object-cover" />
                 ) : (

@@ -7,7 +7,6 @@ import { useToast } from '../components/Toast';
 import { SubtitleEditor } from '../components/SubtitleEditor';
 import { PreviewPlayer } from '../components/PreviewPlayer';
 import { BlurFade } from '../components/BlurFade';
-import { BorderBeam } from '../components/BorderBeam';
 import { Icon } from '../components/Icon';
 
 const LANGS = [
@@ -75,7 +74,7 @@ function Timeline({ job, now }: { job: any; now: number }) {
         return (
           <div key={s.id} className={`flex items-center ${i > 0 ? 'flex-1' : ''}`}>
             {i > 0 && (
-              <div className="relative mx-1 h-px flex-1 overflow-hidden rounded bg-white/[0.07]">
+              <div className="relative mx-1 h-px flex-1 overflow-hidden rounded bg-soft">
                 <motion.div
                   className="absolute inset-y-0 left-0 bg-gradient-to-r from-gold/60 to-gold"
                   initial={false}
@@ -93,7 +92,7 @@ function Timeline({ job, now }: { job: any; now: number }) {
                       ? 'border-gold/50 bg-gold/15 text-gold-bright'
                       : isActive
                         ? 'border-gold bg-gold/10 text-gold-bright'
-                        : 'border-white/10 bg-white/[0.02] text-muted/50'
+                        : 'border-hairline bg-soft text-muted/50'
                 }`}
               >
                 {isActive && (
@@ -304,12 +303,12 @@ function JobDetail({ job }: { job: any }) {
   }, [job.id, job.srt_key]);
 
   return (
-    <div className="border-t border-white/[0.05] pt-3">
+    <div className="border-t border-hairline pt-3">
       <div className="mb-3 flex items-center gap-1">
         {(['overview', 'preview'] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`rounded-lg px-3 py-1.5 text-[12px] font-medium capitalize transition-colors ${
-              tab === t ? 'bg-white/[0.06] text-cream' : 'text-muted hover:text-cream'
+              tab === t ? 'bg-soft text-cream' : 'text-muted hover:text-cream'
             }`}>
             {t === 'preview' ? 'Preview with subtitles' : t}
           </button>
@@ -351,7 +350,7 @@ function JobDetail({ job }: { job: any }) {
           {job.status === 'done' && (
             <button
               onClick={() => (window as any).__openEditor?.(job)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-white/[0.07] active:scale-[0.97]"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97]"
             >
               <Icon name="edit" className="h-3 w-3" /> Edit subtitles
             </button>
@@ -365,7 +364,7 @@ function JobDetail({ job }: { job: any }) {
                 <Icon name="video" className="h-3 w-3" /> Publish as video
               </button>
             ) : (
-              <span className="inline-flex items-center rounded-lg border border-hairline bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-faint" title="yt-dlp downloads audio only; publish requires a direct video-file URL">
+              <span className="inline-flex items-center rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] text-faint" title="yt-dlp downloads audio only; publish requires a direct video-file URL">
                 audio-only — not publishable
               </span>
             )
@@ -377,7 +376,7 @@ function JobDetail({ job }: { job: any }) {
                 <Icon name="download" className="h-3 w-3" /> Dub audio
               </a>
             ) : dub.status === 'dubbing' ? (
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-muted">
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] text-muted">
                 <Spinner className="h-3 w-3" /> Dubbing...
               </span>
             ) : (
@@ -394,7 +393,7 @@ function JobDetail({ job }: { job: any }) {
                   }
                   setDubBusy(false);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-white/[0.07] active:scale-[0.97]"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97]"
               >
                 <Icon name="globe" className="h-3 w-3" /> {dubBusy ? 'Starting...' : `Dub ${String(job.target_lang).toUpperCase()}`}
               </button>
@@ -408,13 +407,13 @@ function JobDetail({ job }: { job: any }) {
           )}
           {job.srt_source_key && (
             <a href={`/api/scribe/${job.id}/file?type=source`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-white/[0.07] active:scale-[0.97]">
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97]">
               <Icon name="download" className="h-3 w-3" /> Source subtitles
             </a>
           )}
           {job.asr_key && (
             <a href={`/api/scribe/${job.id}/file?type=asr`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-muted transition-all hover:bg-white/[0.07] active:scale-[0.97]">
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-muted transition-all hover:bg-hover active:scale-[0.97]">
               <Icon name="download" className="h-3 w-3" /> Raw transcript
             </a>
           )}
@@ -423,7 +422,7 @@ function JobDetail({ job }: { job: any }) {
       <div>
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted">Subtitle preview</p>
         {srt ? (
-          <pre className="max-h-64 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-cream/75">
+          <pre className="max-h-64 overflow-y-auto rounded-xl border border-hairline bg-inset p-3 font-mono text-[11px] leading-relaxed text-cream/75">
             {srt.split('\n\n').slice(0, 10).join('\n\n')}
           </pre>
         ) : job.srt_key ? (
@@ -465,7 +464,7 @@ function CookiesModal({ open, onClose }: { open: boolean; onClose: () => void })
         onChange={(e) => setText(e.target.value)}
         placeholder={'# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t...'}
         spellCheck={false}
-        className="mt-3 w-full resize-y rounded-xl border border-hairline bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-cream outline-none focus:border-gold/40"
+        className="mt-3 w-full resize-y rounded-xl border border-hairline bg-inset p-3 font-mono text-[11px] leading-relaxed text-cream outline-none focus:border-gold/40"
       />
       {msg && <p className="mt-2 text-[12px] text-gold-bright">{msg}</p>}
       <div className="mt-4 flex justify-between">
@@ -513,7 +512,7 @@ export default function Scribe() {
   const [url, setUrl] = useState('');
   const [lang, setLang] = useState('en');
   const [extraLangs, setExtraLangs] = useState<string[]>([]);
-  const [fullVideo, setFullVideo] = useState(false);
+  const [fullVideo, setFullVideo] = useState(true);
   const [batch, setBatch] = useState<null | { title: string; entries: any[]; picked: Set<string> }>(null);
   const [probe, setProbe] = useState<any | null>(null);
   const [probing, setProbing] = useState(false);
@@ -652,7 +651,6 @@ export default function Scribe() {
       {/* Composer */}
       <BlurFade>
         <GlowCard className="relative overflow-hidden p-6">
-          <BorderBeam size={170} duration={14} />
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-[15px] font-semibold tracking-tight text-cream">Add a video</h2>
@@ -665,7 +663,7 @@ export default function Scribe() {
             </div>
             <button
               onClick={() => setCookiesOpen(true)}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-cream"
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-cream"
             >
               <Icon name="wrench" className="h-3.5 w-3.5" /> Cookies
             </button>
@@ -686,11 +684,11 @@ export default function Scribe() {
             </Button>
           </div>
           {(probe || probing) && !looksLikePlaylist && (
-            <div className="mt-3 flex items-center gap-3 rounded-xl border border-hairline bg-black/25 p-2.5">
+            <div className="mt-3 flex items-center gap-3 rounded-xl border border-hairline bg-inset p-2.5">
               {probe?.thumb_url ? (
                 <img src={probe.thumb_url} alt="" className="h-14 w-24 shrink-0 rounded-lg border border-hairline object-cover" />
               ) : (
-                <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg border border-hairline bg-white/[0.02]">
+                <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg border border-hairline bg-soft">
                   {probing ? <Spinner className="h-4 w-4" /> : <Icon name="video" className="h-4 w-4 text-faint" />}
                 </div>
               )}
@@ -738,7 +736,7 @@ export default function Scribe() {
 
       {/* Stats strip + filters */}
       {jobs.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-hairline bg-white/[0.015] px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-hairline bg-soft px-4 py-2.5">
           <span className="text-[12px] text-muted"><b className="text-cream">{stats.running}</b> running</span>
           <span className="text-[12px] text-muted"><b className="text-cream">{stats.week}</b> this week</span>
           <span className="text-[12px] text-muted"><b className="text-cream">{stats.minutes}</b> min transcribed</span>
@@ -756,7 +754,7 @@ export default function Scribe() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Filter..."
-              className="w-28 rounded-lg border border-hairline bg-black/30 px-2.5 py-1 text-[12px] text-cream outline-none placeholder:text-faint focus:border-gold/40"
+              className="w-28 rounded-lg border border-hairline bg-inset px-2.5 py-1 text-[12px] text-cream outline-none placeholder:text-faint focus:border-gold/40"
             />
           </div>
         </div>
@@ -767,7 +765,7 @@ export default function Scribe() {
         {loading && !jobs.length && (
           <div className="space-y-3">
             {[0, 1].map((i) => (
-              <div key={i} className="h-28 animate-pulse rounded-2xl border border-white/[0.04] bg-white/[0.015]" />
+              <div key={i} className="h-28 animate-pulse rounded-2xl border border-hairline bg-soft" />
             ))}
           </div>
         )}
@@ -822,7 +820,7 @@ export default function Scribe() {
                       <button
                         onClick={(e) => { e.stopPropagation(); api(`/api/scribe/${j.id}/retry`, { method: 'POST' }).then(refetch); }}
                         title="Retry as a new job"
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-gold-bright"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-gold-bright"
                       >
                         <Icon name="refresh" className="h-3.5 w-3.5" />
                       </button>
@@ -860,7 +858,7 @@ export default function Scribe() {
           </BlurFade>
         ))}
         {!loading && !shownJobs.length && (
-          <div className="rounded-2xl border border-dashed border-white/[0.08] py-14 text-center">
+          <div className="rounded-2xl border border-dashed border-hairline py-14 text-center">
             <Icon name="captions" className="mx-auto h-8 w-8 text-muted/30" />
             <p className="mt-3 text-[13px] text-muted">No transcriptions yet. Paste a URL above to start.</p>
           </div>
@@ -881,7 +879,7 @@ export default function Scribe() {
           </div>
           <div className="max-h-96 space-y-0.5 overflow-y-auto">
             {batch.entries.map((e: any) => (
-              <label key={e.url} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.02]">
+              <label key={e.url} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-hover">
                 <input type="checkbox" className="accent-[#45b3a2]"
                   checked={batch.picked.has(e.url)}
                   onChange={() => {

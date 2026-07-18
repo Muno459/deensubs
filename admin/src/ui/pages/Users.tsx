@@ -16,7 +16,7 @@ function Journey({ userId }: { userId: number }) {
           <SectionTitle>Comments ({data.comments.length})</SectionTitle>
           <div className="space-y-2">
             {data.comments.slice(0, 10).map((c: any) => (
-              <div key={c.id} className="rounded-lg border border-hairline bg-white/[0.02] p-2.5">
+              <div key={c.id} className="rounded-lg border border-hairline bg-soft p-2.5">
                 <p className="text-[12px] leading-relaxed text-cream/85">{c.content}</p>
                 <p className="mt-1 text-[11px] text-muted">on {c.video_title} · {fmtAgo(c.created_at)}</p>
               </div>
@@ -85,7 +85,7 @@ export default function Users() {
         <p className="mb-3 text-[13px] text-muted">{users.length} registered users</p>
         <Table head={['User', 'Email', 'Comments', 'Joined', 'Role', '']}>
           {users.map((u: any) => (
-            <tr key={u.id} className="transition-colors hover:bg-white/[0.02]">
+            <tr key={u.id} className="transition-colors hover:bg-hover">
               <td className="px-3 py-2.5">
                 <button onClick={() => setJourneyUser(u)} className="flex items-center gap-2.5 text-left">
                   {u.avatar ? (
@@ -108,7 +108,7 @@ export default function Users() {
                   <select
                     value={u.role || 'user'}
                     onChange={(e) => setConfirmRole({ user: u, role: e.target.value })}
-                    className="rounded-lg border border-hairline bg-black/30 px-2 py-1 text-[12px] text-cream outline-none transition-colors hover:border-hairline-strong focus:border-gold/40"
+                    className="rounded-lg border border-hairline bg-inset px-2 py-1 text-[12px] text-cream outline-none transition-colors hover:border-hairline-strong focus:border-gold/40"
                   >
                     <option value="user">user</option>
                     <option value="admin">admin</option>

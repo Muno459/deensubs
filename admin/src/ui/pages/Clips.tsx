@@ -5,7 +5,6 @@ import { api, useApi } from '../lib/api';
 import { fmtDuration, fmtAgo } from '../lib/format';
 import { GlowCard, SectionTitle, Button, inputCls, Badge, Spinner, ErrorNote } from '../components/Primitives';
 import { BlurFade } from '../components/BlurFade';
-import { BorderBeam } from '../components/BorderBeam';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 
@@ -37,7 +36,7 @@ function Composer({ job, moment, onClose, onCreated }: { job: any; moment: Momen
       <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-hairline bg-panel p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-cream">Compose clip</h3>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-white/[0.06] hover:text-cream">✕</button>
+          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-cream">✕</button>
         </div>
         <div className="space-y-3.5">
           <div>
@@ -60,7 +59,7 @@ function Composer({ job, moment, onClose, onCreated }: { job: any; moment: Momen
             <div className="grid grid-cols-3 gap-2">
               {STYLES.map((s) => (
                 <button key={s.id} onClick={() => setStyle(s.id)}
-                  className={`rounded-xl border p-3 text-left transition-all ${style === s.id ? 'border-gold/50 bg-gold/[0.07]' : 'border-hairline bg-white/[0.02] hover:border-hairline-strong'}`}>
+                  className={`rounded-xl border p-3 text-left transition-all ${style === s.id ? 'border-gold/50 bg-gold/[0.07]' : 'border-hairline bg-soft hover:border-hairline-strong'}`}>
                   <p className="text-[13px] font-semibold text-cream">{s.label}</p>
                   <p className="mt-0.5 text-[10px] leading-tight text-faint">{s.desc}</p>
                 </button>
@@ -69,7 +68,7 @@ function Composer({ job, moment, onClose, onCreated }: { job: any; moment: Momen
           </div>
           <div>
             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted">Captions in range ({included.length} cues)</span>
-            <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-hairline bg-black/30 p-2.5">
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-hairline bg-inset p-2.5">
               {included.map((c, i) => (
                 <p key={i} className="text-[12px] leading-snug text-cream/80">
                   <span className="mr-2 font-mono text-[10px] text-faint">{fmtDuration(c.start)}</span>
@@ -146,7 +145,6 @@ export default function Clips() {
     <div className="space-y-5">
       <BlurFade>
         <GlowCard className="relative overflow-hidden p-6">
-          <BorderBeam size={170} duration={14} />
           <h2 className="text-[15px] font-semibold tracking-tight text-cream">Clip Studio</h2>
           <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-muted">
             The viral formula, automated: AI scans the transcript for hook-first, self-contained, quotable moments —

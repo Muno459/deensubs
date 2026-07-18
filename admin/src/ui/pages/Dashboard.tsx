@@ -22,7 +22,7 @@ function QuickAction({ icon, label, onClick }: { icon: string; label: string; on
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2.5 rounded-xl border border-hairline bg-white/[0.02] px-4 py-3 text-[13px] font-medium text-cream transition-all hover:border-gold/30 hover:bg-gold/[0.04] active:scale-[0.98]"
+      className="flex items-center gap-2.5 rounded-xl border border-hairline bg-soft px-4 py-3 text-[13px] font-medium text-cream transition-all hover:border-gold/30 hover:bg-gold/[0.04] active:scale-[0.98]"
     >
       <Icon name={icon} className="h-4 w-4 text-gold" />
       {label}
@@ -111,14 +111,14 @@ export default function Dashboard() {
             </SectionTitle>
             <div className="space-y-2">
               {(scribeJobs || []).map((j: any) => (
-                <a key={j.id} href="#/scribe" className="flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-white/[0.02]">
+                <a key={j.id} href="#/scribe" className="flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-hover">
                   {j.status === 'running' ? (
                     <span className="relative flex h-2 w-2 shrink-0">
                       <span className="absolute h-full w-full animate-ping rounded-full bg-gold opacity-60" />
                       <span className="relative h-2 w-2 rounded-full bg-gold" />
                     </span>
                   ) : (
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${j.status === 'done' ? 'bg-emerald-400' : j.status === 'error' ? 'bg-red-400' : 'bg-white/20'}`} />
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${j.status === 'done' ? 'bg-emerald-400' : j.status === 'error' ? 'bg-red-400' : 'bg-hairline-strong'}`} />
                   )}
                   <span className="min-w-0 flex-1 truncate text-[13px] text-cream/90">{j.title || j.url}</span>
                   <Badge tone={j.status === 'running' ? 'gold' : 'dim'}>{STEP_LABEL[j.step] || j.step}</Badge>
@@ -158,7 +158,7 @@ export default function Dashboard() {
                     title={c.hook}
                   />
                 ) : (
-                  <div key={c.id} className="flex aspect-[9/16] w-28 shrink-0 flex-col items-center justify-center gap-2 rounded-xl border border-hairline bg-white/[0.02] p-2 text-center">
+                  <div key={c.id} className="flex aspect-[9/16] w-28 shrink-0 flex-col items-center justify-center gap-2 rounded-xl border border-hairline bg-soft p-2 text-center">
                     <Icon name="play" className="h-5 w-5 text-faint" />
                     <span className="line-clamp-3 text-[10px] leading-tight text-muted">{c.hook || 'Rendering...'}</span>
                     <Badge tone={c.status === 'error' ? 'red' : 'gold'} className="text-[9px]">{c.status}</Badge>

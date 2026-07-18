@@ -49,10 +49,10 @@ export default function Tools() {
             <SectionTitle>Exports</SectionTitle>
             <p className="text-[13px] leading-relaxed text-muted">Download platform data as CSV.</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <a href="/api/export/videos" className="inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-white/[0.04] px-3.5 py-2 text-[13px] font-semibold text-cream transition-all hover:bg-white/[0.08] active:scale-[0.97]">
+              <a href="/api/export/videos" className="inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-soft px-3.5 py-2 text-[13px] font-semibold text-cream transition-all hover:bg-hover active:scale-[0.97]">
                 <Icon name="download" className="h-4 w-4" /> Videos CSV
               </a>
-              <a href="/api/export/users" className="inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-white/[0.04] px-3.5 py-2 text-[13px] font-semibold text-cream transition-all hover:bg-white/[0.08] active:scale-[0.97]">
+              <a href="/api/export/users" className="inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-soft px-3.5 py-2 text-[13px] font-semibold text-cream transition-all hover:bg-hover active:scale-[0.97]">
                 <Icon name="download" className="h-4 w-4" /> Users CSV
               </a>
             </div>
@@ -71,7 +71,7 @@ export default function Tools() {
                 className={`rounded-full border px-3 py-1 text-[12px] font-medium transition-colors ${
                   prefix === p
                     ? 'border-gold/40 bg-gold/10 text-gold-bright'
-                    : 'border-hairline bg-white/[0.02] text-muted hover:text-cream'
+                    : 'border-hairline bg-soft text-muted hover:text-cream'
                 }`}
               >
                 {p || 'all'}
@@ -89,7 +89,7 @@ export default function Tools() {
           ) : (
             <Table head={['Key', 'Size', 'Uploaded']}>
               {(r2.data?.objects || []).map((o: any) => (
-                <tr key={o.key} className="transition-colors hover:bg-white/[0.02]">
+                <tr key={o.key} className="transition-colors hover:bg-hover">
                   <td className="max-w-lg truncate px-3 py-2 font-mono text-[12px] text-cream/85" title={o.key}>{o.key}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted">{fmtBytes(o.size)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-muted">{fmtAgo(o.uploaded)}</td>
@@ -106,7 +106,7 @@ export default function Tools() {
           <SectionTitle right={<Badge tone="dim">last 50</Badge>}>Admin activity log</SectionTitle>
           <Table head={['Admin', 'Action', 'Target', 'Details', 'When']}>
             {(logs.data?.logs || []).map((l: any) => (
-              <tr key={l.id} className="transition-colors hover:bg-white/[0.02]">
+              <tr key={l.id} className="transition-colors hover:bg-hover">
                 <td className="px-3 py-2 text-cream/85">{l.admin_name || l.admin_id}</td>
                 <td className="px-3 py-2"><Badge tone="gold">{l.action}</Badge></td>
                 <td className="px-3 py-2 text-muted">{l.target}</td>

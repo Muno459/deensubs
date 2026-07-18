@@ -28,23 +28,63 @@
   unicode-range: U+0600-06FF, U+0750-077F, U+FB50-FDFF, U+FE70-FEFF;
 }
 
-/* ---- Design tokens v2: neutral surfaces, gold as the single accent ---- */
-@theme {
+/* ---- Runtime theme (dark = site dark, light = site default) ---- */
+:root {
+  --ink: #0f0f0f;
+  --panel: #1a1a1a;
+  --raised: #212121;
+  --cream: #eceadf;
+  --mutedc: #a29c8f;
+  --faintc: #8d8779;
+  --acc: #45b3a2;
+  --accb: #6ecfbf;
+  --accd: rgba(69, 179, 162, 0.12);
+  --hl: rgba(255, 255, 255, 0.07);
+  --hls: rgba(255, 255, 255, 0.16);
+  --soft: rgba(255, 255, 255, 0.03);
+  --hoverc: rgba(255, 255, 255, 0.05);
+  --inset: rgba(0, 0, 0, 0.3);
+  --glow: rgba(69, 179, 162, 0.07);
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  --ink: #f6f4ee;
+  --panel: #ffffff;
+  --raised: #efece3;
+  --cream: #211d15;
+  --mutedc: #5b564b;
+  --faintc: #8d8779;
+  --acc: #0e6b63;
+  --accb: #14887d;
+  --accd: rgba(14, 107, 99, 0.1);
+  --hl: rgba(30, 25, 10, 0.1);
+  --hls: rgba(30, 25, 10, 0.24);
+  --soft: rgba(30, 25, 10, 0.04);
+  --hoverc: rgba(30, 25, 10, 0.06);
+  --inset: rgba(30, 25, 10, 0.05);
+  --glow: rgba(14, 107, 99, 0.05);
+  color-scheme: light;
+}
+
+@theme inline {
   --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
   --font-arabic: "Amiri", serif;
 
-  --color-ink: #0f0f0f;
-  --color-panel: #1a1a1a;
-  --color-raised: #212121;
-  --color-cream: #eceadf;
-  --color-muted: #a29c8f;
-  --color-faint: #8d8779;
-  --color-gold: #45b3a2;
-  --color-gold-bright: #6ecfbf;
-  --color-gold-dim: rgba(69, 179, 162, 0.12);
-  --color-hairline: rgba(255, 255, 255, 0.07);
-  --color-hairline-strong: rgba(255, 255, 255, 0.16);
+  --color-ink: var(--ink);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-cream: var(--cream);
+  --color-muted: var(--mutedc);
+  --color-faint: var(--faintc);
+  --color-gold: var(--acc);
+  --color-gold-bright: var(--accb);
+  --color-gold-dim: var(--accd);
+  --color-hairline: var(--hl);
+  --color-hairline-strong: var(--hls);
+  --color-soft: var(--soft);
+  --color-hover: var(--hoverc);
+  --color-inset: var(--inset);
 
   --radius-card: 10px;
 
@@ -67,8 +107,8 @@
 
 html,
 body {
-  background: #0f0f0f;
-  color: #eceadf;
+  background: var(--ink);
+  color: var(--cream);
   font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "tnum" 0;
@@ -80,7 +120,7 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(45% 28% at 50% -8%, rgba(69, 179, 162, 0.07), transparent 70%);
+  background: radial-gradient(45% 28% at 50% -8%, var(--glow), transparent 70%);
   z-index: 0;
 }
 
@@ -90,7 +130,7 @@ body::before {
 }
 
 ::selection {
-  background: rgba(69, 179, 162, 0.35);
+  background: var(--accd);
 }
 
 *:focus-visible {
@@ -101,14 +141,14 @@ body::before {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  scrollbar-color: var(--hls) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--hls);
   border-radius: 4px;
 }
 *::-webkit-scrollbar-track {
@@ -128,19 +168,19 @@ body::before {
   padding-left: 1.1rem;
 }
 .md-body a {
-  color: #6ecfbf;
+  color: var(--accb);
   text-decoration: underline;
 }
 .md-body code {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--soft);
   border-radius: 4px;
   padding: 0.1rem 0.3rem;
   font-size: 0.82em;
   font-family: "Geist Mono", ui-monospace, monospace;
 }
 .md-body pre {
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--inset);
+  border: 1px solid var(--hl);
   border-radius: 10px;
   padding: 0.7rem;
   overflow-x: auto;
@@ -156,13 +196,13 @@ body::before {
 }
 .md-body th {
   text-align: left;
-  color: #45b3a2;
+  color: var(--acc);
   font-weight: 600;
   border-bottom: 1px solid rgba(69, 179, 162, 0.25);
   padding: 0.3rem 0.5rem;
 }
 .md-body td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--hl);
   padding: 0.3rem 0.5rem;
 }
 
@@ -177,11 +217,11 @@ body::before {
   outline: none;
   padding: 14px 16px;
   font-size: 14px;
-  color: #eceadf;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--cream);
+  border-bottom: 1px solid var(--hl);
 }
 [cmdk-input]::placeholder {
-  color: #8d8779;
+  color: var(--faintc);
 }
 [cmdk-list] {
   max-height: 340px;
@@ -194,7 +234,7 @@ body::before {
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #8d8779;
+  color: var(--faintc);
 }
 [cmdk-item] {
   display: flex;
@@ -203,16 +243,16 @@ body::before {
   padding: 9px 10px;
   border-radius: 8px;
   font-size: 13px;
-  color: #a29c8f;
+  color: var(--mutedc);
   cursor: pointer;
 }
 [cmdk-item][data-selected="true"] {
-  background: rgba(69, 179, 162, 0.1);
-  color: #eceadf;
+  background: var(--accd);
+  color: var(--cream);
 }
 [cmdk-empty] {
   padding: 24px;
   text-align: center;
   font-size: 13px;
-  color: #8d8779;
+  color: var(--faintc);
 }

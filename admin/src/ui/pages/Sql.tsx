@@ -47,7 +47,7 @@ export default function Sql() {
         <GlowCard className="p-5">
           <SectionTitle
             right={
-              <div className="flex gap-1 rounded-lg border border-hairline bg-black/30 p-0.5">
+              <div className="flex gap-1 rounded-lg border border-hairline bg-inset p-0.5">
                 {(['d1', 'ae'] as const).map((e) => (
                   <button
                     key={e}
@@ -70,7 +70,7 @@ export default function Sql() {
             onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') run(); }}
             rows={5}
             spellCheck={false}
-            className="w-full resize-y rounded-xl border border-hairline bg-black/40 p-3 font-mono text-[13px] leading-relaxed text-cream outline-none focus:border-gold/40"
+            className="w-full resize-y rounded-xl border border-hairline bg-inset p-3 font-mono text-[13px] leading-relaxed text-cream outline-none focus:border-gold/40"
           />
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button onClick={run} disabled={busy}>{busy ? 'Running...' : 'Run query'}</Button>
@@ -80,7 +80,7 @@ export default function Sql() {
                 <button
                   key={p.label}
                   onClick={() => { setEngine(p.engine); setSql(p.sql); }}
-                  className="rounded-full border border-hairline bg-white/[0.03] px-2.5 py-1 text-[11px] text-muted transition-colors hover:border-gold/30 hover:text-cream"
+                  className="rounded-full border border-hairline bg-soft px-2.5 py-1 text-[11px] text-muted transition-colors hover:border-gold/30 hover:text-cream"
                 >
                   {p.label}
                 </button>
@@ -101,7 +101,7 @@ export default function Sql() {
             ) : (
               <Table head={cols}>
                 {rows.map((r, i) => (
-                  <tr key={i} className="transition-colors hover:bg-white/[0.02]">
+                  <tr key={i} className="transition-colors hover:bg-hover">
                     {cols.map((c) => (
                       <td key={c} className="max-w-xs truncate px-3 py-2 font-mono text-[12px] text-cream/85" title={String(r[c] ?? '')}>
                         {String(r[c] ?? '')}

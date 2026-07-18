@@ -81,7 +81,7 @@ export function Badge({
     gold: 'bg-gold/10 text-gold-bright border-gold/25',
     green: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25',
     red: 'bg-red-500/10 text-red-300 border-red-500/25',
-    dim: 'bg-white/[0.04] text-muted border-white/10',
+    dim: 'bg-soft text-muted border-hairline',
   };
   return (
     <span
@@ -113,7 +113,7 @@ export function Button({
 }) {
   const variants = {
     gold: 'bg-gold text-ink hover:bg-gold-bright shadow-[0_0_18px_rgba(196,164,76,0.25)]',
-    ghost: 'bg-white/[0.04] text-cream hover:bg-white/[0.08] border border-hairline',
+    ghost: 'bg-soft text-cream hover:bg-hover border border-hairline',
     danger: 'bg-red-500/10 text-red-300 border border-red-500/25 hover:bg-red-500/20',
   };
   return (
@@ -133,7 +133,7 @@ export function Button({
 }
 
 export const inputCls =
-  'w-full rounded-xl border border-hairline bg-black/30 px-3 py-2 text-[13px] text-cream placeholder:text-muted/60 outline-none transition-colors focus:border-gold/40 focus:bg-black/50';
+  'w-full rounded-xl border border-hairline bg-inset px-3 py-2 text-[13px] text-cream placeholder:text-muted/60 outline-none transition-colors focus:border-gold/40 focus:bg-black/50';
 
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -159,7 +159,7 @@ export function Table({ head, children }: { head: React.ReactNode[]; children: R
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/[0.04]">{children}</tbody>
+        <tbody className="divide-y divide-hairline">{children}</tbody>
       </table>
     </div>
   );
@@ -169,7 +169,7 @@ export function Table({ head, children }: { head: React.ReactNode[]; children: R
 export function HitBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0;
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-soft">
       <motion.div
         className="h-full rounded-full bg-gradient-to-r from-gold/70 to-gold-bright"
         initial={{ width: 0 }}
@@ -226,7 +226,7 @@ export function Modal({
               <h3 className="text-base font-semibold text-cream">{title}</h3>
               <button
                 onClick={onClose}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-cream"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-cream"
               >
                 ✕
               </button>
@@ -281,7 +281,7 @@ export function Drawer({
               <h3 className="text-base font-semibold text-cream">{title}</h3>
               <button
                 onClick={onClose}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-cream"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-cream"
               >
                 ✕
               </button>

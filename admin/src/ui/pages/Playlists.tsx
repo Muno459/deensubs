@@ -95,12 +95,12 @@ function PlaylistDetail({ playlist, onBack, onChanged }: { playlist: any; onBack
           <SectionTitle>Videos, in order</SectionTitle>
           <div className="space-y-1.5">
             {videos.map((v: any, i: number) => (
-              <div key={v.id} className="group flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-white/[0.02]">
+              <div key={v.id} className="group flex items-center gap-3 rounded-lg p-1.5 transition-colors hover:bg-hover">
                 <span className="w-6 text-center font-mono text-[11px] text-faint">{i + 1}</span>
                 {v.thumb_key ? (
                   <img src={thumbUrl(v.thumb_key)} alt="" loading="lazy" className="h-9 w-16 shrink-0 rounded-md border border-hairline object-cover" />
                 ) : (
-                  <div className="flex h-9 w-16 shrink-0 items-center justify-center rounded-md border border-hairline bg-white/[0.02]">
+                  <div className="flex h-9 w-16 shrink-0 items-center justify-center rounded-md border border-hairline bg-soft">
                     <Icon name="video" className="h-3.5 w-3.5 text-faint" />
                   </div>
                 )}
@@ -110,9 +110,9 @@ function PlaylistDetail({ playlist, onBack, onChanged }: { playlist: any; onBack
                 </div>
                 <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <button onClick={() => move(v.id, -1)} disabled={i === 0} title="Move up"
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-white/[0.05] disabled:opacity-30">↑</button>
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-hover disabled:opacity-30">↑</button>
                   <button onClick={() => move(v.id, 1)} disabled={i === videos.length - 1} title="Move down"
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-white/[0.05] disabled:opacity-30">↓</button>
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-hover disabled:opacity-30">↓</button>
                   <button
                     onClick={async () => {
                       await api(`/api/playlists/${playlist.id}/videos/${v.id}`, { method: 'DELETE' });

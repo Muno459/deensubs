@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { GlowCard, Button, Badge, Spinner } from '../components/Primitives';
-import { BorderBeam } from '../components/BorderBeam';
 import { Icon } from '../components/Icon';
 
 type Activity = { name: string; args: string; ms?: number; ok?: boolean; running: boolean };
@@ -154,8 +153,7 @@ export default function Ai() {
       <div className="flex-1 space-y-4 overflow-y-auto pb-4 pr-1">
         {messages.length === 0 && (
           <div className="relative mt-10 overflow-hidden rounded-2xl border border-hairline bg-panel/60 p-8 text-center">
-            <BorderBeam size={150} duration={12} />
-            <Icon name="sparkles" className="mx-auto h-8 w-8 text-gold" />
+              <Icon name="sparkles" className="mx-auto h-8 w-8 text-gold" />
             <h2 className="mt-3 text-lg font-semibold text-cream">Admin Agent</h2>
             <p className="mx-auto mt-1.5 max-w-md text-[13px] leading-relaxed text-muted">
               A tool-using agent on your live database: analytics, moderation, content gaps, cache — and it can
@@ -166,7 +164,7 @@ export default function Ai() {
                 <button
                   key={s}
                   onClick={() => send(s)}
-                  className="rounded-full border border-hairline bg-white/[0.03] px-3 py-1.5 text-[12px] text-cream/80 transition-colors hover:border-gold/30 hover:text-gold-bright"
+                  className="rounded-full border border-hairline bg-soft px-3 py-1.5 text-[12px] text-cream/80 transition-colors hover:border-gold/30 hover:text-gold-bright"
                 >
                   {s}
                 </button>
@@ -259,7 +257,7 @@ export default function Ai() {
             <button
               onClick={() => setMessages([])}
               title="Clear conversation"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-cream"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-cream"
             >
               <Icon name="trash" className="h-3.5 w-3.5" />
             </button>

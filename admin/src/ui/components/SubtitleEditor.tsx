@@ -159,7 +159,7 @@ export function SubtitleEditor({ job, onClose }: { job: any; onClose: () => void
                     value={c.text}
                     onChange={(e) => update(i, e.target.value)}
                     rows={Math.max(1, Math.ceil(c.text.length / 60))}
-                    className="mt-1 w-full resize-none rounded-md border border-transparent bg-transparent text-[13.5px] leading-snug text-cream outline-none transition-colors focus:border-gold/30 focus:bg-black/30 focus:px-2 focus:py-1"
+                    className="mt-1 w-full resize-none rounded-md border border-transparent bg-transparent text-[13.5px] leading-snug text-cream outline-none transition-colors focus:border-gold/30 focus:bg-inset focus:px-2 focus:py-1"
                   />
                 </div>
               );

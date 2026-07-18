@@ -217,7 +217,7 @@ export default function Videos() {
         {filtered.map((v, i) => (
           <BlurFade key={v.id} delay={Math.min(i * 0.02, 0.3)}>
             <GlowCard className="group overflow-hidden">
-              <div className="relative aspect-video overflow-hidden rounded-t-2xl bg-black/40">
+              <div className="relative aspect-video overflow-hidden rounded-t-2xl bg-inset">
                 {v.thumb_key ? (
                   <img src={thumbUrl(v.thumb_key)} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
                 ) : (
@@ -248,13 +248,13 @@ export default function Videos() {
                   <div className="ml-auto flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                     <a
                       href={`https://deensubs.com/watch/${v.slug}`} target="_blank" rel="noreferrer"
-                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-cream" title="Open"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-cream" title="Open"
                     >
                       <Icon name="external" className="h-3.5 w-3.5" />
                     </a>
                     <button
                       onClick={() => setEditing(v)}
-                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-gold-bright" title="Edit"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-gold-bright" title="Edit"
                     >
                       <Icon name="edit" className="h-3.5 w-3.5" />
                     </button>
