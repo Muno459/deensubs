@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
-import { VIDEO_COLS, VIDEO_JOIN, readDB } from '../lib/db.js';
+import { VIDEO_COLS, VIDEO_JOIN, readDB, writeDB } from '../lib/db.js';
 import { getHomeBundle, getScholars, getScholar, getScholarVideos, getCategories, getCategory, getCategoryVideos, getPlatformStats, getVideo } from '../lib/kv-cache.js';
 
 // JSON API for the native iOS app. Read-only mirrors of the SSR pages,
-// backed by the same KV/D1 cache layer — no new queries, no writes.
+// backed by the same KV/D1 cache layer — plus account deletion, the one
+// write the App Store requires (guideline 5.1.1(v)).
 const appApi = new Hono();
 
 appApi.use('/api/app/*', async (c, next) => {
@@ -50,6 +51,7 @@ appApi.get('/api/app/video/:slug', async (c) => {
 
 // /api/app/symposium removed — the Symposium category was retired in favor of Podcast
 
+
 appApi.get('/api/app/stats', async (c) => {
   return c.json({ stats: await getPlatformStats(c.env) });
 });
@@ -57,6 +59,38 @@ appApi.get('/api/app/stats', async (c) => {
 // Session probe — the app restores its signed-in state from the sid cookie
 appApi.get('/api/app/me', (c) => {
   return c.json({ user: c.get('user') || null });
+});
+
+// Permanently delete the signed-in user's account: their comments, every
+// session, and the user row. Analytics rows are detached, not retained
+// under the account.
+appApi.post('/api/app/account/delete', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Not signed in' }, 401);
+  const db = writeDB(c.env);
+
+  const sessions = (await db.prepare('SELECT id FROM sessions WHERE user_id = ?').bind(user.id).all()).results;
+  for (const s of sessions) {
+    try { await c.env.CACHE.delete('session:' + s.id); } catch {}
+  }
+
+  // Slugs whose comment caches go stale once the user's comments vanish.
+  const commented = (await db.prepare('SELECT DISTINCT v.slug AS slug FROM comments cm JOIN videos v ON v.id = cm.video_id WHERE cm.user_id = ?').bind(user.id).all()).results;
+
+  await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run();
+  await db.prepare('DELETE FROM comments WHERE user_id = ?').bind(user.id).run();
+  try { await db.prepare('UPDATE fingerprints SET user_id = NULL WHERE user_id = ?').bind(user.id).run(); } catch {}
+  try { await db.prepare('UPDATE search_logs SET user_id = NULL WHERE user_id = ?').bind(user.id).run(); } catch {}
+  await db.prepare('DELETE FROM users WHERE id = ?').bind(user.id).run();
+
+  for (const v of commented) {
+    c.executionCtx.waitUntil(c.env.CACHE.delete('comments:' + v.slug));
+  }
+
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  headers.append('Set-Cookie', 'sid=; Domain=.deensubs.com; Path=/; HttpOnly; Secure; Max-Age=0');
+  headers.append('Set-Cookie', 'sid=; Path=/; HttpOnly; Secure; Max-Age=0');
+  return new Response(JSON.stringify({ ok: true }), { headers });
 });
 
 // Full search — same FTS query as the /search page, LIKE fallback included

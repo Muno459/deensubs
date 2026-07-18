@@ -133,7 +133,7 @@ auth.get('/auth/logout', async (c) => {
 // The app performs the Apple flow natively and POSTs the resulting identity
 // token (a JWT signed by Apple). We verify it against Apple's public keys,
 // then mint the same session cookie the rest of the site uses.
-const APPLE_AUD = 'deensubs.deensubs'; // iOS bundle identifier
+const APPLE_AUD = 'com.deensubs.app'; // iOS bundle identifier
 
 function b64urlToBytes(s) {
   const b64 = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=');
