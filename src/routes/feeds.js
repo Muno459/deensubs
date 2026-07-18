@@ -206,7 +206,6 @@ feeds.get('/sitemap.xml', async (c) => {
   const urls = [
     `<url><loc>${base}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
     `<url><loc>${base}/scholars</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`,
-    `<url><loc>${base}/symposium</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`,
     `<url><loc>${base}/about</loc><changefreq>monthly</changefreq><priority>0.4</priority></url>`,
   ];
   data.categories.forEach(c => urls.push(`<url><loc>${base}/category/${c.slug}</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`));

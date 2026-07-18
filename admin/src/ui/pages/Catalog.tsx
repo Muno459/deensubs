@@ -73,7 +73,7 @@ function ScholarForm({ initial, onDone, onCancel }: { initial?: any; onDone: () 
         body: JSON.stringify({ kind: 'scholar_magic', imageKey: uj.key, name: form.name || 'scholar' }),
       });
       setForm((fm: any) => ({ ...fm, photo: r.photo, photo_hero: r.photo_hero }));
-      toast.push('Portrait + hero generated — likeness untouched, review below');
+      toast.push('Clean cutout generated — review below');
     } catch (e: any) {
       toast.push(e.message, 'error');
     }
@@ -129,7 +129,7 @@ function ScholarForm({ initial, onDone, onCancel }: { initial?: any; onDone: () 
           <>
             <Icon name="sparkles" className="h-5 w-5 text-gold-bright" />
             <span className="text-[13px] font-medium text-cream">Paste (Ctrl+V) or click to upload a reference photo</span>
-            <span className="text-[11px] text-muted">Branded square portrait + wide hero generate automatically — the face is preserved exactly</span>
+            <span className="text-[11px] text-muted">A clean transparent cutout generates automatically — the site handles muted/hover/accent styling in CSS</span>
           </>
         )}
       </button>

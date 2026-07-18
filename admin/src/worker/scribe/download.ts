@@ -190,6 +190,9 @@ async function ytdlpDownload(env: ScribeEnv, jobId: string, url: string, fullVid
     channel: info.channel,
     thumbUrl: info.thumbnail,
     durationSec: info.duration,
+    description: info.description || '',
+    channelId: info.channel_id || '',
+    ytId: info.vid || '',
   };
 }
 

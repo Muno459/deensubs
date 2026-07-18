@@ -164,6 +164,9 @@ def run_download(job_id: str, url: str, cookies: str | None = None, video: bool 
                         channel=info.get("uploader", "") or info.get("channel", ""),
                         thumbnail=info.get("thumbnail", ""),
                         duration=info.get("duration", 0),
+                        description=(info.get("description") or "")[:5000],
+                        channel_id=info.get("channel_id", ""),
+                        vid=info.get("id", ""),
                         via=label,
                     )
                 return
@@ -553,10 +556,24 @@ class Handler(BaseHTTPRequestHandler):
             if not re.match(r"^https?://", g_url):
                 return self._send(400, {"error": "valid url required"})
             out = os.path.join(DIR, f"grade-{uuid.uuid4()}.png")
-            chain = ("colortemperature=temperature=10000:mix=0.9,"
+            src = g_url
+            chain = payload.get("filter")
+            if payload.get("keyauto"):
+                # Chroma-key whatever flat background color the generator painted:
+                # sample a corner pixel and key on it. Pure ffmpeg (urllib hangs
+                # behind the container's proxy env; ffmpeg fetches URLs directly).
+                probe = subprocess.run(
+                    ["ffmpeg", "-v", "error", "-i", g_url, "-vf", "crop=1:1:4:4,format=rgb24",
+                     "-f", "rawvideo", "-"], capture_output=True, timeout=60)
+                rgb = probe.stdout[:3]
+                if len(rgb) == 3:
+                    chain = f"colorkey=0x{rgb.hex().upper()}:0.17:0.08,format=rgba"
+            if not chain:
+                chain = (
+                     "colortemperature=temperature=10000:mix=0.9,"
                      "huesaturation=saturation=-0.85:colors=y+r+m:strength=10,"
                      "eq=saturation=0.55:brightness=-0.015:contrast=1.05")
-            proc = subprocess.run(["ffmpeg", "-y", "-i", g_url, "-vf", chain, out],
+            proc = subprocess.run(["ffmpeg", "-y", "-i", src, "-vf", chain, out],
                                   capture_output=True, text=True, timeout=120)
             if proc.returncode != 0 or not os.path.exists(out):
                 return self._send(500, {"error": (proc.stderr or "grade failed")[-300:]})

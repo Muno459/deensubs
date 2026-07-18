@@ -95,7 +95,7 @@ ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/b
     </div>
   </div>
   <div class="nav-cats">
-    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
+    <div class="nav-pills" id="pills"><a href="/" class="pill${!activeCat?' on':''}">All</a>${categories.map(c=>`<a href="/category/${e(c.slug)}" class="pill${activeCat===c.slug?' on':''}" style="--pc:${e(c.color)}">${e(c.name)}</a>`).join('')}</div>
   </div>
 </nav>
 <div class="mob-menu" id="mob">
@@ -117,7 +117,7 @@ ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/b
     <div class="ft-col">
       <h2>Browse</h2>
       <a href="/">All videos</a>
-      ${categories.slice(0,5).map(c=>`<a href="${c.slug==='symposium'?'/symposium':'/category/'+e(c.slug)}">${e(c.name)}</a>`).join('')}
+      ${categories.slice(0,5).map(c=>`<a href="/category/${e(c.slug)}">${e(c.name)}</a>`).join('')}
       <a href="/scholars">Scholars</a>
     </div>
     <div class="ft-col">

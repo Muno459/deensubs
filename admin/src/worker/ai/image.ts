@@ -14,15 +14,16 @@ function slugify(s: string): string {
 
 /** OpenAI gpt-image-1: excellent text rendering + edits photos with people
  * (the gemini route refuses those). Primary for generation and all edits. */
-async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array, imageCt = 'image/jpeg', size = 'auto'): Promise<Uint8Array> {
+async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array, imageCt = 'image/jpeg', size = 'auto', background?: string, model = 'gpt-image-2'): Promise<Uint8Array> {
   const key = (env as any).OPENAI_KEY;
   if (!key) throw new Error('OPENAI_KEY secret not set');
   let res: Response;
   if (imageBytes) {
     const form = new FormData();
-    form.append('model', 'gpt-image-2');
+    form.append('model', model);
     form.append('prompt', prompt);
     form.append('size', size);
+    if (background) form.append('background', background);
     form.append('quality', 'high');
     form.append('image', new Blob([imageBytes as any], { type: imageCt }), 'image.' + (imageCt.includes('png') ? 'png' : 'jpg'));
     res = await fetch('https://api.openai.com/v1/images/edits', {
@@ -112,24 +113,40 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
 
 
   if (kind === 'scholar_magic') {
-    // The magic: one pasted reference photo → branded square portrait + wide
-    // hero, both preserving the person's likeness exactly (gpt-image-2).
+    // The magic, matched to how the site actually renders scholars: transparent
+    // cutouts on cards. Two variants per reference photo — a natural cutout and
+    // one toned in the DeenSubs teal accent (like the old gold treatment, re-branded).
     if (!payload.imageKey) throw new Error('imageKey required');
     const obj = await env.MEDIA_BUCKET.get(payload.imageKey);
     if (!obj) throw new Error('reference image not found: ' + payload.imageKey);
     const buf = new Uint8Array(await obj.arrayBuffer());
     const ct = obj.httpMetadata?.contentType || 'image/jpeg';
     const base = slugify(payload.name || 'scholar');
-    const STYLE = "Deep neutral charcoal studio background, soft diffused editorial lighting, a subtle cool rim light. Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Dignified, modern, clean.";
-    const [portrait, hero] = await Promise.all([
-      openaiImage(env, `Professional editorial portrait of this person for an Islamic scholars directory. ${STYLE} Square chest-up composition.`, buf, ct, '1024x1024'),
-      openaiImage(env, `Professional wide banner portrait of this person for an Islamic scholars directory page header. ${STYLE} Subject on the right third, generous empty dark background on the left for text overlay.`, buf, ct, '1536x1024'),
-    ]);
-    const photoKey = `scholars/${base}.png`;
-    const heroKey = `scholars/${base}-hero.png`;
-    await env.MEDIA_BUCKET.put(photoKey, portrait, { httpMetadata: { contentType: 'image/png' } });
-    await env.MEDIA_BUCKET.put(heroKey, hero, { httpMetadata: { contentType: 'image/png' } });
-    return { photo: photoKey, photo_hero: heroKey } as any;
+    const KEEP = "Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Chest-up composition, clean subtle painterly editorial portrait treatment with natural colors.";
+    const MAGENTA = 'The background must be a completely flat, uniform, solid pure magenta (#FF00FF) filling the entire frame edge to edge — no gradient, no vignette, no shadows on the background.';
+    const naturalRaw = await openaiImage(env, `Cut out the person cleanly. ${MAGENTA} The person keeps clean natural tones (neutralize heavy casts on the PERSON only — the background stays vivid pure magenta, never desaturate the background). ${KEEP}`, buf, ct, '1024x1024');
+    // Deterministic chroma-key in the container: guaranteed clean alpha
+    const { getContainer } = await import('@cloudflare/containers');
+    const keyOut = async (bytes: Uint8Array, tmpName: string): Promise<Uint8Array> => {
+      const tmpKey = `scribe/tmp/${tmpName}`;
+      await env.MEDIA_BUCKET.put(tmpKey, bytes, { httpMetadata: { contentType: 'image/png' } });
+      const container = getContainer(env.YTDLP as any, 'grade');
+      const res: Response = await container.fetch(new Request('http://ytdlp/grade', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + ((env as any).YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: `${CDN}/${tmpKey}`, keyauto: true }),
+        signal: AbortSignal.timeout(90_000),
+      }));
+      env.MEDIA_BUCKET.delete(tmpKey).catch(() => {});
+      if (!res.ok) throw new Error(`chroma key failed: HTTP ${res.status}`);
+      return new Uint8Array(await res.arrayBuffer());
+    };
+    const natural = await keyOut(naturalRaw, `${base}-nat-${Date.now().toString(36)}.png`);
+    // ONE clean natural cutout serves everything: cards (CSS mutes it, hover
+    // restores color + teal glow) and the scholar page hero (transparent).
+    const naturalKey = `scholars/${base}-hero.png`;
+    await env.MEDIA_BUCKET.put(naturalKey, natural, { httpMetadata: { contentType: 'image/png' } });
+    return { photo: naturalKey, photo_hero: naturalKey } as any;
   }
 
   if (kind === 'grade') {

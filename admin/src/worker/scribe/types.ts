@@ -46,6 +46,9 @@ export type DownloadResult = {
   channel?: string;
   thumbUrl?: string;
   durationSec?: number;
+  description?: string;
+  channelId?: string;
+  ytId?: string;
 };
 
 /** Update a scribe_jobs row. */

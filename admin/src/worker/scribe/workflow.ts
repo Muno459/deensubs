@@ -73,7 +73,9 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           return { ...res, cached: false };
         }
       );
-      const row: any = await env.DB.prepare('SELECT title, channel, thumb_url FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+      const row: any = await env.DB.prepare('SELECT title, channel, thumb_url, yt_id, orig_description, channel_image_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+      const ytId = row?.yt_id || (dl as any).ytId ||
+        (url.match(/(?:youtube\.com\/watch\?[^#]*v=|youtu\.be\/|youtube\.com\/(?:shorts|live|embed)\/)([\w-]{11})/) || [])[1] || null;
       await markStage(env, jobId, 'asr', {
         source_key: dl.key,
         download_method: dl.method,
@@ -82,7 +84,27 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         channel: row?.channel || dl.channel || null,
         thumb_url: row?.thumb_url || dl.thumbUrl || null,
         duration: dl.durationSec || 0,
+        yt_id: ytId,
+        orig_description: row?.orig_description || (dl as any).description || null,
       });
+      // Channel avatar → R2 (shared per channel, fetched once), best-effort
+      if ((dl as any).channelId && !row?.channel_image_key) {
+        try {
+          const chKey = `channels/${(dl as any).channelId}.jpg`;
+          if (!(await env.MEDIA_BUCKET.head(chKey))) {
+            const page = await fetch(`https://www.youtube.com/channel/${(dl as any).channelId}`, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' },
+            });
+            const html = await page.text();
+            const m = html.match(/property="og:image"\s+content="([^"]+)"/) || html.match(/content="([^"]+)"\s+property="og:image"/);
+            if (m) {
+              const img = await fetch(m[1]);
+              if (img.ok) await env.MEDIA_BUCKET.put(chKey, await img.arrayBuffer(), { httpMetadata: { contentType: 'image/jpeg' } });
+            }
+          }
+          if (await env.MEDIA_BUCKET.head(chKey)) await updateJob(env.DB, jobId, { channel_image_key: chKey });
+        } catch {}
+      }
 
       // 2. ASR (ElevenLabs Scribe v2; chunked automatically for long files)
       const asr = await step.do(

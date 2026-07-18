@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { VIDEO_COLS, VIDEO_JOIN, VIDEO_WITH_SCHOLAR, VIDEO_SCHOLAR_JOIN, readDB } from '../lib/db.js';
-import { getCategories, getScholars, getHomeVideos, getPopularVideos, getHomeBundle, getVideo, getPlatformStats, getCategoryVideos, getCategory, getScholarVideos, getScholar, getRelatedVideos, getSymposiumVideos, kvGetMulti } from '../lib/kv-cache.js';
+import { getCategories, getScholars, getHomeVideos, getPopularVideos, getHomeBundle, getVideo, getPlatformStats, getCategoryVideos, getCategory, getScholarVideos, getScholar, getRelatedVideos, kvGetMulti } from '../lib/kv-cache.js';
 import { parseSRT } from '../lib/srt.js';
 import { renderPage } from '../templates/layout.js';
 import { renderHome } from '../templates/home.js';
@@ -12,7 +12,6 @@ import { renderAbout } from '../templates/about.js';
 import { renderBookmarks } from '../templates/bookmarks.js';
 import { renderHistory } from '../templates/history.js';
 import { render404 } from '../templates/error.js';
-import { renderSymposium } from '../templates/symposium.js';
 import { renderProfile } from '../templates/profile.js';
 
 const pages = new Hono();
@@ -130,10 +129,6 @@ pages.get('/search', async (c) => {
   return c.html(rp(c,q ? 'Search: ' + q : 'Search', renderSearch({ query: q, videos, scholars }), cats, null, { noindex: true }));
 });
 
-pages.get('/symposium', async (c) => {
-  const [videos, cats] = await Promise.all([getSymposiumVideos(c.env), getCategories(c.env)]);
-  return c.html(rp(c, 'Fatwa in the Haramain Symposium', renderSymposium({ videos }), cats, 'symposium', { pattern: true, description: 'Selected sessions from a scholarly symposium on fatwa in the Two Holy Mosques, featuring members of the Council of Senior Scholars, translated with English subtitles.' }));
-});
 
 pages.get('/scholars', async (c) => {
   const [scholars, cats] = await Promise.all([getScholars(c.env), getCategories(c.env)]);

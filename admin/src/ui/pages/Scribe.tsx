@@ -476,6 +476,19 @@ function JobDetail({ job }: { job: any }) {
             <p dir="rtl" className="mt-0.5 font-arabic text-[15px] leading-snug text-cream">{job.title_ar}</p>
           </div>
         )}
+        {job.channel && (
+          <div className="flex items-center gap-2">
+            {job.channel_image_key && <img src={`https://cdn.deensubs.com/${job.channel_image_key}`} alt="" className="h-6 w-6 rounded-full border border-hairline object-cover" />}
+            <span className="text-[12px] text-muted">{job.channel}</span>
+            {job.yt_id && <span className="font-mono text-[10px] text-faint">yt:{job.yt_id}</span>}
+          </div>
+        )}
+        {job.orig_description && (
+          <details>
+            <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-widest text-muted">Original description</summary>
+            <p dir="auto" className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap text-[11.5px] leading-relaxed text-muted">{job.orig_description}</p>
+          </details>
+        )}
         {job.description && (
           <div>
             <div className="flex items-center justify-between">
