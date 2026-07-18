@@ -91,10 +91,10 @@ app.get('/api/overview', async (c) => {
   const db = c.env.DB;
   const [stats, dailyHits, topVideos, topPages, countries, recentComments, recentVideos] = await Promise.all([
     db.prepare('SELECT (SELECT COUNT(*) FROM videos) as video_count, (SELECT COUNT(*) FROM users) as user_count, (SELECT COUNT(*) FROM comments) as comment_count, (SELECT SUM(views) FROM videos) as total_views, (SELECT SUM(likes) FROM videos) as total_likes, (SELECT COUNT(*) FROM watch_events) as watch_events, (SELECT COUNT(DISTINCT country) FROM fingerprints) as countries').first(),
-    db.prepare("SELECT DATE(created_at) as day, COUNT(*) as hits FROM analytics WHERE created_at > datetime('now', '-14 days') GROUP BY day ORDER BY day ASC").all(),
+    queryAE(c.env, "SELECT toDate(timestamp) AS day, count() AS hits FROM deensubs_analytics WHERE timestamp > NOW() - INTERVAL '14' DAY AND blob1 IN ('pageview','watch') GROUP BY day ORDER BY day ASC"),
     db.prepare(`SELECT v.title, v.slug, v.thumb_key, v.views, v.likes, v.duration ${VIDEO_JOIN} ORDER BY v.views DESC LIMIT 8`).all(),
-    db.prepare("SELECT path, COUNT(*) as hits FROM analytics WHERE type='pageview' GROUP BY path ORDER BY hits DESC LIMIT 10").all(),
-    db.prepare("SELECT country, COUNT(*) as hits FROM analytics WHERE country != '' GROUP BY country ORDER BY hits DESC LIMIT 12").all(),
+    queryAE(c.env, "SELECT blob2 AS path, count() AS hits FROM deensubs_analytics WHERE timestamp > NOW() - INTERVAL '14' DAY AND blob1 = 'pageview' GROUP BY path ORDER BY hits DESC LIMIT 10"),
+    queryAE(c.env, "SELECT blob4 AS country, count() AS hits FROM deensubs_analytics WHERE timestamp > NOW() - INTERVAL '14' DAY AND blob4 != '' GROUP BY country ORDER BY hits DESC LIMIT 12"),
     db.prepare('SELECT c.id, c.content, c.created_at, u.name as user_name, u.avatar as user_avatar, v.title as video_title, v.slug as video_slug FROM comments c LEFT JOIN users u ON c.user_id = u.id LEFT JOIN videos v ON c.video_id = v.id ORDER BY c.created_at DESC LIMIT 6').all(),
     db.prepare(`SELECT v.id, v.title, v.slug, v.thumb_key, v.views, v.created_at ${VIDEO_JOIN} ORDER BY v.created_at DESC LIMIT 5`).all(),
   ]);
@@ -105,10 +105,10 @@ app.get('/api/overview', async (c) => {
   ]);
   return c.json({
     stats,
-    dailyHits: dailyHits.results,
+    dailyHits: (dailyHits as any).data || [],
     topVideos: topVideos.results,
-    topPages: topPages.results,
-    countries: countries.results,
+    topPages: (topPages as any).data || [],
+    countries: (countries as any).data || [],
     recentComments: recentComments.results,
     recentVideos: recentVideos.results,
     scribeJobs: scribeJobs.results,
@@ -120,15 +120,22 @@ app.get('/api/overview', async (c) => {
 // ---- Analytics (D1) ----
 
 app.get('/api/analytics', async (c) => {
-  const db = c.env.DB;
+  // Sourced from Analytics Engine — the redesigned site writes events only there
+  const W = "timestamp > NOW() - INTERVAL '30' DAY";
   const [dailyHits, topPages, topVideos, referers, agents] = await Promise.all([
-    db.prepare("SELECT DATE(created_at) as day, COUNT(*) as hits FROM analytics WHERE created_at > datetime('now', '-30 days') GROUP BY day ORDER BY day ASC").all(),
-    db.prepare("SELECT path, COUNT(*) as hits FROM analytics WHERE type='pageview' GROUP BY path ORDER BY hits DESC LIMIT 25").all(),
-    db.prepare("SELECT slug, COUNT(*) as hits FROM analytics WHERE type='watch' AND slug IS NOT NULL GROUP BY slug ORDER BY hits DESC LIMIT 20").all(),
-    db.prepare("SELECT referer, COUNT(*) as hits FROM analytics WHERE referer != '' GROUP BY referer ORDER BY hits DESC LIMIT 20").all(),
-    db.prepare('SELECT user_agent, COUNT(*) as hits FROM analytics GROUP BY user_agent ORDER BY hits DESC LIMIT 20').all(),
+    queryAE(c.env, `SELECT toDate(timestamp) AS day, count() AS hits FROM deensubs_analytics WHERE ${W} AND blob1 IN ('pageview','watch') GROUP BY day ORDER BY day ASC`),
+    queryAE(c.env, `SELECT blob2 AS path, count() AS hits FROM deensubs_analytics WHERE ${W} AND blob1 = 'pageview' GROUP BY path ORDER BY hits DESC LIMIT 25`),
+    queryAE(c.env, `SELECT blob3 AS slug, count() AS hits FROM deensubs_analytics WHERE ${W} AND blob1 = 'watch' AND blob3 != '' GROUP BY slug ORDER BY hits DESC LIMIT 20`),
+    queryAE(c.env, `SELECT blob6 AS referer, count() AS hits FROM deensubs_analytics WHERE ${W} AND blob6 != '' AND blob1 IN ('pageview','watch') GROUP BY referer ORDER BY hits DESC LIMIT 20`),
+    queryAE(c.env, `SELECT concat(blob9, ' · ', blob10, ' · ', blob8) AS user_agent, count() AS hits FROM deensubs_analytics WHERE ${W} AND blob9 != '' GROUP BY user_agent ORDER BY hits DESC LIMIT 20`),
   ]);
-  return c.json({ dailyHits: dailyHits.results, topPages: topPages.results, topVideos: topVideos.results, referers: referers.results, agents: agents.results });
+  return c.json({
+    dailyHits: (dailyHits as any).data || [],
+    topPages: (topPages as any).data || [],
+    topVideos: (topVideos as any).data || [],
+    referers: (referers as any).data || [],
+    agents: (agents as any).data || [],
+  });
 });
 
 // Analytics Engine (real-time) summary for dashboard
@@ -246,6 +253,7 @@ app.get('/api/users/:id/journey', async (c) => {
 // ---- Searches ----
 
 app.get('/api/searches', async (c) => {
+  // D1 via the site's queue consumer (search_log messages) — still the live path
   const db = c.env.DB;
   const [top, zero] = await Promise.all([
     db.prepare('SELECT query, MAX(results) as results, COUNT(*) as times FROM search_logs GROUP BY query ORDER BY times DESC LIMIT 50').all(),
@@ -284,23 +292,28 @@ app.get('/api/visitors/:id', async (c) => {
 // ---- Watch analytics ----
 
 app.get('/api/watch', async (c) => {
-  const db = c.env.DB;
-  const [events, completion, topWatched, connections, bufferIssues] = await Promise.all([
-    db.prepare('SELECT event_type, COUNT(*) as count FROM watch_events GROUP BY event_type ORDER BY count DESC').all(),
-    db.prepare("SELECT video_slug, COUNT(DISTINCT fingerprint_id) as viewers, COUNT(*) as events, ROUND(AVG(CASE WHEN duration>0 THEN position*100.0/duration ELSE 0 END),1) as avg_pct FROM watch_events GROUP BY video_slug ORDER BY viewers DESC LIMIT 25").all(),
-    db.prepare('SELECT video_slug, COUNT(DISTINCT fingerprint_id) as unique_viewers, COUNT(*) as events FROM watch_events GROUP BY video_slug ORDER BY unique_viewers DESC LIMIT 20').all(),
-    db.prepare("SELECT connection, COUNT(*) as count FROM watch_events WHERE connection != '' GROUP BY connection ORDER BY count DESC").all(),
-    db.prepare('SELECT video_slug, ROUND(AVG(buffered),1) as avg_buffer, COUNT(*) as events FROM watch_events WHERE buffered > 0 GROUP BY video_slug ORDER BY avg_buffer ASC LIMIT 10').all(),
+  // AE watch_event: blob2 = event type, blob3 = slug, double1 = pos, double2 = dur
+  const W = "blob1 = 'watch_event' AND timestamp > NOW() - INTERVAL '30' DAY";
+  const [events, completion] = await Promise.all([
+    queryAE(c.env, `SELECT blob2 AS event_type, count() AS count FROM deensubs_analytics WHERE ${W} GROUP BY event_type ORDER BY count DESC`),
+    queryAE(c.env, `SELECT index1 AS video_slug, count() AS events, round(avg(if(double2 > 0, double1 * 100.0 / double2, 0)), 1) AS avg_pct FROM deensubs_analytics WHERE ${W} AND index1 != '' AND index1 != 'unknown' GROUP BY video_slug ORDER BY events DESC LIMIT 25`),
   ]);
-  // Resolve titles
-  const slugs = [...new Set((completion.results as any[]).map((r) => r.video_slug).filter(Boolean))];
-  const videoMap: Record<string, string> = {};
+  const compRows = ((completion as any).data || []).map((r: any) => ({ ...r, viewers: r.events }));
+  const slugs = [...new Set(compRows.map((r: any) => r.video_slug).filter(Boolean))];
+  let titles: Record<string, string> = {};
   if (slugs.length) {
-    const vids = await db.prepare(`SELECT slug, title FROM videos WHERE slug IN (${slugs.map(() => '?').join(',')})`).bind(...slugs).all();
-    for (const v of vids.results as any[]) videoMap[v.slug] = v.title;
+    const rows = await c.env.DB.prepare(
+      `SELECT slug, title FROM videos WHERE slug IN (${slugs.map(() => '?').join(',')})`
+    ).bind(...slugs).all();
+    titles = Object.fromEntries((rows.results as any[]).map((r) => [r.slug, r.title]));
   }
-  return c.json({ events: events.results, completion: completion.results, topWatched: topWatched.results, connections: connections.results, bufferIssues: bufferIssues.results, videoMap });
-});
+  return c.json({
+    events: (events as any).data || [],
+    completion: compRows.map((r: any) => ({ ...r, title: titles[r.video_slug] || r.video_slug })),
+    topWatched: compRows.map((r: any) => ({ video_slug: r.video_slug, unique_viewers: r.viewers, events: r.events, title: titles[r.video_slug] || r.video_slug })),
+    connections: [],
+    bufferIssues: [],
+  });});
 
 // ---- SQL console ----
 
@@ -393,10 +406,12 @@ function genJobId(): string {
 }
 
 // yt-dlp cookies (cookies.txt) — stored in R2, sent to the VPS per download
-const COOKIES_KEY = 'scribe/config/cookies.txt';
+// Per-admin cookies: each admin's session cookies are private to them.
+// (Legacy shared file scribe/config/cookies.txt remains as a fallback.)
+const cookiesKeyFor = (userId: number | undefined) => `scribe/config/cookies-${userId || 0}.txt`;
 
 app.get('/api/scribe/cookies', async (c) => {
-  const obj = await c.env.MEDIA_BUCKET.get(COOKIES_KEY);
+  const obj = await c.env.MEDIA_BUCKET.get(cookiesKeyFor(c.get('user')?.id));
   if (!obj) return c.json({ set: false });
   const text = await obj.text();
   const lines = text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
@@ -407,7 +422,7 @@ app.put('/api/scribe/cookies', async (c) => {
   const { cookies } = await c.req.json();
   if (typeof cookies !== 'string' || !cookies.trim()) return c.json({ error: 'cookies text required' }, 400);
   if (cookies.length > 512 * 1024) return c.json({ error: 'cookies file too large' }, 400);
-  await c.env.MEDIA_BUCKET.put(COOKIES_KEY, cookies, {
+  await c.env.MEDIA_BUCKET.put(cookiesKeyFor(c.get('user')?.id), cookies, {
     httpMetadata: { contentType: 'text/plain; charset=utf-8' },
   });
   const lines = cookies.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
@@ -415,18 +430,18 @@ app.put('/api/scribe/cookies', async (c) => {
 });
 
 app.delete('/api/scribe/cookies', async (c) => {
-  await c.env.MEDIA_BUCKET.delete(COOKIES_KEY);
+  await c.env.MEDIA_BUCKET.delete(cookiesKeyFor(c.get('user')?.id));
   return c.json({ ok: true });
 });
 
 type JobIdentity = { title?: string; channel?: string; thumb_url?: string };
 
-async function createScribeJob(env: Env, url: string, targetLangs: string[], fullVideo: boolean, ident: JobIdentity = {}) {
+async function createScribeJob(env: Env, url: string, targetLangs: string[], fullVideo: boolean, ident: JobIdentity = {}, createdBy?: number) {
   const id = genJobId();
   const primary = targetLangs[0] || 'en';
-  await env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, target_langs, full_video, status, step, title, channel, thumb_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  await env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, target_langs, full_video, status, step, title, channel, thumb_url, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, url, primary, JSON.stringify(targetLangs), fullVideo ? 1 : 0, 'queued', 'queued',
-      ident.title || null, ident.channel || null, ident.thumb_url || null).run();
+      ident.title || null, ident.channel || null, ident.thumb_url || null, createdBy ?? null).run();
   await env.DB.prepare('UPDATE scribe_jobs SET wf_instance = ? WHERE id = ?').bind(id, id).run();
   await env.SCRIBE_WORKFLOW.create({ id, params: { jobId: id, url, targetLang: primary, targetLangs, fullVideo } });
   return id;
@@ -483,7 +498,7 @@ app.post('/api/scribe/probe', async (c) => {
     try {
       const { getContainer } = await import('@cloudflare/containers');
       const container = getContainer(c.env.YTDLP as any, 'enum');
-      const cookiesObj = await c.env.MEDIA_BUCKET.get(COOKIES_KEY);
+      const cookiesObj = (await c.env.MEDIA_BUCKET.get(cookiesKeyFor(c.get('user')?.id))) || (await c.env.MEDIA_BUCKET.get('scribe/config/cookies.txt'));
       const res = await container.fetch(new Request('http://ytdlp/probe', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + (c.env.YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
@@ -532,7 +547,7 @@ app.post('/api/scribe/enumerate', async (c) => {
   if (!url || !/^https?:\/\//.test(url)) return c.json({ error: 'A valid http(s) URL is required' }, 400);
   const { getContainer } = await import('@cloudflare/containers');
   const container = getContainer(c.env.YTDLP as any, 'enum');
-  const cookiesObj = await c.env.MEDIA_BUCKET.get(COOKIES_KEY);
+  const cookiesObj = (await c.env.MEDIA_BUCKET.get(cookiesKeyFor(c.get('user')?.id))) || (await c.env.MEDIA_BUCKET.get('scribe/config/cookies.txt'));
   const cookies = cookiesObj ? await cookiesObj.text() : null;
   const res = await container.fetch(new Request('http://ytdlp/playlist', {
     method: 'POST',
@@ -552,7 +567,7 @@ app.post('/api/scribe/batch', async (c) => {
   const ids: string[] = [];
   for (const url of urls) {
     if (!/^https?:\/\//.test(url)) continue;
-    ids.push(await createScribeJob(c.env, url, langs, !!full_video));
+    ids.push(await createScribeJob(c.env, url, langs, !!full_video, {}, c.get('user')?.id));
   }
   return c.json({ created: ids.length, ids });
 });
@@ -564,7 +579,7 @@ app.post('/api/scribe', async (c) => {
   const targetLang = langs[0];
   let id = '';
   try {
-    id = await createScribeJob(c.env, url, langs, !!full_video, { title, channel, thumb_url });
+    id = await createScribeJob(c.env, url, langs, !!full_video, { title, channel, thumb_url }, c.get('user')?.id);
   } catch (err: any) {
     return c.json({ error: 'Failed to start pipeline: ' + err.message }, 500);
   }

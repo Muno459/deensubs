@@ -7,7 +7,11 @@
 
 import type { Cue } from './types';
 
-export type ClipStyle = 'bold' | 'gold' | 'minimal';
+export type ClipStyle = 'bold' | 'accent' | 'minimal';
+/** Old rows stored 'gold'; it maps to the teal accent preset. */
+export function normalizeStyle(s: string): ClipStyle {
+  return s === 'gold' ? 'accent' : (['bold', 'accent', 'minimal'].includes(s) ? (s as ClipStyle) : 'bold');
+}
 
 const PLAY_W = 1080;
 const PLAY_H = 1920;
@@ -75,7 +79,7 @@ export function buildClipAss(opts: {
       title: `Style: Title,Geist,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&HB4000000,-1,0,0,0,100,100,0,0,3,0,14,8,70,70,110,1`,
       upper: true,
     },
-    gold: {
+    accent: {
       caption: `Style: Caption,${capFont},80,&H00DFEAEC,&H00BFCF6E,&H00000000,&H8C000000,-1,0,0,0,100,100,0.5,0,1,7,2,2,70,70,560,1`,
       title: `Style: Title,Geist,54,&H00A2B345,&H00FFFFFF,&H00000000,&HB4000000,-1,0,0,0,100,100,0.5,0,3,0,12,8,70,70,110,1`,
       upper: false,

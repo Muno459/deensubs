@@ -158,7 +158,7 @@ fetch('/auth/onetap',{method:'POST',headers:{'Content-Type':'application/json'},
 document.head.appendChild(s)}catch(e){}}
 if(typeof requestIdleCallback==='function')requestIdleCallback(loadOneTap,{timeout:4000});else setTimeout(loadOneTap,3000);
 `:''}
-window.__CDN='${CDN}';
+window.__CDN='${CDN}';${user?.role === 'admin' ? 'window.IS_ADMIN=1;' : ''}
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
 </script>
 </body></html>`;

@@ -2,7 +2,7 @@
 
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
 import { llmChat } from './translate';
-import { buildClipAss, type ClipStyle } from './ass';
+import { buildClipAss, normalizeStyle, type ClipStyle } from './ass';
 import type { Cue, ScribeEnv } from './types';
 
 const CDN_BASE = 'https://cdn.deensubs.com';
@@ -11,7 +11,14 @@ export type Moment = { start: number; end: number; hook: string; reason: string;
 
 /** The viral formula, encoded as a selection prompt. */
 export async function suggestMoments(env: ScribeEnv, cues: Cue[], count = 5): Promise<Moment[]> {
-  const lines = cues.map((c, i) => `${i}\t${Math.round(c.start)}-${Math.round(c.end)}s\t${c.text}`).join('\n');
+  // Group ~4 cues per line: full-lecture coverage in a compact prompt
+  // (the old version sliced to 30k chars = only the first ~15% of a long talk)
+  const lines: string[] = [];
+  for (let i = 0; i < cues.length; i += 4) {
+    const g = cues.slice(i, i + 4);
+    lines.push(`${i}-${Math.min(i + 3, cues.length - 1)}\t${Math.round(g[0].start)}-${Math.round(g[g.length - 1].end)}s\t${g.map((c) => c.text).join(' ')}`);
+  }
+  const linesText = lines.join('\n');
   const raw = await llmChat(
     env,
     [
@@ -28,7 +35,7 @@ Answer with ONLY a JSON array (no markdown):
 [{"start_cue": n, "end_cue": n, "hook": "5-9 word title that stops the scroll", "reason": "why this works", "score": 1-10}]
 Pick the ${count} strongest, ranked best first. hook: punchy, faithful to content, no clickbait lies, keep honorifics (ﷺ, ﷻ).`,
       },
-      { role: 'user', content: `Cues (index, seconds, text):\n${lines.slice(0, 30000)}` },
+      { role: 'user', content: `Cue groups (indexRange, seconds, text):\n${linesText.slice(0, 90000)}` },
     ],
     2000
   );
@@ -95,7 +102,7 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
             start: clip.start,
             end: clip.end,
             hook: clip.hook || '',
-            style: (clip.style as ClipStyle) || 'bold',
+            style: normalizeStyle(clip.style || 'bold'),
           });
 
           const start = await containerCall(env, 'clip-' + clipId, '/clip', {

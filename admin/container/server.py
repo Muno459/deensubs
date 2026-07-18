@@ -277,8 +277,8 @@ def run_clip(job_id: str, payload: dict) -> None:
             fh.write(base64.b64decode(payload.get("ass_b64", "")))
         vf = (
             "[0:v]split=2[bg][fg];"
-            "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-            "boxblur=22:3,eq=brightness=-0.18:saturation=0.85[bgb];"
+            "[bg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
+            "boxblur=8:2,scale=1080:1920,eq=brightness=-0.18:saturation=0.85[bgb];"
             "[fg]scale=1080:-2[fgs];"
             "[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto[base];"
             f"[base]ass={ass_path}:fontsdir=/usr/share/fonts/custom[subbed];"
@@ -289,7 +289,7 @@ def run_clip(job_id: str, payload: dict) -> None:
             "-ss", str(start), "-to", str(end), "-i", url,
             "-filter_complex", vf,
             "-map", "[out]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
             "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",
             "-t", str(dur),
@@ -555,7 +555,8 @@ class Handler(BaseHTTPRequestHandler):
             g_url = payload.get("url", "")
             if not re.match(r"^https?://", g_url):
                 return self._send(400, {"error": "valid url required"})
-            out = os.path.join(DIR, f"grade-{uuid.uuid4()}.png")
+            want_webp = payload.get("out") == "webp"
+            out = os.path.join(DIR, f"grade-{uuid.uuid4()}." + ("webp" if want_webp else "png"))
             src = g_url
             chain = payload.get("filter")
             if payload.get("keyauto"):
@@ -573,13 +574,14 @@ class Handler(BaseHTTPRequestHandler):
                      "colortemperature=temperature=10000:mix=0.9,"
                      "huesaturation=saturation=-0.85:colors=y+r+m:strength=10,"
                      "eq=saturation=0.55:brightness=-0.015:contrast=1.05")
-            proc = subprocess.run(["ffmpeg", "-y", "-i", src, "-vf", chain, out],
+            enc = ["-c:v", "libwebp", "-q:v", "85", "-pix_fmt", "yuva420p"] if want_webp else []
+            proc = subprocess.run(["ffmpeg", "-y", "-i", src, "-vf", chain, *enc, out],
                                   capture_output=True, text=True, timeout=120)
             if proc.returncode != 0 or not os.path.exists(out):
                 return self._send(500, {"error": (proc.stderr or "grade failed")[-300:]})
             size = os.path.getsize(out)
             self.send_response(200)
-            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Type", "image/webp" if want_webp else "image/png")
             self.send_header("Content-Length", str(size))
             self.end_headers()
             with open(out, "rb") as fh:

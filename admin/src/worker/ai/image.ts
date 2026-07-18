@@ -122,7 +122,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     const buf = new Uint8Array(await obj.arrayBuffer());
     const ct = obj.httpMetadata?.contentType || 'image/jpeg';
     const base = slugify(payload.name || 'scholar');
-    const KEEP = "Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Chest-up composition, clean subtle painterly editorial portrait treatment with natural colors.";
+    const KEEP = "Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Chest-up bust composition, clean subtle painterly editorial portrait treatment with natural colors. IMPORTANT: if the source photo is cropped at the sides, extend and complete the shoulders, arms and clothing naturally so the person's full silhouette fits INSIDE the frame with clear margins on the left and right — nothing may be cut off at the side edges (the bust may reach the bottom edge only).";
     const MAGENTA = 'The background must be a completely flat, uniform, solid pure magenta (#FF00FF) filling the entire frame edge to edge — no gradient, no vignette, no shadows on the background.';
     const naturalRaw = await openaiImage(env, `Cut out the person cleanly. ${MAGENTA} The person keeps clean natural tones (neutralize heavy casts on the PERSON only — the background stays vivid pure magenta, never desaturate the background). ${KEEP}`, buf, ct, '1024x1024');
     // Deterministic chroma-key in the container: guaranteed clean alpha
@@ -134,7 +134,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
       const res: Response = await container.fetch(new Request('http://ytdlp/grade', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + ((env as any).YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: `${CDN}/${tmpKey}`, keyauto: true }),
+        body: JSON.stringify({ url: `${CDN}/${tmpKey}`, keyauto: true, out: 'webp' }),
         signal: AbortSignal.timeout(90_000),
       }));
       env.MEDIA_BUCKET.delete(tmpKey).catch(() => {});
@@ -144,8 +144,10 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     const natural = await keyOut(naturalRaw, `${base}-nat-${Date.now().toString(36)}.png`);
     // ONE clean natural cutout serves everything: cards (CSS mutes it, hover
     // restores color + teal glow) and the scholar page hero (transparent).
-    const naturalKey = `scholars/${base}-hero.png`;
-    await env.MEDIA_BUCKET.put(naturalKey, natural, { httpMetadata: { contentType: 'image/png' } });
+    // WebP because the site serves .webp keys untouched (.png gets rewritten
+    // to .avif variants that do not exist).
+    const naturalKey = `scholars/${base}-hero.webp`;
+    await env.MEDIA_BUCKET.put(naturalKey, natural, { httpMetadata: { contentType: 'image/webp' } });
     return { photo: naturalKey, photo_hero: naturalKey } as any;
   }
 

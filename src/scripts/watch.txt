@@ -498,8 +498,17 @@ function renderComments(comments,cl){
     var s=Math.floor((Date.now()-new Date(c.created_at+'Z').getTime())/1000);
     if(s<60)ago='just now';else if(s<3600)ago=Math.floor(s/60)+'m ago';else if(s<86400)ago=Math.floor(s/3600)+'h ago';else if(s<2592000)ago=Math.floor(s/86400)+'d ago';else ago=new Date(c.created_at).toLocaleDateString('en',{month:'short',day:'numeric',year:'numeric'});
     var avHtml=c.user_avatar?'<img src="'+c.user_avatar+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">':initials;
-    return'<div class="cm"><div class="cm-av" style="background:'+col+'">'+avHtml+'</div><div class="cm-body"><div class="cm-h"><strong>'+name+'</strong><time>'+ago+'</time></div><p>'+c.content.replace(/</g,'&lt;')+'</p></div></div>';
+    var del=window.IS_ADMIN?'<button class="cm-del" data-id="'+c.id+'" title="Delete comment" aria-label="Delete comment">&times;</button>':'';
+    return'<div class="cm"><div class="cm-av" style="background:'+col+'">'+avHtml+'</div><div class="cm-body"><div class="cm-h"><strong>'+name+'</strong><time>'+ago+'</time>'+del+'</div><p>'+c.content.replace(/</g,'&lt;')+'</p></div></div>';
   }).join('');
+  cl.querySelectorAll('.cm-del').forEach(function(b){b.onclick=function(){
+    if(!confirm('Delete this comment?'))return;
+    fetch('/admin/delete-comment/'+b.dataset.id,{method:'POST'}).then(function(){
+      allComments=allComments.filter(function(c){return String(c.id)!==String(b.dataset.id)});
+      renderComments(allComments,cl);
+      var cnt=document.getElementById('cm-count');if(cnt)cnt.textContent=allComments.length;
+    });
+  }});
   // Linkify timestamps
   cl.querySelectorAll('.cm p').forEach(function(p){
     p.innerHTML=p.innerHTML.replace(/(\d{1,2}):(\d{2})(?::(\d{2}))?/g,function(match,a,b,cc){

@@ -75,9 +75,9 @@ export async function aiFill(env: any, kind: string, payload: any): Promise<any>
     }
     case 'scholar': {
       const out = await ask(env,
-        'You draft a scholar profile for an Islamic content platform. Given the name, return slug, a short title line (role/affiliation IF widely known — empty string when not certain), and a 2-3 sentence bio draft. Never fabricate specifics: when unsure of facts, keep the bio generic about their known field and say nothing unverifiable.',
-        `Scholar name: ${payload.name || ''}\n\nReturn {"slug","title","bio"}.`);
-      out.slug = slugify(out.slug || payload.name);
+        'You draft a scholar profile for an Islamic content platform. Given a (possibly rough) name, return: name (properly formatted English transliteration with the Sheikh honorific, e.g. "Sheikh Salih al-Fawzan"), slug, a short title line (role/affiliation IF widely known — empty string when not certain), and a 2-3 sentence bio draft. Never fabricate specifics: when unsure of facts, keep the bio generic about their known field and say nothing unverifiable.',
+        `Scholar name: ${payload.name || ''}\n\nReturn {"name","slug","title","bio"}.`);
+      out.slug = slugify(out.slug || out.name || payload.name);
       return out;
     }
     case 'playlist': {

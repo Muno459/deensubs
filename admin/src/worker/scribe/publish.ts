@@ -212,6 +212,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   const keys = await env.CACHE.list();
   for (const k of keys.keys) await env.CACHE.delete(k.name);
   };
+  await (await import('./types')).updateJob(env.DB, jobId, { published_slug: slug });
   if (ctx) ctx.waitUntil(indexAndPurge());
   else await indexAndPurge();
 

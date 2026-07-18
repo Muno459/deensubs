@@ -11,7 +11,7 @@ import { AiFillButton } from '../components/AiFill';
 
 const STYLES = [
   { id: 'bold', label: 'Bold', desc: 'UPPERCASE white, heavy outline — maximum stopping power' },
-  { id: 'gold', label: 'Gold', desc: 'DeenSubs cream + gold karaoke accent — elegant' },
+  { id: 'accent', label: 'Accent', desc: 'DeenSubs cream + teal karaoke accent — elegant' },
   { id: 'minimal', label: 'Minimal', desc: 'Clean white, thin outline — calm and premium' },
 ];
 

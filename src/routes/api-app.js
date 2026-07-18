@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { VIDEO_COLS, VIDEO_JOIN, readDB } from '../lib/db.js';
-import { getHomeBundle, getScholars, getScholar, getScholarVideos, getCategories, getCategory, getCategoryVideos, getSymposiumVideos, getPlatformStats, getVideo } from '../lib/kv-cache.js';
+import { getHomeBundle, getScholars, getScholar, getScholarVideos, getCategories, getCategory, getCategoryVideos, getPlatformStats, getVideo } from '../lib/kv-cache.js';
 
 // JSON API for the native iOS app. Read-only mirrors of the SSR pages,
 // backed by the same KV/D1 cache layer — no new queries, no writes.
@@ -48,9 +48,7 @@ appApi.get('/api/app/video/:slug', async (c) => {
   return c.json({ video });
 });
 
-appApi.get('/api/app/symposium', async (c) => {
-  return c.json({ videos: await getSymposiumVideos(c.env) });
-});
+// /api/app/symposium removed — the Symposium category was retired in favor of Podcast
 
 appApi.get('/api/app/stats', async (c) => {
   return c.json({ stats: await getPlatformStats(c.env) });

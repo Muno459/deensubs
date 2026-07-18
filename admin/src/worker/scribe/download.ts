@@ -121,10 +121,21 @@ async function directDownload(env: ScribeEnv, jobId: string, url: string): Promi
   return { key, method: 'direct', contentType: ct, bytes };
 }
 
-/** Cookies (cookies.txt) saved from the dashboard, stored in R2. */
+/** Cookies (cookies.txt) saved from the dashboard, stored in R2 — private
+ * per admin (keyed by the job creator), with the legacy shared file as fallback. */
 export const COOKIES_KEY = 'scribe/config/cookies.txt';
 
-async function loadCookies(env: ScribeEnv): Promise<string | null> {
+async function loadCookies(env: ScribeEnv, jobId?: string): Promise<string | null> {
+  if (jobId) {
+    const row: any = await env.DB.prepare('SELECT created_by FROM scribe_jobs WHERE id = ?').bind(jobId).first().catch(() => null);
+    if (row?.created_by != null) {
+      const own = await env.MEDIA_BUCKET.get(`scribe/config/cookies-${row.created_by}.txt`);
+      if (own) {
+        const text = await own.text();
+        if (text.trim()) return text;
+      }
+    }
+  }
   const obj = await env.MEDIA_BUCKET.get(COOKIES_KEY);
   if (!obj) return null;
   const text = await obj.text();
@@ -140,7 +151,7 @@ async function ytdlpDownload(env: ScribeEnv, jobId: string, url: string, fullVid
   const call = (path: string, init?: RequestInit) =>
     container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
 
-  const cookies = await loadCookies(env);
+  const cookies = await loadCookies(env, jobId);
   const start = await call('/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

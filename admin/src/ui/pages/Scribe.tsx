@@ -507,7 +507,13 @@ function JobDetail({ job }: { job: any }) {
               <Icon name="edit" className="h-3 w-3" /> Edit subtitles
             </button>
           )}
-          {job.status === 'done' && (
+          {job.status === 'done' && job.published_slug && (
+            <a href={`https://deensubs.com/watch/${job.published_slug}`} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 transition-all hover:bg-emerald-500/20 active:scale-[0.97]">
+              <Icon name="external" className="h-3 w-3" /> Published — /watch/{job.published_slug}
+            </a>
+          )}
+          {job.status === 'done' && !job.published_slug && (
             isVideoSource ? (
               <button
                 onClick={() => setPublishOpen(true)}
