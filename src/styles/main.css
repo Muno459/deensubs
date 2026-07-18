@@ -292,7 +292,7 @@ img{display:block}button{font:inherit}input,textarea,select{font:inherit}
 /* ── Category hero ── */
 .cat-hero{position:relative;display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:2rem 2.25rem;margin-bottom:1.75rem;border-radius:16px;overflow:hidden;background:linear-gradient(135deg,color-mix(in srgb,var(--pc,var(--accent)) 10%,var(--s1)),var(--s1) 70%);border:1px solid color-mix(in srgb,var(--pc,var(--accent)) 20%,var(--bd))}
 /* Kufic line-work layer, tinted per category via mask (see feeds.js for artwork credit) */
-.cat-hero::after{content:'';position:absolute;inset:0;pointer-events:none;background:color-mix(in srgb,var(--pc,var(--accent)) 13%,transparent);-webkit-mask-image:url(/bg/pattern-flat.png);-webkit-mask-size:cover;-webkit-mask-position:left center;mask-image:url(/bg/pattern-flat.png);mask-size:cover;mask-position:left center}
+.cat-hero::after{content:'';position:absolute;inset:0;pointer-events:none;background:color-mix(in srgb,var(--pc,var(--accent)) 5%,transparent);-webkit-mask-image:url(/bg/pattern-flat.png);-webkit-mask-size:cover;-webkit-mask-position:left center;mask-image:url(/bg/pattern-flat.png);mask-size:cover;mask-position:left center}
 .cat-hero-txt,.cat-hero-ar{position:relative;z-index:1}
 .cat-hero-txt{max-width:560px}
 .cat-hero .page-title{font-size:1.85rem;margin-bottom:.4rem}
