@@ -79,7 +79,7 @@ async function routerImage(env: ImgEnv, prompt: string, imageDataUri?: string): 
 async function store(env: ImgEnv, prefix: string, name: string, bytes: Uint8Array): Promise<string> {
   const key = `${prefix}${slugify(name)}-${Date.now().toString(36)}.png`;
   await env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType: 'image/png' } });
-  if (key.startsWith('thumbs/') && env.MEDIA_KV) {
+  if ((key.startsWith('thumbs/') || key.startsWith('scholars/')) && env.MEDIA_KV) {
     await env.MEDIA_KV.put(key, bytes, { metadata: { ct: 'image/png' } }).catch(() => {});
   }
   return key;
@@ -148,6 +148,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     // to .avif variants that do not exist).
     const naturalKey = `scholars/${base}-hero.webp`;
     await env.MEDIA_BUCKET.put(naturalKey, natural, { httpMetadata: { contentType: 'image/webp' } });
+    if (env.MEDIA_KV) await env.MEDIA_KV.put(naturalKey, natural, { metadata: { ct: 'image/webp' } }).catch(() => {});
     return { photo: naturalKey, photo_hero: naturalKey } as any;
   }
 
@@ -168,6 +169,9 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     await env.MEDIA_BUCKET.put(payload.imageKey, bytes, {
       httpMetadata: { contentType: payload.imageKey.endsWith('.webp') ? 'image/webp' : 'image/png' },
     });
+    if ((payload.imageKey.startsWith('thumbs/') || payload.imageKey.startsWith('scholars/')) && env.MEDIA_KV) {
+      await env.MEDIA_KV.put(payload.imageKey, bytes, { metadata: { ct: payload.imageKey.endsWith('.webp') ? 'image/webp' : 'image/png' } }).catch(() => {});
+    }
     return { key: payload.imageKey };
   }
 
