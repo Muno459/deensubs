@@ -328,9 +328,21 @@ export async function translateWords(
     const cue = cues[i];
     const next = cues[i + 1];
     if (next && cue.end > next.start - 0.08) cue.end = Math.max(cue.start + 0.4, next.start - 0.08);
+    if (next && cue.end > next.start) cue.end = next.start; // hard floor: never overlap
     if (cue.end - cue.start < 1.0) {
       const limit = next ? next.start - 0.08 : cue.end + 1.0;
       cue.end = Math.min(cue.start + 1.2, Math.max(cue.end, limit));
+    }
+  }
+  // Reading-speed relief: dense cues linger into following silence (target ≤17 CPS)
+  for (let i = 0; i < cues.length; i++) {
+    const cue = cues[i];
+    const next = cues[i + 1];
+    const dur = cue.end - cue.start;
+    if (cue.text.length / dur > 17) {
+      const need = cue.start + cue.text.length / 17;
+      const limit = next ? next.start - 0.08 : cue.end + 2.0;
+      cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + 3.0));
     }
   }
   return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);

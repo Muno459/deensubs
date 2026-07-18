@@ -427,6 +427,7 @@ async function createScribeJob(env: Env, url: string, targetLangs: string[], ful
   await env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, target_langs, full_video, status, step, title, channel, thumb_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, url, primary, JSON.stringify(targetLangs), fullVideo ? 1 : 0, 'queued', 'queued',
       ident.title || null, ident.channel || null, ident.thumb_url || null).run();
+  await env.DB.prepare('UPDATE scribe_jobs SET wf_instance = ? WHERE id = ?').bind(id, id).run();
   await env.SCRIBE_WORKFLOW.create({ id, params: { jobId: id, url, targetLang: primary, targetLangs, fullVideo } });
   return id;
 }
@@ -599,15 +600,19 @@ app.get('/api/scribe/:id/file', async (c) => {
   });
 });
 
+/** Terminate the job's most recent workflow instance (tracked in wf_instance),
+ * falling back to the base id. Prevents zombie instances from re-writing artifacts. */
+async function terminateJob(env: Env, job: any) {
+  for (const iid of [...new Set([job.wf_instance, job.id].filter(Boolean))]) {
+    try { await (await env.SCRIBE_WORKFLOW.get(iid)).terminate(); } catch {}
+  }
+}
+
 app.delete('/api/scribe/:id', async (c) => {
   const id = c.req.param('id');
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
   if (!job) return c.json({ error: 'Not found' }, 404);
-  // Best-effort: stop a running workflow instance
-  try {
-    const inst = await c.env.SCRIBE_WORKFLOW.get(id);
-    await inst.terminate();
-  } catch {}
+  await terminateJob(c.env, job);
   // Remove artifacts
   const list = await c.env.MEDIA_BUCKET.list({ prefix: `scribe/${id}/` });
   for (const obj of list.objects) await c.env.MEDIA_BUCKET.delete(obj.key);
@@ -620,15 +625,15 @@ app.post('/api/scribe/:id/resume', async (c) => {
   const id = c.req.param('id');
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
   if (!job) return c.json({ error: 'Not found' }, 404);
-  try { await (await c.env.SCRIBE_WORKFLOW.get(id)).terminate(); } catch {}
+  await terminateJob(c.env, job);
   const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
-  const suffix = 'r' + genJobId().slice(0, 4);
-  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', error = NULL WHERE id = ?").bind(id).run();
+  const instance = `${id}-r${genJobId().slice(0, 4)}`;
+  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', error = NULL, wf_instance = ? WHERE id = ?").bind(instance, id).run();
   await c.env.SCRIBE_WORKFLOW.create({
-    id: `${id}-${suffix}`,
+    id: instance,
     params: { jobId: id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
   });
-  return c.json({ ok: true, resumed: true });
+  return c.json({ ok: true, resumed: true, instance });
 });
 
 // Force a fresh translation (clears cue artifacts, keeps download + ASR)
@@ -636,7 +641,7 @@ app.post('/api/scribe/:id/retranslate-all', async (c) => {
   const id = c.req.param('id');
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
   if (!job) return c.json({ error: 'Not found' }, 404);
-  try { await (await c.env.SCRIBE_WORKFLOW.get(id)).terminate(); } catch {}
+  await terminateJob(c.env, job);
   const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
   const list = await c.env.MEDIA_BUCKET.list({ prefix: `scribe/${id}/` });
   for (const o of list.objects) {
@@ -644,10 +649,10 @@ app.post('/api/scribe/:id/retranslate-all', async (c) => {
       await c.env.MEDIA_BUCKET.delete(o.key);
     }
   }
-  const suffix = 'r' + genJobId().slice(0, 4);
-  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', step = 'translate', error = NULL, cue_count = 0, llm_tokens = 0 WHERE id = ?").bind(id).run();
+  const instance = `${id}-r${genJobId().slice(0, 4)}`;
+  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', step = 'translate', error = NULL, cue_count = 0, llm_tokens = 0, wf_instance = ? WHERE id = ?").bind(instance, id).run();
   await c.env.SCRIBE_WORKFLOW.create({
-    id: `${id}-${suffix}`,
+    id: instance,
     params: { jobId: id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
   });
   return c.json({ ok: true, retranslating: true });
@@ -1050,12 +1055,14 @@ async function autoResumeSweep(env: Env) {
     "SELECT * FROM scribe_jobs WHERE status = 'error' AND error LIKE '%Durable Object reset%' AND updated_at > datetime('now', '-1 day') LIMIT 3"
   ).all();
   for (const job of dead.results as any[]) {
-    try { await (await env.SCRIBE_WORKFLOW.get(job.id)).terminate(); } catch {}
+    for (const iid of [...new Set([job.wf_instance, job.id].filter(Boolean))]) {
+      try { await (await env.SCRIBE_WORKFLOW.get(iid)).terminate(); } catch {}
+    }
     const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
-    const suffix = 'a' + Math.random().toString(36).slice(2, 6);
-    await env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', error = 'auto-resumed after deploy reset' WHERE id = ?").bind(job.id).run();
+    const instance = `${job.id}-a${Math.random().toString(36).slice(2, 6)}`;
+    await env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', error = 'auto-resumed after deploy reset', wf_instance = ? WHERE id = ?").bind(instance, job.id).run();
     await env.SCRIBE_WORKFLOW.create({
-      id: `${job.id}-${suffix}`,
+      id: instance,
       params: { jobId: job.id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
     }).catch(() => {});
   }
