@@ -7,6 +7,7 @@ import {
 import { BlurFade } from '../components/BlurFade';
 import { BorderBeam } from '../components/BorderBeam';
 import { Icon } from '../components/Icon';
+import { AiFillButton } from '../components/AiFill';
 
 type Video = {
   id: number; title: string; title_ar: string | null; slug: string; description: string | null;
@@ -80,6 +81,24 @@ function VideoForm({ initial, meta, onDone, onCancel }: { initial: Partial<Video
 
   return (
     <div className="space-y-3.5">
+      <div className="flex justify-end">
+        <AiFillButton
+          kind="video"
+          payload={{ video: form }}
+          label="Fill with AI"
+          note="Drafted from title + subtitles — review before saving"
+          onFill={(r) => setForm((f: any) => ({
+            ...f,
+            title: r.title || f.title,
+            title_ar: r.title_ar || f.title_ar,
+            description: r.description || f.description,
+            slug: f.id ? f.slug : r.slug || f.slug,
+            source: r.source || f.source,
+            category_id: f.category_id ?? r.category_id ?? null,
+            scholar_id: f.scholar_id ?? r.scholar_id ?? null,
+          }))}
+        />
+      </div>
       <Field label="Title">
         <input className={inputCls} value={form.title || ''} onChange={(e) => {
           const title = e.target.value;

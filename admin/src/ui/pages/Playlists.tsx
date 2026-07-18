@@ -4,6 +4,7 @@ import { fmtNum, fmtDuration, fmtDate, thumbUrl } from '../lib/format';
 import { GlowCard, SectionTitle, PageLoader, ErrorNote, Button, Modal, Field, inputCls, Badge } from '../components/Primitives';
 import { BlurFade } from '../components/BlurFade';
 import { Icon } from '../components/Icon';
+import { AiFillButton } from '../components/AiFill';
 import { useToast } from '../components/Toast';
 
 function PlaylistForm({ initial, onDone, onCancel }: { initial?: any; onDone: () => void; onCancel: () => void }) {
@@ -12,6 +13,14 @@ function PlaylistForm({ initial, onDone, onCancel }: { initial?: any; onDone: ()
   const toast = useToast();
   return (
     <div className="space-y-3.5">
+      <div className="flex justify-end">
+        <AiFillButton
+          kind="playlist"
+          payload={{ title: form.title, playlistId: form.id || null }}
+          label="Name with AI"
+          onFill={(r) => setForm((f: any) => ({ ...f, title: r.title || f.title, title_ar: r.title_ar || f.title_ar, description: r.description || f.description }))}
+        />
+      </div>
       <Field label="Title">
         <input className={inputCls} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
       </Field>

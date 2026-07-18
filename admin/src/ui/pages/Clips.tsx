@@ -7,6 +7,7 @@ import { GlowCard, SectionTitle, Button, inputCls, Badge, Spinner, ErrorNote } f
 import { BlurFade } from '../components/BlurFade';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
+import { AiFillButton } from '../components/AiFill';
 
 const STYLES = [
   { id: 'bold', label: 'Bold', desc: 'UPPERCASE white, heavy outline — maximum stopping power' },
@@ -41,7 +42,16 @@ function Composer({ job, moment, onClose, onCreated }: { job: any; moment: Momen
         <div className="space-y-3.5">
           <div>
             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted">Hook title (pinned on top)</span>
-            <input className={inputCls} value={hook} onChange={(e) => setHook(e.target.value)} placeholder="The Dua That Changes Everything" />
+            <div className="flex gap-2">
+              <input className={inputCls} value={hook} onChange={(e) => setHook(e.target.value)} placeholder="The Dua That Changes Everything" />
+              <AiFillButton
+                kind="clip_hook"
+                payload={{ text: included.map((c: any) => c.text).join(' ') }}
+                label="Hook"
+                className="shrink-0"
+                onFill={(r) => r.hook && setHook(r.hook)}
+              />
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>

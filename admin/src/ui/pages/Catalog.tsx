@@ -4,6 +4,7 @@ import { api, useApi } from '../lib/api';
 import { GlowCard, SectionTitle, PageLoader, Button, Modal, Field, inputCls, Badge } from '../components/Primitives';
 import { BlurFade } from '../components/BlurFade';
 import { Icon } from '../components/Icon';
+import { AiFillButton } from '../components/AiFill';
 import { useToast } from '../components/Toast';
 
 function CategoryForm({ initial, onDone, onCancel }: { initial?: any; onDone: () => void; onCancel: () => void }) {
@@ -12,6 +13,13 @@ function CategoryForm({ initial, onDone, onCancel }: { initial?: any; onDone: ()
   const toast = useToast();
   return (
     <div className="space-y-3.5">
+      <div className="flex justify-end">
+        <AiFillButton
+          kind="category"
+          payload={{ name: form.name }}
+          onFill={(r) => setForm((f: any) => ({ ...f, name: r.name || f.name, name_ar: r.name_ar || f.name_ar, color: r.color || f.color }))}
+        />
+      </div>
       <Field label="Name">
         <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       </Field>
@@ -48,6 +56,19 @@ function ScholarForm({ initial, onDone, onCancel }: { initial?: any; onDone: () 
   const toast = useToast();
   return (
     <div className="space-y-3.5">
+      <div className="flex justify-end">
+        <AiFillButton
+          kind="scholar"
+          payload={{ name: form.name }}
+          note="AI draft — verify facts before saving"
+          onFill={(r) => setForm((f: any) => ({
+            ...f,
+            slug: f.id ? f.slug : r.slug || f.slug,
+            title: r.title || f.title,
+            bio: r.bio || f.bio,
+          }))}
+        />
+      </div>
       <Field label="Name">
         <input className={inputCls} value={form.name} onChange={(e) => setForm({
           ...form, name: e.target.value,

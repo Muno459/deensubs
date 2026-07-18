@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AiFillButton } from '../components/AiFill';
 import { api } from '../lib/api';
 import { GlowCard, SectionTitle, ErrorNote, Button, Table, Badge } from '../components/Primitives';
 import { BlurFade } from '../components/BlurFade';
@@ -19,6 +20,7 @@ export default function Sql() {
   const [meta, setMeta] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [ask, setAsk] = useState('');
 
   async function run() {
     setBusy(true); setErr(''); setRows(null); setMeta('');
@@ -64,6 +66,24 @@ export default function Sql() {
           >
             {engine === 'd1' ? 'D1 SQL console (read-only)' : 'Analytics Engine SQL'}
           </SectionTitle>
+          <div className="mb-2.5 flex gap-2">
+            <input
+              className="w-full rounded-xl border border-hairline bg-inset px-3 py-2 text-[13px] text-cream outline-none placeholder:text-faint focus:border-gold/40"
+              placeholder="Ask in plain English — e.g. top scholars by total watch minutes this month"
+              value={ask}
+              onChange={(e) => setAsk(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && ask.trim()) (document.getElementById('ai-sql-btn') as HTMLButtonElement)?.click(); }}
+            />
+            <span id="ai-sql-wrap" className="shrink-0">
+              <AiFillButton
+                kind="sql"
+                payload={{ question: ask, engine }}
+                label="Write query"
+                className="h-full"
+                onFill={(r) => r.sql && setSql(r.sql)}
+              />
+            </span>
+          </div>
           <textarea
             value={sql}
             onChange={(e) => setSql(e.target.value)}

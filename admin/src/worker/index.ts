@@ -638,6 +638,16 @@ app.post('/api/scribe/:id/resume', async (c) => {
 
 // Fetch the video track for an audio-only job: transcript + subtitles are
 // reused, only download (+ render/done) re-run. Unlocks publish + native preview.
+// AI drafts any admin form (see ai/fill.ts for kinds)
+app.post('/api/ai/fill', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try {
+    return c.json(await aiFill(c.env, body.kind, body));
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e).slice(0, 300) }, 500);
+  }
+});
+
 app.post('/api/scribe/:id/fetch-video', async (c) => {
   const id = c.req.param('id');
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
@@ -1013,6 +1023,7 @@ app.put('/api/scholars/:id', async (c) => {
 // ---- AI agent (padborginn router, agentic loop, SSE streaming) ----
 
 import { runAgent, SYSTEM_PROMPT as AGENT_PROMPT } from './ai/agent';
+import { aiFill } from './ai/fill';
 import { AI_TOOLS as AGENT_TOOLS, executeTool as runTool } from './ai/tools';
 
 // Streaming endpoint: SSE events (round / tool_start / tool_done / token / done / error)

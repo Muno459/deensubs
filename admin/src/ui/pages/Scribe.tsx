@@ -170,6 +170,22 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
         if (r.candidates?.length) setChosenTs(r.candidates[0].ts);
       })
       .catch((e) => { setCands([]); setCandErr(e.message); });
+    // AI drafts the rest: category/scholar picks + Arabic title + slug (silent best-effort)
+    let live = true;
+    api('/api/ai/fill', { method: 'POST', body: JSON.stringify({ kind: 'publish', jobId: job.id }) })
+      .then((r) => {
+        if (!live) return;
+        setForm((f: any) => f ? {
+          ...f,
+          title_ar: f.title_ar || r.title_ar || '',
+          description: f.description || r.description || '',
+          slug: r.slug || f.slug,
+          category_id: f.category_id ?? r.category_id ?? null,
+          scholar_id: f.scholar_id ?? r.scholar_id ?? null,
+        } : f);
+      })
+      .catch(() => {});
+    return () => { live = false; };
   }, [open, job.id]);
 
   if (!open || !form) return null;
