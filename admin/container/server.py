@@ -275,13 +275,32 @@ def run_clip(job_id: str, payload: dict) -> None:
         import base64
         with open(ass_path, "wb") as fh:
             fh.write(base64.b64decode(payload.get("ass_b64", "")))
+        # LLM-directed motion: subtle Ken Burns + punch zooms + shake, applied
+        # to the composed frame BEFORE captions burn (text stays crisp).
+        fx = payload.get("fx") or []
+        motion = ""
+        if payload.get("kb") or fx:
+            # zoompan: the only ffmpeg filter with per-frame zoom expressions
+            # (crop w/h evaluate once at init). t = on/30 after fps=30.
+            terms = ["1", f"0.030*on/(30*{dur:.3f})"]
+            for e in fx:
+                if e.get("type") == "punch":
+                    terms.append(f"0.085*max(0,1-abs(on/30-{float(e['t']):.2f})/0.16)")
+            terms = terms[:14]
+            z = "+".join(terms)
+            shakes = [e for e in fx if e.get("type") == "shake"][:3]
+            xoff = "+".join(f"10*sin(48*on/30)*max(0,1-abs(on/30-{float(e['t']):.2f})/0.30)" for e in shakes)
+            zesc = z.replace(",", "\\,")
+            xesc = ("+(" + xoff.replace(",", "\\,") + ")") if xoff else ""
+            motion = (f"fps=30,zoompan=z='{zesc}':"
+                      f"x='iw/2-(iw/zoom/2){xesc}':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps=30,")
         vf = (
             "[0:v]split=2[bg][fg];"
             "[bg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
             "boxblur=8:2,scale=1080:1920,eq=brightness=-0.18:saturation=0.85[bgb];"
             "[fg]scale=1080:-2[fgs];"
             "[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto[base];"
-            f"[base]ass={ass_path}:fontsdir=/usr/share/fonts/custom[subbed];"
+            f"[base]{motion}ass={ass_path}:fontsdir=/usr/share/fonts/custom[subbed];"
             f"[subbed]drawbox=x=0:y=ih-16:w=iw*min(t/{dur:.3f}\\,1):h=16:color=0x45b3a2@0.95:t=fill[out]"
         )
         cmd = [
@@ -568,7 +587,9 @@ class Handler(BaseHTTPRequestHandler):
                      "-f", "rawvideo", "-"], capture_output=True, timeout=60)
                 rgb = probe.stdout[:3]
                 if len(rgb) == 3:
-                    chain = f"colorkey=0x{rgb.hex().upper()}:0.17:0.08,format=rgba"
+                    # Wider key + 2px alpha erosion shaves the pink fringe ring
+                    chain = (f"colorkey=0x{rgb.hex().upper()}:0.25:0.12,format=rgba,"
+                             "split[c][a];[a]alphaextract,erosion,erosion[sh];[c][sh]alphamerge")
             if not chain:
                 chain = (
                      "colortemperature=temperature=10000:mix=0.9,"

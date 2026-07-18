@@ -603,7 +603,9 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 /* With transparent portrait */
 .sp-hero-img{padding-right:280px;min-height:300px;align-items:flex-end}
 .sp-hero-portrait{position:absolute;right:0;bottom:0;width:330px;pointer-events:none}
-.sp-hero-portrait img{width:100%;display:block}
+.sp-hero-portrait::before{content:'';position:absolute;inset:-14% -20% 0 -20%;background:radial-gradient(ellipse 70% 85% at 50% 70%,color-mix(in srgb,var(--accent) 26%,transparent) 0%,color-mix(in srgb,var(--accent) 12%,transparent) 45%,transparent 72%)}
+.sp-hero-portrait::after{content:'';position:absolute;inset:-10% -14% 0 -14%;background:var(--gd);-webkit-mask-image:url('/bg/pattern-flat.png');mask-image:url('/bg/pattern-flat.png');-webkit-mask-size:420px;mask-size:420px;-webkit-mask-repeat:repeat;mask-repeat:repeat;opacity:.5}
+.sp-hero-portrait img{position:relative;z-index:1;width:100%;display:block;filter:drop-shadow(0 18px 32px color-mix(in srgb,var(--accent) 22%,rgba(0,0,0,.35)))}
 
 /* Without transparent portrait — large avatar */
 .sp-hero-av-large{position:absolute;right:2.5rem;top:50%;transform:translateY(-50%);width:140px;height:140px;border-radius:50%;overflow:hidden;border:1px solid var(--bdh)}

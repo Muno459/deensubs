@@ -2,7 +2,7 @@
 
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
 import { llmChat } from './translate';
-import { buildClipAss, normalizeStyle, type ClipStyle } from './ass';
+import { buildClipAss, normalizeStyle, type CaptionCard, type ClipStyle } from './ass';
 import type { Cue, ScribeEnv } from './types';
 
 const CDN_BASE = 'https://cdn.deensubs.com';
@@ -64,6 +64,51 @@ Pick the ${count} strongest, ranked best first. hook: punchy, faithful to conten
   return moments.slice(0, count);
 }
 
+/** LLM edit-direction: caption cards timed to speech + effect cues.
+ * Returns null on any failure — the mechanical splitter is the fallback. */
+export async function aiClipDirection(
+  env: ScribeEnv,
+  cues: Cue[],
+  start: number,
+  end: number,
+  hook: string
+): Promise<CaptionCard[] | null> {
+  try {
+    const lines = cues.map((c) => `${c.start.toFixed(1)}-${c.end.toFixed(1)}\t${c.text}`).join('\n');
+    const raw = await llmChat(env, [
+      { role: 'system', content: `You are a viral short-form video editor (TikTok/Reels style). Break the subtitle text into rapid caption CARDS. Output ONLY JSONL, one card per line:
+{"a":ABS_START_SEC,"b":ABS_END_SEC,"t":"1-5 words","em":1,"fx":"punch"}
+Rules:
+- Cards lie within the cue timings, in order, non-overlapping, 0.4-1.8s each, flipping with natural speech rhythm (distribute time by word length).
+- "t" uses the cues' words VERBATIM — never paraphrase. Break at meaningful phrase boundaries.
+- "em":1 marks the single most impactful card per sentence (renders bigger, accent color). Use sparingly.
+- "fx":"punch" on emphasis beats (max one per 4 seconds). "fx":"shake" ONLY for one truly explosive moment per clip, if any.
+- Cover ALL spoken text between ${start.toFixed(1)}s and ${end.toFixed(1)}s. No commentary, no markdown.` },
+      { role: 'user', content: `Hook: ${hook}\nCues (absStart-absEnd\ttext):\n${lines}` },
+    ], 4000, 'ag/claude-sonnet-4-6');
+    const cards: CaptionCard[] = [];
+    for (let line of raw.split('\n')) {
+      line = line.trim().replace(/^```(json)?|```$/g, '').trim();
+      if (!line.startsWith('{')) continue;
+      try {
+        const o = JSON.parse(line);
+        const a = Math.max(start, Number(o.a));
+        const b = Math.min(end, Number(o.b));
+        const t = String(o.t || '').trim();
+        if (!t || isNaN(a) || isNaN(b) || b - a < 0.25) continue;
+        cards.push({ a, b, t: t.slice(0, 60), em: o.em ? 1 : 0, fx: o.fx === 'punch' || o.fx === 'shake' ? o.fx : undefined });
+      } catch {}
+    }
+    cards.sort((x, y) => x.a - y.a);
+    for (let i = 0; i < cards.length - 1; i++) {
+      if (cards[i].b > cards[i + 1].a) cards[i].b = Math.max(cards[i].a + 0.25, cards[i + 1].a - 0.02);
+    }
+    return cards.length >= 3 ? cards : null;
+  } catch {
+    return null;
+  }
+}
+
 export type ClipParams = { clipId: string };
 
 type ClipEnv = ScribeEnv & { CACHE: KVNamespace };
@@ -97,13 +142,19 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
           if (!cuesObj) throw new Error('cues missing');
           const cues = (await cuesObj.json<Cue[]>()).filter((c) => c.end > clip.start && c.start < clip.end);
 
+          // LLM edit direction (captions + effects); mechanical fallback
+          const cards = await aiClipDirection(env, cues, clip.start, clip.end, clip.hook || '');
           const ass = buildClipAss({
             cues,
             start: clip.start,
             end: clip.end,
             hook: clip.hook || '',
             style: normalizeStyle(clip.style || 'bold'),
+            cards: cards || undefined,
           });
+          const fx = (cards || [])
+            .filter((c) => c.fx)
+            .map((c) => ({ t: Math.max(0, +(c.a - clip.start).toFixed(2)), type: c.fx }));
 
           const start = await containerCall(env, 'clip-' + clipId, '/clip', {
             method: 'POST',
@@ -113,6 +164,8 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
               start: clip.start,
               end: clip.end,
               ass_b64: btoa(unescape(encodeURIComponent(ass))),
+              fx: cards ? fx : undefined,
+              kb: cards ? 1 : 0,
             }),
           });
           if (!start.ok) throw new Error(`clip start failed: HTTP ${start.status} ${await start.text().catch(() => '')}`);

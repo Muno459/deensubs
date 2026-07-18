@@ -60,14 +60,17 @@ function groupCue(cue: Cue, clipStart: number): { start: number; end: number; te
   return out;
 }
 
+export type CaptionCard = { a: number; b: number; t: string; em?: number; fx?: string };
+
 export function buildClipAss(opts: {
   cues: Cue[]; // cues overlapping the clip range, absolute times
   start: number;
   end: number;
   hook: string;
   style: ClipStyle;
+  cards?: CaptionCard[]; // LLM-directed caption cards (absolute times)
 }): string {
-  const { cues, start, end, hook, style } = opts;
+  const { cues, start, end, hook, style, cards } = opts;
   const dur = end - start;
   const arabic = cues.some((c) => hasArabic(c.text));
   const capFont = arabic ? 'Noto Naskh Arabic' : 'Geist';
@@ -101,6 +104,18 @@ export function buildClipAss(opts: {
     );
   }
 
+  if (cards?.length) {
+    // LLM-directed cards: rapid pops timed to speech, emphasis in accent
+    for (const card of cards) {
+      const a = Math.max(0, card.a - start);
+      const b = Math.min(dur, card.b - start);
+      if (b - a < 0.15) continue;
+      const text = preset.upper && !hasArabic(card.t) ? card.t.toUpperCase() : card.t;
+      const pop = '{\\fad(60,40)\\t(0,110,\\fscx110\\fscy110)\\t(110,200,\\fscx100\\fscy100)' +
+        (card.em ? '\\c&HA2B345&\\fs104' : '') + '}';
+      events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,${pop}${esc(text)}`);
+    }
+  } else {
   // Rapid caption groups
   for (const cue of cues) {
     const s = Math.max(cue.start, start);
@@ -114,6 +129,7 @@ export function buildClipAss(opts: {
         `Dialogue: 0,${assTime(Math.max(0, grp.start))},${assTime(Math.min(dur, grp.end + 0.05))},Caption,,0,0,0,,{\\fad(50,30)}${esc(text)}`
       );
     }
+  }
   }
 
   return `[Script Info]

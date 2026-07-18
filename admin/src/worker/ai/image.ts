@@ -122,7 +122,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     const buf = new Uint8Array(await obj.arrayBuffer());
     const ct = obj.httpMetadata?.contentType || 'image/jpeg';
     const base = slugify(payload.name || 'scholar');
-    const KEEP = "Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Chest-up bust composition, clean subtle painterly editorial portrait treatment with natural colors. IMPORTANT: if the source photo is cropped at the sides, extend and complete the shoulders, arms and clothing naturally so the person's full silhouette fits INSIDE the frame with clear margins on the left and right — nothing may be cut off at the side edges (the bust may reach the bottom edge only).";
+    const KEEP = "Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Chest-up bust composition, clean subtle painterly editorial portrait treatment with natural colors. IMPORTANT: if the source photo is cropped at the sides, extend and complete the shoulders, arms and clothing naturally so the person's full silhouette fits INSIDE the frame with clear margins on the left and right — nothing may be cut off at the side edges — keep at least 10% empty margin on the left and right edges (scale the figure down if needed; only the bust may reach the bottom edge).";
     const MAGENTA = 'The background must be a completely flat, uniform, solid pure magenta (#FF00FF) filling the entire frame edge to edge — no gradient, no vignette, no shadows on the background.';
     const naturalRaw = await openaiImage(env, `Cut out the person cleanly. ${MAGENTA} The person keeps clean natural tones (neutralize heavy casts on the PERSON only — the background stays vivid pure magenta, never desaturate the background). ${KEEP}`, buf, ct, '1024x1024');
     // Deterministic chroma-key in the container: guaranteed clean alpha
@@ -149,6 +149,26 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     const naturalKey = `scholars/${base}-hero.webp`;
     await env.MEDIA_BUCKET.put(naturalKey, natural, { httpMetadata: { contentType: 'image/webp' } });
     return { photo: naturalKey, photo_hero: naturalKey } as any;
+  }
+
+  if (kind === 'refilter') {
+    // Run an arbitrary ffmpeg filter over an existing R2 image in place
+    // (e.g. alpha-erosion de-fringing) — deterministic, no model involved.
+    if (!payload.imageKey || !payload.filter) throw new Error('imageKey and filter required');
+    const { getContainer } = await import('@cloudflare/containers');
+    const container = getContainer(env.YTDLP as any, 'grade');
+    const res: Response = await container.fetch(new Request('http://ytdlp/grade', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + ((env as any).YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: `${CDN}/${payload.imageKey}?rf=${Date.now()}`, filter: payload.filter, out: payload.imageKey.endsWith('.webp') ? 'webp' : undefined }),
+      signal: AbortSignal.timeout(90_000),
+    }));
+    if (!res.ok) throw new Error(`refilter failed: HTTP ${res.status} ${(await res.text()).slice(0, 120)}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    await env.MEDIA_BUCKET.put(payload.imageKey, bytes, {
+      httpMetadata: { contentType: payload.imageKey.endsWith('.webp') ? 'image/webp' : 'image/png' },
+    });
+    return { key: payload.imageKey };
   }
 
   if (kind === 'grade') {
