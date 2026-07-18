@@ -8,7 +8,7 @@ import { GlowingEffect } from './GlowingEffect';
 export function GlowCard({
   children,
   className,
-  glow = true,
+  glow = false,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -17,7 +17,7 @@ export function GlowCard({
   return (
     <div
       className={cn(
-        'relative rounded-xl border border-hairline bg-panel',
+        'relative rounded-xl border border-hairline bg-panel shadow-[var(--sh)]',
         className
       )}
     >
@@ -78,9 +78,9 @@ export function Badge({
   className?: string;
 }) {
   const tones = {
-    gold: 'bg-gold/10 text-gold-bright border-gold/25',
-    green: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25',
-    red: 'bg-red-500/10 text-red-300 border-red-500/25',
+    gold: 'bg-gold-dim text-gold border-gold/30',
+    green: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30',
+    red: 'bg-red-500/10 text-red-400 border-red-500/30',
     dim: 'bg-soft text-muted border-hairline',
   };
   return (
@@ -122,7 +122,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'rounded-xl px-3.5 py-2 text-[13px] font-semibold transition-all active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40',
+        'rounded-lg px-3.5 py-2 text-[13px] font-medium transition-all active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40',
         variants[variant],
         className
       )}
@@ -133,7 +133,7 @@ export function Button({
 }
 
 export const inputCls =
-  'w-full rounded-xl border border-hairline bg-inset px-3 py-2 text-[13px] text-cream placeholder:text-muted/60 outline-none transition-colors focus:border-gold/40 focus:bg-black/50';
+  'w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-cream placeholder:text-faint outline-none transition-colors focus:border-gold/50';
 
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -171,7 +171,7 @@ export function HitBar({ value, max }: { value: number; max: number }) {
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-soft">
       <motion.div
-        className="h-full rounded-full bg-gradient-to-r from-gold/70 to-gold-bright"
+        className="h-full rounded-full bg-gold"
         initial={{ width: 0 }}
         animate={{ width: `${pct}%` }}
         transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}

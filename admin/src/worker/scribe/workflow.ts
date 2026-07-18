@@ -4,7 +4,7 @@
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
 import { download } from './download';
 import { runAsr, loadAsr } from './asr';
-import { translateWords, takeUsage } from './translate';
+import { translateWords, qaPass, takeUsage } from './translate';
 import { generateMetadata, generateChapters } from './metadata';
 import { renderSrt } from './srt';
 import { updateJob, type Cue, type ScribeEnv } from './types';
@@ -21,8 +21,8 @@ async function markStage(env: ScribeEnv, jobId: string, stage: string, extra: Re
   const row: any = await env.DB.prepare('SELECT stage_times FROM scribe_jobs WHERE id = ?').bind(jobId).first();
   let times: Record<string, string> = {};
   try { times = JSON.parse(row?.stage_times || '{}'); } catch {}
-  times[stage] = new Date().toISOString();
-  await updateJob(env.DB, jobId, { step: stage, stage_times: JSON.stringify(times), ...extra });
+  if (!times[stage]) times[stage] = new Date().toISOString();
+  await updateJob(env.DB, jobId, { step: stage, stage_times: JSON.stringify(times), error: null, ...extra });
 }
 
 async function addTokens(env: ScribeEnv, jobId: string, tokens: number) {
@@ -45,7 +45,18 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       const dl = await step.do(
         'download',
         { retries: { limit: 3, delay: '45 seconds', backoff: 'exponential' }, timeout: '30 minutes' },
-        () => download(env, jobId, url, !!fullVideo)
+        async () => {
+          // Resume: reuse the already-downloaded source if it exists
+          const row: any = await env.DB.prepare('SELECT source_key, download_method, duration, title, channel, thumb_url FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+          if (row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key))) {
+            return {
+              key: row.source_key, method: (row.download_method || 'direct') as any,
+              contentType: '', bytes: 0, title: row.title, channel: row.channel,
+              thumbUrl: row.thumb_url, durationSec: row.duration || 0,
+            };
+          }
+          return download(env, jobId, url, !!fullVideo);
+        }
       );
       const row: any = await env.DB.prepare('SELECT title, channel, thumb_url FROM scribe_jobs WHERE id = ?').bind(jobId).first();
       await markStage(env, jobId, 'asr', {
@@ -62,7 +73,22 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       const asr = await step.do(
         'asr',
         { retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' }, timeout: '60 minutes' },
-        () => runAsr(env, jobId, dl.key, dl.durationSec || 0)
+        async () => {
+          const asrKey = `scribe/${jobId}/asr.json`;
+          const existing = await env.MEDIA_BUCKET.get(asrKey);
+          if (existing) {
+            const data: any = await existing.json();
+            const words = (data.words || []).filter((w: any) => (w.type || 'word') === 'word');
+            if (words.length) {
+              return {
+                asrKey, languageCode: data.language_code || '',
+                wordCount: words.length,
+                durationSec: data.audio_duration_secs || words[words.length - 1].end || 0,
+              };
+            }
+          }
+          return runAsr(env, jobId, dl.key, dl.durationSec || 0);
+        }
       );
       await markStage(env, jobId, 'translate', {
         asr_key: asr.asrKey,
@@ -75,20 +101,45 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // 3. Translate — one pass per target language (primary first)
       let primaryCueCount = 0;
       for (const lang of langs) {
+        const cuesKey = lang === primary ? `scribe/${jobId}/cues.json` : `scribe/${jobId}/cues.${lang}.json`;
         const tr = await step.do(
           `translate-${lang}`,
           { retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' }, timeout: '45 minutes' },
           async () => {
+            const existing = await env.MEDIA_BUCKET.get(cuesKey);
+            if (existing) {
+              const cues: any[] = await existing.json();
+              if (cues.length) return { cuesKey, cueCount: cues.length, tokens: 0, cached: true };
+            }
             const data = await loadAsr(env, asr.asrKey);
             const cues = await translateWords(env, data.words, lang);
-            const cuesKey = lang === primary ? `scribe/${jobId}/cues.json` : `scribe/${jobId}/cues.${lang}.json`;
             await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(cues), {
               httpMetadata: { contentType: 'application/json' },
             });
-            return { cuesKey, cueCount: cues.length, tokens: takeUsage() };
+            return { cuesKey, cueCount: cues.length, tokens: takeUsage(), cached: false };
           }
         );
         await addTokens(env, jobId, tr.tokens);
+
+        // Netflix QA repair pass (skipped when cues came from a finished run)
+        if (!tr.cached) {
+          const qa = await step.do(
+            `qa-${lang}`,
+            { retries: { limit: 1, delay: '30 seconds' }, timeout: '30 minutes' },
+            async () => {
+              const obj = await env.MEDIA_BUCKET.get(cuesKey);
+              if (!obj) throw new Error('cues missing for QA');
+              const cues = await obj.json<Cue[]>();
+              const repaired = await qaPass(env, cues, lang);
+              await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(repaired.cues), {
+                httpMetadata: { contentType: 'application/json' },
+              });
+              return { fixes: repaired.fixes, tokens: takeUsage() };
+            }
+          );
+          await addTokens(env, jobId, qa.tokens);
+        }
+
         if (lang === primary) {
           primaryCueCount = tr.cueCount;
           await updateJob(env.DB, jobId, { cue_count: tr.cueCount });

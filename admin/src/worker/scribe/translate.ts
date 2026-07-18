@@ -114,13 +114,13 @@ function parseSse(text: string): string {
  * answer with an SSE stream even when stream:false is sent, so both shapes
  * are handled.
  */
-export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000): Promise<string> {
+export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000, model?: string): Promise<string> {
   const base = (env.SCRIBE_LLM_URL || '').replace(/\/$/, '');
   const res = await fetch(`${base}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.SCRIBE_LLM_KEY },
     body: JSON.stringify({
-      model: env.SCRIBE_LLM_MODEL || 'ag/gemini-3.5-flash-low',
+      model: model || env.SCRIBE_LLM_MODEL || 'ag/gemini-3.1-pro-low',
       messages,
       temperature: 0.4,
       max_tokens: maxTokens,
@@ -168,58 +168,83 @@ function parseCues(raw: string, win: CleanWord[]): { w: [number, number]; t: str
   return out;
 }
 
-/** Translate one window, with retries for unparseable output AND for
- * uncovered tails (models sometimes stop before the last words). */
+const STRONG_MODEL = 'ag/claude-sonnet-4-6';
+
+/** Uncovered index ranges within [lo,hi] given parsed cues. */
+function computeHoles(cues: { w: [number, number] }[], lo: number, hi: number): [number, number][] {
+  const sorted = [...cues].sort((a, b) => a.w[0] - b.w[0]);
+  const holes: [number, number][] = [];
+  let cursor = lo;
+  for (const c of sorted) {
+    if (c.w[0] > cursor) holes.push([cursor, c.w[0] - 1]);
+    cursor = Math.max(cursor, c.w[1] + 1);
+  }
+  if (cursor <= hi) holes.push([cursor, hi]);
+  return holes;
+}
+
+/** Attach tiny uncovered ranges to the nearest cue (minimal timing shift). */
+function attachSmallHoles(cues: { w: [number, number]; t: string }[], lo: number, hi: number) {
+  cues.sort((a, b) => a.w[0] - b.w[0]);
+  for (const [a, b] of computeHoles(cues, lo, hi)) {
+    let best: { w: [number, number] } | null = null;
+    let bestDist = Infinity;
+    for (const c of cues) {
+      const dist = c.w[1] < a ? a - c.w[1] : c.w[0] > b ? c.w[0] - b : 0;
+      if (dist < bestDist) { bestDist = dist; best = c; }
+    }
+    if (!best) continue;
+    best.w[0] = Math.min(best.w[0], a);
+    best.w[1] = Math.max(best.w[1], b);
+  }
+}
+
+/** Translate one window: model ladder, then targeted hole-filling.
+ * Never emits source text as translation; timing anchors stay honest. */
 async function translateWindow(
   env: ScribeEnv,
   targetLang: string,
   win: CleanWord[],
   prevTail: string
 ): Promise<{ w: [number, number]; t: string }[]> {
+  const lo = win[0].i;
+  const hi = win[win.length - 1].i;
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT(targetLang) },
     { role: 'user', content: windowPrompt(win, prevTail) },
   ];
-  let cues = parseCues(await llmChat(env, messages), win);
-  if (!cues.length) {
-    cues = parseCues(await llmChat(env, messages), win); // one retry
-  }
-  if (!cues.length) {
-    // Last resort: one cue for the whole window with joined source text
-    return [{ w: [win[0].i, win[win.length - 1].i], t: win.map((w) => w.text).join(' ') }];
-  }
 
-  // Coverage check: if the model stopped early, translate the tail it missed
-  const hi = win[win.length - 1].i;
+  // Ladder: primary twice, then the strong model
+  let cues: { w: [number, number]; t: string }[] = [];
+  for (const model of [undefined, undefined, STRONG_MODEL]) {
+    try {
+      cues = parseCues(await llmChat(env, messages, 4000, model), win);
+      if (cues.length) break;
+    } catch {}
+  }
+  if (!cues.length) throw new Error(`window ${lo}-${hi} failed on all models`);
+
+  // Hole-filling: translate what the model skipped instead of stretching timing
   for (let round = 0; round < 2; round++) {
-    const maxCovered = Math.max(...cues.map((c) => c.w[1]));
-    if (maxCovered >= hi - 1) break;
-    const rest = win.filter((w) => w.i > maxCovered);
-    if (rest.length < 2) break;
-    const tailPrev = cues[cues.length - 1]?.t || prevTail;
-    const more = parseCues(
-      await llmChat(env, [
-        { role: 'system', content: SYSTEM_PROMPT(targetLang) },
-        { role: 'user', content: windowPrompt(rest, tailPrev) },
-      ]),
-      rest as CleanWord[]
-    );
-    if (!more.length) break;
-    cues = cues.concat(more);
+    const holes = computeHoles(cues, lo, hi).filter(([a, b]) => b - a + 1 >= 3);
+    if (!holes.length) break;
+    for (const [a, b] of holes) {
+      const sub = win.filter((w) => w.i >= a && w.i <= b);
+      if (sub.length < 3) continue;
+      try {
+        const more = parseCues(
+          await llmChat(env, [
+            { role: 'system', content: SYSTEM_PROMPT(targetLang) },
+            { role: 'user', content: windowPrompt(sub, cues[cues.length - 1]?.t || prevTail) },
+          ], 3000, round === 0 ? undefined : STRONG_MODEL),
+          sub as CleanWord[]
+        );
+        if (more.length) cues.push(...more);
+      } catch {}
+    }
   }
-  return cues;
-}
-
-/** Fill index gaps between/around parsed cues so every word is covered. */
-function fillCoverage(cues: { w: [number, number]; t: string }[], lo: number, hi: number) {
-  cues.sort((a, b) => a.w[0] - b.w[0]);
-  let cursor = lo;
-  for (const c of cues) {
-    if (c.w[0] > cursor) c.w[0] = cursor; // extend back over any gap
-    c.w[1] = Math.max(c.w[1], c.w[0]);
-    cursor = Math.max(cursor, c.w[1] + 1);
-  }
-  if (cues.length) cues[cues.length - 1].w[1] = Math.max(cues[cues.length - 1].w[1], hi);
+  attachSmallHoles(cues, lo, hi);
+  return cues.sort((a, b) => a.w[0] - b.w[0]);
 }
 
 export async function translateWords(
@@ -245,13 +270,13 @@ export async function translateWords(
     settled.forEach((cues, j) => (results[i + j] = cues));
   }
 
-  // Stitch windows → final cues with exact word-derived timing
-  const cues: Cue[] = [];
+  // Stitch windows → cues with exact word-derived timing (keep word spans
+  // internally so long cues can be SPLIT at real word boundaries, never
+  // truncated into silent gaps)
+  type WCue = Cue & { w: [number, number] };
+  let cues: WCue[] = [];
   for (let i = 0; i < windows.length; i++) {
-    const win = windows[i];
-    const winCues = results[i];
-    fillCoverage(winCues, win[0].i, win[win.length - 1].i);
-    for (const c of winCues) {
+    for (const c of results[i]) {
       const first = words[c.w[0]];
       const last = words[c.w[1]];
       if (!first || !last) continue;
@@ -260,23 +285,96 @@ export async function translateWords(
         end: Math.max(last.end, first.start + 0.6),
         text: c.t,
         source: words.slice(c.w[0], c.w[1] + 1).map((w) => w.text).join(' '),
+        w: [c.w[0], c.w[1]],
       });
     }
   }
+  cues.sort((a, b) => a.start - b.start);
 
-  // Post pass: keep cues ordered, non-overlapping, and readable
+  // Split cues longer than ~8.5s at sentence/clause boundaries, timing the
+  // split at the proportional source-word boundary
+  const splitOnce = (cue: WCue): WCue[] => {
+    const dur = cue.end - cue.start;
+    if (dur <= 8.5 || cue.w[1] - cue.w[0] < 4) return [cue];
+    const text = cue.text;
+    const marks = [...text.matchAll(/[.!?؟…,;:]\s+/g)].map((m) => m.index! + m[0].length);
+    const mid = text.length / 2;
+    let splitAt = marks.length ? marks.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p)) : -1;
+    if (splitAt < 8 || text.length - splitAt < 8) {
+      const sp = [...text.matchAll(/\s+/g)].map((m) => m.index!);
+      if (!sp.length) return [cue];
+      splitAt = sp.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p)) + 1;
+    }
+    const share = splitAt / text.length;
+    const wSplit = Math.max(cue.w[0] + 1, Math.min(cue.w[1], cue.w[0] + Math.round((cue.w[1] - cue.w[0]) * share)));
+    const a: WCue = {
+      start: cue.start, end: words[wSplit - 1].end, w: [cue.w[0], wSplit - 1],
+      text: text.slice(0, splitAt).trim(),
+      source: words.slice(cue.w[0], wSplit).map((w) => w.text).join(' '),
+    };
+    const b: WCue = {
+      start: words[wSplit].start, end: cue.end, w: [wSplit, cue.w[1]],
+      text: text.slice(splitAt).trim(),
+      source: words.slice(wSplit, cue.w[1] + 1).map((w) => w.text).join(' '),
+    };
+    return [...splitOnce(a), ...splitOnce(b)];
+  };
+  cues = cues.flatMap(splitOnce);
+
+  // Netflix-style post pass: ordered, non-overlapping, breathable
   cues.sort((a, b) => a.start - b.start);
   for (let i = 0; i < cues.length; i++) {
     const cue = cues[i];
     const next = cues[i + 1];
-    if (next && cue.end > next.start) cue.end = next.start; // no overlap
-    // Extend very short cues into the following silence
+    if (next && cue.end > next.start - 0.08) cue.end = Math.max(cue.start + 0.4, next.start - 0.08);
     if (cue.end - cue.start < 1.0) {
-      const limit = next ? next.start : cue.end + 1.0;
-      cue.end = Math.min(cue.start + 1.2, limit);
+      const limit = next ? next.start - 0.08 : cue.end + 1.0;
+      cue.end = Math.min(cue.start + 1.2, Math.max(cue.end, limit));
     }
-    // Cap runaway cues
-    if (cue.end - cue.start > 10) cue.end = cue.start + 10;
   }
-  return cues.filter((c) => c.end > c.start && c.text.trim());
+  return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);
+}
+
+/** Netflix-grade QA repair: strong model reviews source ↔ translation in
+ * batches and fixes mistranslation, dropped content, over-long lines, and
+ * reading-speed violations. Returns the repaired cue list. */
+export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): Promise<{ cues: Cue[]; fixes: number }> {
+  const BATCH = 40;
+  let fixes = 0;
+  const out = [...cues];
+  const jobs: Promise<void>[] = [];
+  const runBatch = async (offset: number) => {
+    const batch = out.slice(offset, offset + BATCH);
+    const lines = batch.map((c, i) => {
+      const dur = Math.max(0.3, c.end - c.start);
+      const cps = Math.round(c.text.length / dur);
+      const flag = cps > 20 ? ` [CPS ${cps} TOO FAST — condense]` : '';
+      return `${offset + i}\nSRC: ${c.source}\nTRN: ${c.text}${flag}`;
+    }).join('\n\n');
+    try {
+      const raw = await llmChat(env, [
+        { role: 'system', content: `You are a Netflix-standard subtitle QA reviewer for Islamic lectures (${targetLang} target). Review source↔translation pairs. Output ONLY JSONL fixes for cues that need them (mistranslation, dropped meaning, awkward phrasing, CPS violations to condense, honorific mistakes):
+{"i": cueNumber, "t": "corrected translation"}
+Rules: max ~84 chars, keep honorifics (Allah ﷻ, Prophet ﷺ, RA/AS/RH), keep transliterations (fiqh, Sharia...), Quran quotes in established translation wording. If a cue is fine, output nothing for it. No commentary.` },
+        { role: 'user', content: lines },
+      ], 3500, STRONG_MODEL);
+      for (const line of raw.split('\n')) {
+        const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
+        if (!t.startsWith('{')) continue;
+        try {
+          const f = JSON.parse(t);
+          if (typeof f.i === 'number' && typeof f.t === 'string' && out[f.i] && f.t.trim()) {
+            out[f.i] = { ...out[f.i], text: f.t.trim() };
+            fixes++;
+          }
+        } catch {}
+      }
+    } catch {}
+  };
+  for (let i = 0; i < out.length; i += BATCH * 4) {
+    const group = [];
+    for (let j = i; j < Math.min(i + BATCH * 4, out.length); j += BATCH) group.push(runBatch(j));
+    await Promise.all(group);
+  }
+  return { cues: out, fixes };
 }

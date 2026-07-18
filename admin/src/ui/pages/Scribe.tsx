@@ -399,6 +399,22 @@ function JobDetail({ job }: { job: any }) {
               </button>
             )
           )}
+          {job.status === 'done' && (
+            <button
+              onClick={async () => {
+                if (!confirm('Re-translate with the current quality pipeline? Existing subtitles for this job are replaced (download + transcript reused).')) return;
+                try {
+                  await api(`/api/scribe/${job.id}/retranslate-all`, { method: 'POST' });
+                  toast.push('Re-translation started');
+                } catch (e: any) {
+                  toast.push(e.message, 'error');
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97]"
+            >
+              <Icon name="refresh" className="h-3 w-3" /> Re-translate
+            </button>
+          )}
           {job.srt_key && (
             <a href={`/api/scribe/${job.id}/file?type=srt`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/10 px-2.5 py-1.5 text-[11px] font-semibold text-gold-bright transition-all hover:bg-gold/20 active:scale-[0.97]">
@@ -818,11 +834,16 @@ export default function Scribe() {
                   <div className="flex shrink-0 items-center gap-1">
                     {j.status === 'error' && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); api(`/api/scribe/${j.id}/retry`, { method: 'POST' }).then(refetch); }}
-                        title="Retry as a new job"
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-gold-bright"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          api(`/api/scribe/${j.id}/resume`, { method: 'POST' })
+                            .then(() => { toast.push('Resuming from last completed step'); refetch(); })
+                            .catch((err) => toast.push(err.message, 'error'));
+                        }}
+                        title="Resume from last completed step (download/transcript reused)"
+                        className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-gold transition-colors hover:bg-gold-dim"
                       >
-                        <Icon name="refresh" className="h-3.5 w-3.5" />
+                        <Icon name="refresh" className="h-3.5 w-3.5" /> Resume
                       </button>
                     )}
                     <button

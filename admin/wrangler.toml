@@ -73,7 +73,7 @@ tag = "v1"
 new_sqlite_classes = ["YtdlpContainer"]
 
 [vars]
-SCRIBE_LLM_MODEL = "ag/gemini-3.5-flash-low"
+SCRIBE_LLM_MODEL = "ag/gemini-3.1-pro-low"
 SCRIBE_LLM_URL = "https://router.padborginn.dk"
 
 # Secrets (set via: echo "value" | npx wrangler secret put NAME):

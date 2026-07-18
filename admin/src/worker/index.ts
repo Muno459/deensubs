@@ -615,6 +615,44 @@ app.delete('/api/scribe/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// Resume a failed job from its last completed artifact (download/ASR reused)
+app.post('/api/scribe/:id/resume', async (c) => {
+  const id = c.req.param('id');
+  const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
+  if (!job) return c.json({ error: 'Not found' }, 404);
+  try { await (await c.env.SCRIBE_WORKFLOW.get(id)).terminate(); } catch {}
+  const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
+  const suffix = 'r' + genJobId().slice(0, 4);
+  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', error = NULL WHERE id = ?").bind(id).run();
+  await c.env.SCRIBE_WORKFLOW.create({
+    id: `${id}-${suffix}`,
+    params: { jobId: id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
+  });
+  return c.json({ ok: true, resumed: true });
+});
+
+// Force a fresh translation (clears cue artifacts, keeps download + ASR)
+app.post('/api/scribe/:id/retranslate-all', async (c) => {
+  const id = c.req.param('id');
+  const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
+  if (!job) return c.json({ error: 'Not found' }, 404);
+  try { await (await c.env.SCRIBE_WORKFLOW.get(id)).terminate(); } catch {}
+  const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
+  const list = await c.env.MEDIA_BUCKET.list({ prefix: `scribe/${id}/` });
+  for (const o of list.objects) {
+    if (/\/(cues.*\.json|[a-z]{2}\.srt|source\.srt|chapters\.json|meta\.json)$/.test(o.key)) {
+      await c.env.MEDIA_BUCKET.delete(o.key);
+    }
+  }
+  const suffix = 'r' + genJobId().slice(0, 4);
+  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', step = 'translate', error = NULL, cue_count = 0, llm_tokens = 0 WHERE id = ?").bind(id).run();
+  await c.env.SCRIBE_WORKFLOW.create({
+    id: `${id}-${suffix}`,
+    params: { jobId: id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
+  });
+  return c.json({ ok: true, retranslating: true });
+});
+
 app.post('/api/scribe/:id/retry', async (c) => {
   const id = c.req.param('id');
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();

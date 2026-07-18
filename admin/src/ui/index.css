@@ -30,39 +30,39 @@
 
 /* ---- Runtime theme (dark = site dark, light = site default) ---- */
 :root {
-  --ink: #0f0f0f;
-  --panel: #1a1a1a;
-  --raised: #212121;
-  --cream: #eceadf;
-  --mutedc: #a29c8f;
-  --faintc: #8d8779;
+  --ink: #0a0a0a;
+  --panel: #121212;
+  --raised: #1a1a1a;
+  --cream: #ededed;
+  --mutedc: #a3a3a3;
+  --faintc: #707070;
   --acc: #45b3a2;
-  --accb: #6ecfbf;
-  --accd: rgba(69, 179, 162, 0.12);
-  --hl: rgba(255, 255, 255, 0.07);
-  --hls: rgba(255, 255, 255, 0.16);
-  --soft: rgba(255, 255, 255, 0.03);
-  --hoverc: rgba(255, 255, 255, 0.05);
-  --inset: rgba(0, 0, 0, 0.3);
-  --glow: rgba(69, 179, 162, 0.07);
+  --accb: #63d3c1;
+  --accd: rgba(69, 179, 162, 0.14);
+  --hl: rgba(255, 255, 255, 0.08);
+  --hls: rgba(255, 255, 255, 0.17);
+  --soft: rgba(255, 255, 255, 0.04);
+  --hoverc: rgba(255, 255, 255, 0.055);
+  --inset: rgba(0, 0, 0, 0.35);
+  --sh: none;
   color-scheme: dark;
 }
 [data-theme="light"] {
-  --ink: #f6f4ee;
+  --ink: #fafafa;
   --panel: #ffffff;
-  --raised: #efece3;
-  --cream: #211d15;
-  --mutedc: #5b564b;
-  --faintc: #8d8779;
-  --acc: #0e6b63;
-  --accb: #14887d;
-  --accd: rgba(14, 107, 99, 0.1);
-  --hl: rgba(30, 25, 10, 0.1);
-  --hls: rgba(30, 25, 10, 0.24);
-  --soft: rgba(30, 25, 10, 0.04);
-  --hoverc: rgba(30, 25, 10, 0.06);
-  --inset: rgba(30, 25, 10, 0.05);
-  --glow: rgba(14, 107, 99, 0.05);
+  --raised: #f2f2f2;
+  --cream: #171717;
+  --mutedc: #666666;
+  --faintc: #909090;
+  --acc: #0c8577;
+  --accb: #0a9d8c;
+  --accd: rgba(12, 133, 119, 0.1);
+  --hl: #e8e8e8;
+  --hls: #d6d6d6;
+  --soft: rgba(0, 0, 0, 0.03);
+  --hoverc: rgba(0, 0, 0, 0.045);
+  --inset: rgba(0, 0, 0, 0.035);
+  --sh: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px -4px rgba(0, 0, 0, 0.06);
   color-scheme: light;
 }
 
@@ -112,16 +112,6 @@ body {
   font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "tnum" 0;
-}
-
-/* Single restrained ambient accent at the very top */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(45% 28% at 50% -8%, var(--glow), transparent 70%);
-  z-index: 0;
 }
 
 #root {
