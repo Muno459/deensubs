@@ -362,9 +362,6 @@ img{display:block}button{font:inherit}input,textarea,select{font:inherit}
 .ft-col a:hover{color:var(--accent)}
 .ft-bottom{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;padding-top:1.25rem}
 .ft-copy{font-size:.68rem;color:var(--t3)}
-.ft-attr{font-size:.66rem;color:var(--t3);margin-right:auto}
-.ft-attr a{color:var(--t3);text-decoration:underline;text-underline-offset:2px;transition:color .15s}
-.ft-attr a:hover{color:var(--accent)}
 .ft-social{display:flex;gap:.55rem;align-items:center}
 .ft-social a{width:30px;height:30px;border:1px solid var(--bd);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--t2);transition:color .15s,border-color .15s}
 .ft-social a:hover{color:var(--accent);border-color:var(--bdh)}
