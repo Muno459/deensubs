@@ -20,9 +20,9 @@ async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array,
   let res: Response;
   if (imageBytes) {
     const form = new FormData();
-    form.append('model', 'gpt-image-1');
+    form.append('model', 'gpt-image-2');
     form.append('prompt', prompt);
-    form.append('size', '1536x1024');
+    form.append('size', 'auto');
     form.append('quality', 'high');
     form.append('image', new Blob([imageBytes as any], { type: imageCt }), 'image.' + (imageCt.includes('png') ? 'png' : 'jpg'));
     res = await fetch('https://api.openai.com/v1/images/edits', {
@@ -34,7 +34,7 @@ async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array,
     res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-image-1', prompt, size: '1536x1024', quality: 'high' }),
+      body: JSON.stringify({ model: 'gpt-image-2', prompt, size: 'auto', quality: 'high' }),
     });
   }
   if (!res.ok) throw new Error(`OpenAI image HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -119,8 +119,10 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
       const cached = await env.MEDIA_BUCKET.head(cacheKey);
       if (cached) return { key: cacheKey };
     }
-    const job: any = await env.DB.prepare('SELECT thumb_url FROM scribe_jobs WHERE id = ?').bind(payload.jobId).first();
+    const job: any = await env.DB.prepare('SELECT thumb_url, target_lang FROM scribe_jobs WHERE id = ?').bind(payload.jobId).first();
     if (!job?.thumb_url) throw new Error('This job has no original thumbnail');
+    const LANG_NAMES: Record<string, string> = { en: 'English', fr: 'French', de: 'German', es: 'Spanish', tr: 'Turkish', ur: 'Urdu', id: 'Indonesian', da: 'Danish', sv: 'Swedish', nl: 'Dutch' };
+    const langName = LANG_NAMES[job.target_lang] || job.target_lang || 'English';
     // Prefer the max-res variant when the platform has one
     const urls = [job.thumb_url.replace(/hqdefault|sddefault|mqdefault/, 'maxresdefault'), job.thumb_url];
     let src: Response | null = null;
@@ -132,7 +134,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     const srcBytes = new Uint8Array(await src.arrayBuffer());
     const bytes = await openaiImage(
       env,
-      'Recreate this video thumbnail exactly, but translate all Arabic (or other non-English) text into natural, concise English. Keep the layout, colors, person, background, badges and composition identical. Render the English text in a matching bold style, correctly spelled.',
+      `Translate all text to ${langName}.`,
       srcBytes,
       src.headers.get('content-type') || 'image/jpeg'
     );
