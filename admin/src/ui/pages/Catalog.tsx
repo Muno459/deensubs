@@ -1,7 +1,7 @@
 // Catalog: categories + scholars management (the missing CRUD)
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, useApi } from '../lib/api';
-import { GlowCard, SectionTitle, PageLoader, Button, Modal, Field, inputCls, Badge } from '../components/Primitives';
+import { GlowCard, SectionTitle, PageLoader, Button, Modal, Field, inputCls, Badge, Spinner } from '../components/Primitives';
 import { BlurFade } from '../components/BlurFade';
 import { Icon } from '../components/Icon';
 import { AiFillButton } from '../components/AiFill';
@@ -54,9 +54,37 @@ function CategoryForm({ initial, onDone, onCancel }: { initial?: any; onDone: ()
 function ScholarForm({ initial, onDone, onCancel }: { initial?: any; onDone: () => void; onCancel: () => void }) {
   const [form, setForm] = useState<any>(initial || { name: '', slug: '', title: '', bio: '', photo: '', photo_hero: '' });
   const [saving, setSaving] = useState(false);
+  const [magic, setMagic] = useState<'idle' | 'uploading' | 'generating'>('idle');
+  const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
+
+  async function runMagic(f: File) {
+    if (!f.type.startsWith('image/')) return;
+    setMagic('uploading');
+    try {
+      const up = await fetch(`/api/upload?prefix=scholars/&name=${encodeURIComponent((form.name || 'scholar') + '-ref')}`, {
+        method: 'POST', headers: { 'content-type': f.type }, body: f, credentials: 'include',
+      });
+      const uj: any = await up.json();
+      if (!up.ok) throw new Error(uj.error || 'upload failed');
+      setMagic('generating');
+      const r = await api('/api/ai/image', {
+        method: 'POST',
+        body: JSON.stringify({ kind: 'scholar_magic', imageKey: uj.key, name: form.name || 'scholar' }),
+      });
+      setForm((fm: any) => ({ ...fm, photo: r.photo, photo_hero: r.photo_hero }));
+      toast.push('Portrait + hero generated — likeness untouched, review below');
+    } catch (e: any) {
+      toast.push(e.message, 'error');
+    }
+    setMagic('idle');
+  }
+
   return (
-    <div className="space-y-3.5">
+    <div className="space-y-3.5" onPaste={(e) => {
+      const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/'));
+      if (f) { e.preventDefault(); runMagic(f); }
+    }}>
       <div className="flex justify-end">
         <AiFillButton
           kind="scholar"
@@ -87,6 +115,26 @@ function ScholarForm({ initial, onDone, onCancel }: { initial?: any; onDone: () 
       <Field label="Bio">
         <textarea rows={3} className={inputCls + ' resize-y'} value={form.bio || ''} onChange={(e) => setForm({ ...form, bio: e.target.value })} />
       </Field>
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        disabled={magic !== 'idle'}
+        className="flex w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-gold/40 bg-gold/[0.04] px-4 py-6 text-center transition-colors hover:bg-gold/[0.08] disabled:opacity-70"
+      >
+        {magic !== 'idle' ? (
+          <span className="inline-flex items-center gap-2 text-[13px] text-gold-bright">
+            <Spinner className="h-4 w-4" /> {magic === 'uploading' ? 'Uploading reference...' : 'Doing the magic — portrait + hero (~2 min)...'}
+          </span>
+        ) : (
+          <>
+            <Icon name="sparkles" className="h-5 w-5 text-gold-bright" />
+            <span className="text-[13px] font-medium text-cream">Paste (Ctrl+V) or click to upload a reference photo</span>
+            <span className="text-[11px] text-muted">Branded square portrait + wide hero generate automatically — the face is preserved exactly</span>
+          </>
+        )}
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) runMagic(f); }} />
       <ImageField label="Photo" prefix="scholars/" gradeable value={form.photo || ''} onChange={(key) => setForm({ ...form, photo: key })} />
       <ImageField label="Hero photo" hint="Wide banner used on the scholar page" prefix="scholars/" gradeable value={form.photo_hero || ''} onChange={(key) => setForm({ ...form, photo_hero: key })} />
       <div className="flex justify-end gap-2 pt-1">

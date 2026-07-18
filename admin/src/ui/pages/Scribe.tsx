@@ -219,7 +219,6 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
   const meta = useApi<any>(open ? '/api/meta' : null);
   const [form, setForm] = useState<any>(null);
   const [cands, setCands] = useState<{ key: string; ts: number }[] | null>(null);
-  const [transThumb, setTransThumb] = useState<string | 'loading' | 'none' | null>(null);
   const [customThumb, setCustomThumb] = useState<string | null>(null);
   const [chosenKey, setChosenKey] = useState<string | null>(null);
   const thumbFileRef = useRef<HTMLInputElement>(null);
@@ -247,15 +246,6 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
         if (r.candidates?.length) setChosenTs(r.candidates[0].ts);
       })
       .catch((e) => { setCands([]); setCandErr(e.message); });
-    // Automagic: translate the original platform thumbnail (Arabic → English)
-    if (job.thumb_url) {
-      setTransThumb('loading');
-      api('/api/ai/image', { method: 'POST', body: JSON.stringify({ kind: 'thumb_translate', jobId: job.id }) })
-        .then((r) => { setTransThumb(r.key); setChosenKey((k) => k ?? r.key); })
-        .catch(() => setTransThumb('none'));
-    } else {
-      setTransThumb('none');
-    }
     setCustomThumb(null);
     setChosenKey(null);
     // AI drafts the rest: category/scholar picks + Arabic title + slug (silent best-effort)
@@ -359,18 +349,6 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 }} />
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {transThumb === 'loading' && (
-                <div className="flex aspect-video items-center justify-center gap-1.5 rounded-lg border border-hairline bg-inset text-center text-[10px] text-muted">
-                  <Spinner className="h-3 w-3" /> Translating original...
-                </div>
-              )}
-              {transThumb && transThumb !== 'loading' && transThumb !== 'none' && (
-                <button onClick={() => { setChosenKey(transThumb); setChosenTs(null); }}
-                  className={`relative overflow-hidden rounded-lg border-2 transition-all ${chosenKey === transThumb ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'}`}>
-                  <img src={`https://cdn.deensubs.com/${transThumb}?v=${job.id}`} alt="" className="aspect-video w-full object-cover" />
-                  <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[10px] text-gold-bright">✨ Original · translated</span>
-                </button>
-              )}
               {customThumb && (
                 <button onClick={() => { setChosenKey(customThumb); setChosenTs(null); }}
                   className={`relative overflow-hidden rounded-lg border-2 transition-all ${chosenKey === customThumb ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'}`}>

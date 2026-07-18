@@ -14,7 +14,7 @@ function slugify(s: string): string {
 
 /** OpenAI gpt-image-1: excellent text rendering + edits photos with people
  * (the gemini route refuses those). Primary for generation and all edits. */
-async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array, imageCt = 'image/jpeg'): Promise<Uint8Array> {
+async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array, imageCt = 'image/jpeg', size = 'auto'): Promise<Uint8Array> {
   const key = (env as any).OPENAI_KEY;
   if (!key) throw new Error('OPENAI_KEY secret not set');
   let res: Response;
@@ -22,7 +22,7 @@ async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array,
     const form = new FormData();
     form.append('model', 'gpt-image-2');
     form.append('prompt', prompt);
-    form.append('size', 'auto');
+    form.append('size', size);
     form.append('quality', 'high');
     form.append('image', new Blob([imageBytes as any], { type: imageCt }), 'image.' + (imageCt.includes('png') ? 'png' : 'jpg'));
     res = await fetch('https://api.openai.com/v1/images/edits', {
@@ -34,7 +34,7 @@ async function openaiImage(env: ImgEnv, prompt: string, imageBytes?: Uint8Array,
     res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-image-2', prompt, size: 'auto', quality: 'high' }),
+      body: JSON.stringify({ model: 'gpt-image-2', prompt, size, quality: 'high' }),
     });
   }
   if (!res.ok) throw new Error(`OpenAI image HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -110,36 +110,26 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     return { key: await store(env, prefix, base + '-edit', bytes) };
   }
 
-  if (kind === 'thumb_translate') {
-    // Automagic: fetch the original platform thumbnail and re-render it with
-    // all Arabic text translated to English — layout/person/design preserved.
-    if (!payload.jobId) throw new Error('jobId required');
-    const cacheKey = `scribe/${payload.jobId}/thumb-en.png`;
-    if (!payload.refresh) {
-      const cached = await env.MEDIA_BUCKET.head(cacheKey);
-      if (cached) return { key: cacheKey };
-    }
-    const job: any = await env.DB.prepare('SELECT thumb_url, target_lang FROM scribe_jobs WHERE id = ?').bind(payload.jobId).first();
-    if (!job?.thumb_url) throw new Error('This job has no original thumbnail');
-    const LANG_NAMES: Record<string, string> = { en: 'English', fr: 'French', de: 'German', es: 'Spanish', tr: 'Turkish', ur: 'Urdu', id: 'Indonesian', da: 'Danish', sv: 'Swedish', nl: 'Dutch' };
-    const langName = LANG_NAMES[job.target_lang] || job.target_lang || 'English';
-    // Prefer the max-res variant when the platform has one
-    const urls = [job.thumb_url.replace(/hqdefault|sddefault|mqdefault/, 'maxresdefault'), job.thumb_url];
-    let src: Response | null = null;
-    for (const u of [...new Set(urls)]) {
-      const r = await fetch(u);
-      if (r.ok) { src = r; break; }
-    }
-    if (!src) throw new Error('Could not fetch the original thumbnail');
-    const srcBytes = new Uint8Array(await src.arrayBuffer());
-    const bytes = await openaiImage(
-      env,
-      `Translate all text to ${langName}.`,
-      srcBytes,
-      src.headers.get('content-type') || 'image/jpeg'
-    );
-    await env.MEDIA_BUCKET.put(cacheKey, bytes, { httpMetadata: { contentType: 'image/png' } });
-    return { key: cacheKey };
+
+  if (kind === 'scholar_magic') {
+    // The magic: one pasted reference photo → branded square portrait + wide
+    // hero, both preserving the person's likeness exactly (gpt-image-2).
+    if (!payload.imageKey) throw new Error('imageKey required');
+    const obj = await env.MEDIA_BUCKET.get(payload.imageKey);
+    if (!obj) throw new Error('reference image not found: ' + payload.imageKey);
+    const buf = new Uint8Array(await obj.arrayBuffer());
+    const ct = obj.httpMetadata?.contentType || 'image/jpeg';
+    const base = slugify(payload.name || 'scholar');
+    const STYLE = "Deep neutral charcoal studio background, soft diffused editorial lighting, a subtle cool rim light. Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Dignified, modern, clean.";
+    const [portrait, hero] = await Promise.all([
+      openaiImage(env, `Professional editorial portrait of this person for an Islamic scholars directory. ${STYLE} Square chest-up composition.`, buf, ct, '1024x1024'),
+      openaiImage(env, `Professional wide banner portrait of this person for an Islamic scholars directory page header. ${STYLE} Subject on the right third, generous empty dark background on the left for text overlay.`, buf, ct, '1536x1024'),
+    ]);
+    const photoKey = `scholars/${base}.png`;
+    const heroKey = `scholars/${base}-hero.png`;
+    await env.MEDIA_BUCKET.put(photoKey, portrait, { httpMetadata: { contentType: 'image/png' } });
+    await env.MEDIA_BUCKET.put(heroKey, hero, { httpMetadata: { contentType: 'image/png' } });
+    return { photo: photoKey, photo_hero: heroKey } as any;
   }
 
   if (kind === 'grade') {
