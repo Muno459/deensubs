@@ -294,15 +294,30 @@ def run_clip(job_id: str, payload: dict) -> None:
             xesc = ("+(" + xoff.replace(",", "\\,") + ")") if xoff else ""
             motion = (f"fps=30,zoompan=z='{zesc}':"
                       f"x='iw/2-(iw/zoom/2){xesc}':y='ih/2-(ih/zoom/2)':d=1:s=1080x1920:fps=30,")
+        if payload.get("framing") == "fit":
+            base_chain = (
+                "[0:v]split=2[bg][fg];"
+                "[bg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
+                "boxblur=8:2,scale=1080:1920,eq=brightness=-0.18:saturation=0.85[bgb];"
+                "[fg]scale=1080:-2[fgs];"
+                "[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto[base];"
+            )
+        else:
+            # fill: full-bleed center crop on the speaker — the TikTok look
+            base_chain = "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[base];"
         vf = (
-            "[0:v]split=2[bg][fg];"
-            "[bg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
-            "boxblur=8:2,scale=1080:1920,eq=brightness=-0.18:saturation=0.85[bgb];"
-            "[fg]scale=1080:-2[fgs];"
-            "[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto[base];"
+            base_chain +
             f"[base]{motion}ass={ass_path}:fontsdir=/usr/share/fonts/custom[subbed];"
             f"[subbed]drawbox=x=0:y=ih-16:w=iw*min(t/{dur:.3f}\\,1):h=16:color=0x45b3a2@0.95:t=fill[out]"
         )
+        # Hard flash cuts (LLM-directed): 80ms white pops on transition beats
+        flashes = [e for e in fx if e.get("type") == "flash"][:3]
+        if flashes:
+            fl = "".join(
+                f",drawbox=x=0:y=0:w=iw:h=ih:color=white@0.85:t=fill:enable='between(t,{float(e['t']):.2f},{float(e['t']) + 0.08:.2f})'"
+                for e in flashes
+            )
+            vf = vf.replace("[out]", "") + fl + "[out]"
         cmd = [
             "ffmpeg", "-y",
             "-ss", str(start), "-to", str(end), "-i", url,
@@ -316,8 +331,16 @@ def run_clip(job_id: str, payload: dict) -> None:
         ]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         if proc.returncode == 0 and os.path.exists(out_path):
+            files = {}
+            if payload.get("poster"):
+                poster_path = os.path.join(DIR, f"{job_id}-poster.jpg")
+                pp = subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(min(1.0, dur / 2)),
+                                     "-i", out_path, "-frames:v", "1", "-q:v", "3", poster_path],
+                                    capture_output=True, timeout=60)
+                if pp.returncode == 0 and os.path.exists(poster_path):
+                    files["poster.jpg"] = poster_path
             with jobs_lock:
-                jobs[job_id].update(status="done", file=out_path, ext="mp4")
+                jobs[job_id].update(status="done", file=out_path, ext="mp4", files=files, names=list(files.keys()))
         else:
             with jobs_lock:
                 jobs[job_id].update(status="error", error=(proc.stderr or "").strip()[-400:])

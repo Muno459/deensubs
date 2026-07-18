@@ -10,6 +10,7 @@ import { useToast } from '../components/Toast';
 import { AiFillButton } from '../components/AiFill';
 
 const STYLES = [
+  { id: 'tiktok', label: 'TikTok Native', desc: 'Black text in white bubbles — the default TikTok caption look' },
   { id: 'bold', label: 'Bold', desc: 'UPPERCASE white, heavy outline — maximum stopping power' },
   { id: 'accent', label: 'Accent', desc: 'DeenSubs cream + teal karaoke accent — elegant' },
   { id: 'minimal', label: 'Minimal', desc: 'Clean white, thin outline — calm and premium' },
@@ -21,7 +22,8 @@ function Composer({ job, moment, onClose, onCreated }: { job: any; moment: Momen
   const [start, setStart] = useState(moment?.start ?? 0);
   const [end, setEnd] = useState(moment?.end ?? Math.min(45, job.duration || 45));
   const [hook, setHook] = useState(moment?.hook ?? '');
-  const [style, setStyle] = useState('bold');
+  const [style, setStyle] = useState('tiktok');
+  const [framing, setFraming] = useState<'fill' | 'fit'>('fill');
   const [creating, setCreating] = useState(false);
   const [cues, setCues] = useState<any[]>([]);
   const toast = useToast();
@@ -63,6 +65,18 @@ function Composer({ job, moment, onClose, onCreated }: { job: any; moment: Momen
               <input type="number" step="0.1" className={inputCls} value={end} onChange={(e) => setEnd(parseFloat(e.target.value) || 0)} />
             </div>
             <div className="flex items-end pb-2 text-[13px] tabular-nums text-muted">{Math.max(0, end - start).toFixed(1)}s clip</div>
+          </div>
+          <div>
+            <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted">Framing</span>
+            <div className="grid grid-cols-2 gap-2">
+              {([['fill', 'Zoomed in', 'Full-bleed on the speaker — where the magic is'], ['fit', 'Zoomed out', 'Whole frame visible, blurred sides']] as const).map(([id, label, desc]) => (
+                <button key={id} onClick={() => setFraming(id)}
+                  className={`rounded-xl border p-2.5 text-left transition-colors ${framing === id ? 'border-gold/60 bg-gold/10' : 'border-hairline bg-soft hover:bg-hover'}`}>
+                  <p className="text-[12px] font-semibold text-cream">{label}</p>
+                  <p className="text-[10.5px] leading-snug text-muted">{desc}</p>
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted">Caption style</span>
@@ -118,6 +132,7 @@ export default function Clips() {
   const jobs = useApi<any>('/api/scribe');
   const clips = useApi<any>('/api/clips');
   const [jobId, setJobId] = useState('');
+  const [playing, setPlaying] = useState<any | null>(null);
   const [moments, setMoments] = useState<Moment[] | null>(null);
   const [finding, setFinding] = useState(false);
   const [findErr, setFindErr] = useState('');
@@ -212,35 +227,48 @@ export default function Clips() {
 
       <div>
         <SectionTitle>Rendered clips</SectionTitle>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
           {(clips.data?.clips || []).map((c: any) => (
-            <GlowCard key={c.id} glow={false} className="p-3.5">
-              <div className="flex items-center gap-2">
-                {c.status === 'running' && <Spinner className="h-3.5 w-3.5" />}
-                {c.status === 'done' && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
-                {c.status === 'error' && <span className="h-2 w-2 rounded-full bg-red-400" />}
-                <p className="min-w-0 flex-1 truncate text-[13px] font-medium text-cream">{c.hook || 'Untitled clip'}</p>
-                <Badge tone="dim">{c.style}</Badge>
-              </div>
-              <p className="mt-1 truncate text-[11px] text-faint">{c.job_title || c.job_id} · {(c.end - c.start).toFixed(0)}s · {fmtAgo(c.created_at)}</p>
-              {c.error && <p className="mt-1 break-all text-[11px] text-red-400">{c.error}</p>}
-              {c.status === 'done' && c.r2_key && (
-                <div className="mt-2.5 flex items-center gap-2">
-                  <video src={`https://cdn.deensubs.com/${c.r2_key}`} controls preload="metadata" className="aspect-[9/16] w-24 rounded-lg border border-hairline bg-black" />
-                  <div className="flex flex-col gap-1.5">
-                    <a href={`/api/clips/${c.id}/file`}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-ink hover:bg-gold-bright">
-                      <Icon name="download" className="h-3 w-3" /> Download
-                    </a>
-                    <button
-                      onClick={async () => { await api(`/api/clips/${c.id}`, { method: 'DELETE' }); toast.push('Clip deleted'); clips.refetch(); }}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-2.5 py-1.5 text-[11px] text-muted hover:bg-red-500/10 hover:text-red-400">
-                      <Icon name="trash" className="h-3 w-3" /> Delete
-                    </button>
+            <div key={c.id} className="group">
+              <button
+                onClick={() => c.status === 'done' && c.r2_key && setPlaying(c)}
+                className="relative block w-full overflow-hidden rounded-2xl border border-hairline bg-black"
+              >
+                {c.status === 'done' && c.r2_key ? (
+                  <>
+                    <img src={`https://cdn.deensubs.com/${c.r2_key.replace('.mp4', '.jpg')}?v=${c.id}`} alt=""
+                      onError={(e) => { const el = e.target as HTMLImageElement; el.onerror = null; el.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E'; }}
+                      className="aspect-[9/16] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/30">
+                      <Icon name="play" className="h-12 w-12 text-white opacity-0 drop-shadow-lg transition-opacity group-hover:opacity-100" />
+                    </span>
+                  </>
+                ) : (
+                  <div className="flex aspect-[9/16] w-full flex-col items-center justify-center gap-2 bg-inset">
+                    {c.status === 'running' ? <Spinner className="h-6 w-6" /> : <span className="text-2xl">⚠️</span>}
+                    <span className="text-[11px] text-muted">{c.status === 'running' ? 'Rendering...' : 'Failed'}</span>
                   </div>
+                )}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-3 pt-8 text-left">
+                  <p className="truncate text-[12.5px] font-semibold text-white">{c.hook || 'Untitled clip'}</p>
+                  <p className="truncate text-[10.5px] text-white/70">{(c.end - c.start).toFixed(0)}s · {c.style}{c.framing === 'fit' ? ' · fit' : ''} · {fmtAgo(c.created_at)}</p>
                 </div>
-              )}
-            </GlowCard>
+              </button>
+              {c.error && <p className="mt-1 break-all text-[10.5px] text-red-400">{c.error.slice(0, 120)}</p>}
+              <div className="mt-1.5 flex items-center gap-1.5">
+                {c.status === 'done' && c.r2_key && (
+                  <a href={`/api/clips/${c.id}/file`} className="inline-flex items-center gap-1 rounded-lg border border-hairline bg-soft px-2 py-1 text-[10.5px] font-medium text-cream/80 hover:bg-hover">
+                    <Icon name="download" className="h-3 w-3" /> Download
+                  </a>
+                )}
+                <button
+                  onClick={async () => { await api(`/api/clips/${c.id}`, { method: 'DELETE' }); toast.push('Clip deleted'); clips.refetch(); }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-hairline bg-soft px-2 py-1 text-[10.5px] text-muted hover:text-red-400"
+                >
+                  <Icon name="trash" className="h-3 w-3" /> Delete
+                </button>
+              </div>
+            </div>
           ))}
         </div>
         {!clips.data?.clips?.length && !clips.loading && (
@@ -259,6 +287,19 @@ export default function Clips() {
           onCreated={clips.refetch}
         />
       )}
-    </div>
+          {playing && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-6" onClick={() => setPlaying(null)}>
+          <div className="flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <video src={`https://cdn.deensubs.com/${playing.r2_key}?v=${playing.id}`} controls autoPlay
+              className="max-h-[82vh] rounded-2xl border border-hairline bg-black" style={{ aspectRatio: '9/16' }} />
+            <div className="flex items-center gap-2">
+              <p className="max-w-[40ch] truncate text-[13px] text-cream">{playing.hook || 'Clip'}</p>
+              <a href={`/api/clips/${playing.id}/file`} className="rounded-lg bg-gold px-3 py-1.5 text-[12px] font-semibold text-ink hover:bg-gold-bright">Download</a>
+              <button onClick={() => setPlaying(null)} className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-muted hover:text-cream">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+</div>
   );
 }

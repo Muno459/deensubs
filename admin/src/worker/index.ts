@@ -950,14 +950,14 @@ app.get('/api/clips', async (c) => {
 });
 
 app.post('/api/clips', async (c) => {
-  const { job_id, start, end, hook, style } = await c.req.json();
+  const { job_id, start, end, hook, style, framing } = await c.req.json();
   if (!job_id || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
     return c.json({ error: 'job_id, start, end required' }, 400);
   }
   if (end - start > 180) return c.json({ error: 'clips are capped at 3 minutes' }, 400);
   const id = genJobId();
-  await c.env.DB.prepare('INSERT INTO clips (id, job_id, start, end, hook, style, status) VALUES (?,?,?,?,?,?,?)')
-    .bind(id, job_id, start, end, hook || '', style || 'bold', 'running').run();
+  await c.env.DB.prepare('INSERT INTO clips (id, job_id, start, end, hook, style, framing, status) VALUES (?,?,?,?,?,?,?,?)')
+    .bind(id, job_id, start, end, hook || '', style || 'tiktok', framing === 'fit' ? 'fit' : 'fill', 'running').run();
   try {
     await c.env.CLIP_WORKFLOW.create({ id: 'clip-' + id, params: { clipId: id } });
   } catch (err: any) {

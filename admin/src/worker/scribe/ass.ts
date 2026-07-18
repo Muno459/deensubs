@@ -7,10 +7,10 @@
 
 import type { Cue } from './types';
 
-export type ClipStyle = 'bold' | 'accent' | 'minimal';
+export type ClipStyle = 'tiktok' | 'bold' | 'accent' | 'minimal';
 /** Old rows stored 'gold'; it maps to the teal accent preset. */
 export function normalizeStyle(s: string): ClipStyle {
-  return s === 'gold' ? 'accent' : (['bold', 'accent', 'minimal'].includes(s) ? (s as ClipStyle) : 'bold');
+  return s === 'gold' ? 'accent' : (['tiktok', 'bold', 'accent', 'minimal'].includes(s) ? (s as ClipStyle) : 'tiktok');
 }
 
 const PLAY_W = 1080;
@@ -69,14 +69,22 @@ export function buildClipAss(opts: {
   hook: string;
   style: ClipStyle;
   cards?: CaptionCard[]; // LLM-directed caption cards (absolute times)
+  framing?: 'fill' | 'fit';
 }): string {
-  const { cues, start, end, hook, style, cards } = opts;
+  const { cues, start, end, hook, style, cards, framing } = opts;
   const dur = end - start;
   const arabic = cues.some((c) => hasArabic(c.text));
   const capFont = arabic ? 'Noto Naskh Arabic' : 'Geist';
 
   // Style presets — Fontsize is in PlayRes units (1080x1920)
   const styles: Record<ClipStyle, { caption: string; title: string; upper: boolean }> = {
+    tiktok: {
+      // TikTok's native caption bubble: black text in a white per-line box
+      // (BorderStyle=4; Outline doubles as box padding), sentence case, static.
+      caption: `Style: Caption,${arabic ? 'Noto Naskh Arabic' : 'Inter'},76,&H00141414,&H00141414,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.3,0,4,16,0,2,70,70,560,1`,
+      title: `Style: Title,Inter,56,&H00141414,&H00141414,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.3,0,4,18,0,8,70,70,110,1`,
+      upper: false,
+    },
     bold: {
       caption: `Style: Caption,${capFont},92,&H00FFFFFF,&H00A2B345,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,9,3,2,60,60,560,1`,
       title: `Style: Title,Geist,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&HB4000000,-1,0,0,0,100,100,0,0,3,0,14,8,70,70,110,1`,
@@ -97,10 +105,12 @@ export function buildClipAss(opts: {
 
   const events: string[] = [];
 
-  // Hook title, pinned top, whole clip (alignment 8 = top center)
+  // Hook title: TikTok bubble. Fill mode = upper-center (~21% height, clear
+  // of faces which sit mid-frame); fit mode = in the top blur band.
   if (hook.trim()) {
+    const y = framing === 'fit' ? 150 : 190; // fill mode: high enough to clear faces (heads sit mid-frame at full-bleed zoom)
     events.push(
-      `Dialogue: 1,${assTime(0.15)},${assTime(Math.max(0.5, dur - 0.1))},Title,,0,0,0,,{\\fad(220,180)}${esc(hook.trim())}`
+      `Dialogue: 1,${assTime(0.15)},${assTime(Math.max(0.5, dur - 0.1))},Title,,0,0,0,,{\\fad(220,180)\\an8\\pos(540,${y})}${esc(hook.trim())}`
     );
   }
 
@@ -111,8 +121,14 @@ export function buildClipAss(opts: {
       const b = Math.min(dur, card.b - start);
       if (b - a < 0.15) continue;
       const text = preset.upper && !hasArabic(card.t) ? card.t.toUpperCase() : card.t;
-      const pop = '{\\fad(60,40)\\t(0,110,\\fscx110\\fscy110)\\t(110,200,\\fscx100\\fscy100)' +
-        (card.em ? '\\c&HA2B345&\\fs104' : '') + '}';
+      const isTiktok = style === 'tiktok';
+      // Wrap-neutral animation only: \fscy scales height without changing
+      // line width, so libass never re-wraps mid-display (the old \fscx pop
+      // temporarily widened glyphs and re-broke lines). Sizes are static.
+      const pop = isTiktok
+        ? '{\\fad(40,30)' + (card.em ? '\\c&HFFFFFF&\\4c&H141414&' : '') + '}'
+        : '{\\fad(60,40)\\t(0,110,\\fscy108)\\t(110,190,\\fscy100)' +
+          (card.em ? '\\c&HA2B345&' : '') + '}';
       events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,${pop}${esc(text)}`);
     }
   } else {
