@@ -104,7 +104,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         const cuesKey = lang === primary ? `scribe/${jobId}/cues.json` : `scribe/${jobId}/cues.${lang}.json`;
         const tr = await step.do(
           `translate-${lang}`,
-          { retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' }, timeout: '45 minutes' },
+          { retries: { limit: 4, delay: '1 minute', backoff: 'exponential' }, timeout: '45 minutes' },
           async () => {
             const existing = await env.MEDIA_BUCKET.get(cuesKey);
             if (existing) {

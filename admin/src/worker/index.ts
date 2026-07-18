@@ -1043,6 +1043,24 @@ export { ScribePipeline } from './scribe/workflow';
 export { ClipRenderer } from './scribe/clips';
 export { YtdlpContainer } from './scribe/container';
 
+/** Auto-resume jobs killed by infrastructure (deploy rollouts reset the
+ * workflow engine mid-step). Artifact-aware steps make resumes cheap. */
+async function autoResumeSweep(env: Env) {
+  const dead = await env.DB.prepare(
+    "SELECT * FROM scribe_jobs WHERE status = 'error' AND error LIKE '%Durable Object reset%' AND updated_at > datetime('now', '-1 day') LIMIT 3"
+  ).all();
+  for (const job of dead.results as any[]) {
+    try { await (await env.SCRIBE_WORKFLOW.get(job.id)).terminate(); } catch {}
+    const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
+    const suffix = 'a' + Math.random().toString(36).slice(2, 6);
+    await env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', error = 'auto-resumed after deploy reset' WHERE id = ?").bind(job.id).run();
+    await env.SCRIBE_WORKFLOW.create({
+      id: `${job.id}-${suffix}`,
+      params: { jobId: job.id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
+    }).catch(() => {});
+  }
+}
+
 // Daily retention: drop scribe artifacts for jobs older than 30 days.
 // Published copies live under canonical keys, so this only clears staging.
 async function retentionSweep(env: Env) {
@@ -1058,7 +1076,12 @@ async function retentionSweep(env: Env) {
 
 export default {
   fetch: app.fetch,
-  scheduled: (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
-    ctx.waitUntil(retentionSweep(env));
+  scheduled: (event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(autoResumeSweep(env));
+    // Retention only on the daily 03:30 tick
+    const d = new Date(event.scheduledTime);
+    if (d.getUTCHours() === 3 && d.getUTCMinutes() >= 30 && d.getUTCMinutes() < 35) {
+      ctx.waitUntil(retentionSweep(env));
+    }
   },
 };

@@ -120,7 +120,7 @@ export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.SCRIBE_LLM_KEY },
     body: JSON.stringify({
-      model: model || env.SCRIBE_LLM_MODEL || 'ag/gemini-3.1-pro-low',
+      model: model || env.SCRIBE_LLM_MODEL || 'ag/claude-sonnet-4-6',
       messages,
       temperature: 0.4,
       max_tokens: maxTokens,
@@ -168,7 +168,8 @@ function parseCues(raw: string, win: CleanWord[]): { w: [number, number]; t: str
   return out;
 }
 
-const STRONG_MODEL = 'ag/claude-sonnet-4-6';
+// Fallback from a different model family for when Claude quota dips
+const FALLBACK_MODEL = 'ag/gemini-3.1-pro-low';
 
 /** Uncovered index ranges within [lo,hi] given parsed cues. */
 function computeHoles(cues: { w: [number, number] }[], lo: number, hi: number): [number, number][] {
@@ -216,7 +217,7 @@ async function translateWindow(
 
   // Ladder: primary twice, then the strong model
   let cues: { w: [number, number]; t: string }[] = [];
-  for (const model of [undefined, undefined, STRONG_MODEL]) {
+  for (const model of [undefined, undefined, FALLBACK_MODEL]) {
     try {
       cues = parseCues(await llmChat(env, messages, 4000, model), win);
       if (cues.length) break;
@@ -236,7 +237,7 @@ async function translateWindow(
           await llmChat(env, [
             { role: 'system', content: SYSTEM_PROMPT(targetLang) },
             { role: 'user', content: windowPrompt(sub, cues[cues.length - 1]?.t || prevTail) },
-          ], 3000, round === 0 ? undefined : STRONG_MODEL),
+          ], 3000, round === 0 ? undefined : FALLBACK_MODEL),
           sub as CleanWord[]
         );
         if (more.length) cues.push(...more);
@@ -357,7 +358,7 @@ export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): P
 {"i": cueNumber, "t": "corrected translation"}
 Rules: max ~84 chars, keep honorifics (Allah ﷻ, Prophet ﷺ, RA/AS/RH), keep transliterations (fiqh, Sharia...), Quran quotes in established translation wording. If a cue is fine, output nothing for it. No commentary.` },
         { role: 'user', content: lines },
-      ], 3500, STRONG_MODEL);
+      ], 3500);
       for (const line of raw.split('\n')) {
         const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
         if (!t.startsWith('{')) continue;

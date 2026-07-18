@@ -54,7 +54,7 @@ index_name = "deensubs-cues"
 
 # Daily retention sweep for old Scribe staging artifacts
 [triggers]
-crons = ["30 3 * * *"]
+crons = ["*/5 * * * *"]
 
 # yt-dlp + ffmpeg in a Cloudflare Container (download fallback).
 # Reached only via the YTDLP Durable Object binding, never public.
@@ -73,7 +73,7 @@ tag = "v1"
 new_sqlite_classes = ["YtdlpContainer"]
 
 [vars]
-SCRIBE_LLM_MODEL = "ag/gemini-3.1-pro-low"
+SCRIBE_LLM_MODEL = "ag/claude-sonnet-4-6"
 SCRIBE_LLM_URL = "https://router.padborginn.dk"
 
 # Secrets (set via: echo "value" | npx wrangler secret put NAME):
