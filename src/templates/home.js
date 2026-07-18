@@ -1,6 +1,6 @@
 import { e, fv, ft, thu, thuSrcset, ago, cdn, schImg, schImgSm, isNew } from '../lib/helpers.js';
 import { tsvg } from '../components/thumbnail.js';
-import { vcard, section } from '../components/video-card.js';
+import { vcard, scard, section } from '../components/video-card.js';
 import HOME_JS from '../scripts/home.min.txt';
 
 export function renderHome({ featured, videos, popular, categories, byCategory, scholars }) {
@@ -10,11 +10,14 @@ export function renderHome({ featured, videos, popular, categories, byCategory, 
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"DeenSubs","url":"https://deensubs.com","potentialAction":{"@type":"SearchAction","target":"https://deensubs.com/search?q={search_term_string}","query-input":"required name=search_term_string"}}</script>
 <div id="cw-slot"></div>
 
+<div class="home-body">
+<div class="home-main">
+
 ${featured ? `
 <section class="hero">
   <a href="/watch/${e(featured.slug)}" class="hero-card">
     <div class="hero-th">
-      ${thu(featured) ? `<img src="${e(thu(featured))}" ${thuSrcset(featured) ? `srcset="${thuSrcset(featured)}" sizes="(max-width:768px) 100vw, 640px"` : ''} alt="${e(featured.title)}" class="hero-img" width="640" height="360" fetchpriority="high">` : tsvg(featured.title, featured.category_color || '#c4a44c', 900, 506)}
+      ${thu(featured) ? `<img src="${e(thu(featured))}" ${thuSrcset(featured) ? `srcset="${thuSrcset(featured)}" sizes="(max-width:768px) 100vw, 640px"` : ''} alt="${e(featured.title)}" class="hero-img" width="640" height="360" fetchpriority="high">` : tsvg(featured.title, featured.category_color || '#0e6b63', 900, 506)}
       <div class="hero-ov">
         <div class="hero-pb"></div>
         <div class="hero-meta-ov">
@@ -27,7 +30,7 @@ ${featured ? `
       <h1>${e(featured.title)}</h1>
       ${featured.description ? `<p class="hero-desc">${e(featured.description)}</p>` : ''}
       <div class="hero-mt">
-        ${featured.category_name ? `<span class="tag" style="--tc:${e(featured.category_color || '#c4a44c')}">${e(featured.category_name)}</span>` : ''}
+        ${featured.category_name ? `<span class="tag" style="--tc:${e(featured.category_color || '#0e6b63')}">${e(featured.category_name)}</span>` : ''}
         <span class="tag tag-s">AR &rarr; EN</span>
         <span>${fv(featured.views)}</span>
         <span>${ago(featured.created_at)}</span>
@@ -54,9 +57,24 @@ ${catsWithContent.map(c => {
   return section(c.name, '', cv.slice(0, 6), { link: '/category/' + c.slug });
 }).join('')}
 
-${videos.length ? `<section class="sec">
+${videos.length ? `<section class="sec" id="latest">
 <div class="sec-hd"><h2>Latest Videos</h2>${newThisWeek ? `<span class="sec-new">${newThisWeek} new this week</span>` : ''}<a href="/search" class="sec-more">View all &rarr;</a></div>
 <div class="grid">${videos.slice(0, 12).map((v, i) => vcard(v, { anim: true })).join('')}</div></section>` : ''}
+
+</div>
+<aside class="hrail" aria-label="For you">
+  <div class="hrail-sec" id="rail-cw" style="display:none">
+    <h3 class="hrail-h">Jump back in</h3>
+    <div id="rail-cw-list"></div>
+    <a href="/history" class="hrail-more">Watch history &rarr;</a>
+  </div>
+  <div class="hrail-sec">
+    <h3 class="hrail-h">Latest uploads</h3>
+    ${videos.slice(0, 5).map(scard).join('')}
+    ${videos.length ? `<a href="#latest" class="hrail-more">All latest videos &rarr;</a>` : ''}
+  </div>
+</aside>
+</div>
 
 <script>${HOME_JS}</script>`;
 }

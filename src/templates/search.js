@@ -13,7 +13,7 @@ ${scholars.length?`<div class="search-scholars"><h3>Scholars</h3><div class="sea
   <div class="search-sch-av">${s.photo?`<img src="${schImg(s.photo)}" alt="" loading="lazy">`:(s.name||'').split(' ').pop().charAt(0)}</div>
   <div><div class="search-sch-name">${e(s.name)}</div><div class="search-sch-sub">${s.video_count||0} videos${s.title?' · '+e(s.title):''}</div></div>
 </a>`).join('')}</div></div>`:''}
-<div class="grid" id="sr">${videos.length?videos.map(v=>vcard(v,{anim:true})).join(''):`<p class="emp">${query&&!scholars.length?'No results found for &ldquo;'+e(query)+'&rdquo;. Try different keywords or browse <a href="/" style="color:var(--gold)">all videos</a>.':(query?'':'Type a query to search across all videos, scholars, and topics.')}</p>`}</div>
+<div class="grid" id="sr">${videos.length?videos.map(v=>vcard(v,{anim:true})).join(''):`<p class="emp">${query&&!scholars.length?'No results found for &ldquo;'+e(query)+'&rdquo;. Try different keywords or browse <a href="/" style="color:var(--accent)">all videos</a>.':(query?'':'Type a query to search across all videos, scholars, and topics.')}</p>`}</div>
 ${query && cats.length > 1 ? `<script>(function(){var sf=document.getElementById('sf');if(!sf)return;sf.onclick=function(ev){var b=ev.target.closest('.sf-chip');if(!b)return;sf.querySelectorAll('.sf-chip').forEach(function(c){c.classList.remove('sf-on')});b.classList.add('sf-on');var cat=b.dataset.cat;document.querySelectorAll('#sr .card').forEach(function(c){var tags=c.querySelectorAll('.tag');var match=cat==='all';tags.forEach(function(t){if(t.textContent===cat)match=true});c.style.display=match?'':'none'})}})()</script>` : ''}
 </section>`;
 }

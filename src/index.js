@@ -14,7 +14,7 @@ const app = new Hono();
 
 // ── Maintenance gate — password-protect entire site ──
 // Set MAINTENANCE_PASS secret in Cloudflare to enable. Remove secret to disable.
-const MAINTENANCE_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DeenSubs — Rebuilding</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#050507;color:#eae6da;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:2rem}.c{text-align:center;max-width:400px}.logo{font-size:1.5rem;font-weight:300;color:#c4a44c;margin-bottom:.5rem;letter-spacing:.05em}h1{font-size:1.1rem;font-weight:400;color:#807c72;margin-bottom:2rem;line-height:1.6}form{display:flex;gap:.5rem;justify-content:center}input{background:#111118;border:1px solid rgba(196,164,76,.15);border-radius:8px;padding:.6rem 1rem;color:#eae6da;font:inherit;font-size:.85rem;width:200px;text-align:center}input:focus{outline:none;border-color:#c4a44c}button{background:rgba(196,164,76,.1);border:1px solid rgba(196,164,76,.2);border-radius:8px;padding:.6rem 1.2rem;color:#c4a44c;font:inherit;font-size:.85rem;font-weight:500;cursor:pointer;transition:all .2s}button:hover{background:rgba(196,164,76,.2);border-color:#c4a44c}.err{color:#c44;font-size:.75rem;margin-top:.75rem}</style></head><body><div class="c"><div class="logo">DeenSubs</div><h1>We are rebuilding the site.<br>Please check back soon.</h1><form method="POST"><input type="password" name="pass" placeholder="Password" autocomplete="off"><button type="submit">Enter</button></form>ERRMSG</div></body></html>`;
+const MAINTENANCE_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DeenSubs — Rebuilding</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eae6da;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:2rem}.c{text-align:center;max-width:400px}.logo{font-size:1.5rem;font-weight:300;color:#45b3a2;margin-bottom:.5rem;letter-spacing:.05em}h1{font-size:1.1rem;font-weight:400;color:#807c72;margin-bottom:2rem;line-height:1.6}form{display:flex;gap:.5rem;justify-content:center}input{background:#111118;border:1px solid rgba(62,166,152,.15);border-radius:8px;padding:.6rem 1rem;color:#eae6da;font:inherit;font-size:.85rem;width:200px;text-align:center}input:focus{outline:none;border-color:#45b3a2}button{background:rgba(62,166,152,.1);border:1px solid rgba(62,166,152,.2);border-radius:8px;padding:.6rem 1.2rem;color:#45b3a2;font:inherit;font-size:.85rem;font-weight:500;cursor:pointer;transition:all .2s}button:hover{background:rgba(62,166,152,.2);border-color:#45b3a2}.err{color:#c44;font-size:.75rem;margin-top:.75rem}</style></head><body><div class="c"><div class="logo">DeenSubs</div><h1>We are rebuilding the site.<br>Please check back soon.</h1><form method="POST"><input type="password" name="pass" placeholder="Password" autocomplete="off"><button type="submit">Enter</button></form>ERRMSG</div></body></html>`;
 
 app.use('*', async (c, next) => {
   const mpass = c.env.MAINTENANCE_PASS;
@@ -75,7 +75,7 @@ app.use('*', async (c, next) => {
 // Inject user into requests (skip for static assets)
 app.use('*', async (c, next) => {
   const p = c.req.path;
-  if (p.startsWith('/fonts/') || p.startsWith('/img/') || p.startsWith('/api/media/') || p.startsWith('/api/vtt/') || p === '/api/watch-event' || p === '/api/fingerprint' || p === '/favicon.svg' || p === '/favicon.ico' || p === '/robots.txt' || p === '/sitemap.xml' || p === '/feed.xml' || p === '/manifest.json' || p === '/sw.js') {
+  if (p.startsWith('/fonts/') || p.startsWith('/img/') || p.startsWith('/bg/') || p.startsWith('/api/media/') || p.startsWith('/api/vtt/') || p === '/api/watch-event' || p === '/api/fingerprint' || p === '/favicon.svg' || p === '/favicon.ico' || p === '/robots.txt' || p === '/sitemap.xml' || p === '/feed.xml' || p === '/manifest.json' || p === '/sw.js') {
     await next();
     return;
   }
@@ -102,7 +102,7 @@ app.use('*', async (c, next) => {
   const start = Date.now();
   try { await next(); } catch (e) { console.error('MIDDLEWARE ERROR:', e.message, e.stack); throw e; }
   const path = new URL(c.req.url).pathname;
-  if (path.startsWith('/fonts/') || path.startsWith('/img/') || path === '/favicon.svg' || path === '/favicon.ico' || path === '/api/watch-event' || path === '/sw.js') return;
+  if (path.startsWith('/fonts/') || path.startsWith('/img/') || path.startsWith('/bg/') || path === '/favicon.svg' || path === '/favicon.ico' || path === '/api/watch-event' || path === '/sw.js') return;
   const user = c.get('user');
   const slug = path.match(/\/watch\/([^/]+)/)?.[1] || null;
   const catMatch = path.match(/\/category\/([^/]+)/)?.[1] || '';

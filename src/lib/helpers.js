@@ -147,6 +147,6 @@ export function isNew(d) {
 export function avatarColor(name) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
-  const hues = ['#c4a44c', '#4c8ac4', '#4ca476', '#8a4cc4', '#4cb4a4', '#c44c6e', '#c48a4c'];
+  const hues = ['#0e6b63', '#4c8ac4', '#4ca476', '#8a4cc4', '#4cb4a4', '#c44c6e', '#c48a4c'];
   return hues[Math.abs(h) % hues.length];
 }
