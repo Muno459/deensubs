@@ -135,13 +135,13 @@ export function buildClipAss(opts: {
         const hl = (card.hl || '').toUpperCase().trim();
         let line = esc(up);
         if (hl && up.includes(hl)) line = esc(up).replace(esc(hl), `{${YEL}}${esc(hl)}{${WHT}}`);
-        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(40,30)}${line}`);
+        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,${line ? '' : ''}${line}`);
       } else if (style === 'bubble' || (style === 'tiktok' && hasArabic(card.t))) {
         // \\blur rounds the bubble corners
-        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(40,30)\\blur2.4}${esc(card.t)}`);
+        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\blur2.4}${esc(card.t)}`);
       } else {
         const text = preset.upper && !hasArabic(card.t) ? card.t.toUpperCase() : card.t;
-        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(60,40)}${esc(text)}`);
+        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,${esc(text)}`);
       }
     }
   } else {
