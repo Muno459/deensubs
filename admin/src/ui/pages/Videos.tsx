@@ -230,7 +230,7 @@ export default function Videos() {
                 </span>
                 {v.category_name && (
                   <span className="absolute left-2 top-2 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide backdrop-blur"
-                    style={{ background: 'rgba(5,5,7,0.7)', color: v.category_color || '#c4a44c' }}>
+                    style={{ background: 'rgba(5,5,7,0.7)', color: v.category_color || '#45b3a2' }}>
                     {v.category_name}
                   </span>
                 )}

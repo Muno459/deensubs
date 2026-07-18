@@ -274,7 +274,7 @@ def run_clip(job_id: str, payload: dict) -> None:
             "[fg]scale=1080:-2[fgs];"
             "[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto[base];"
             f"[base]ass={ass_path}:fontsdir=/usr/share/fonts/custom[subbed];"
-            f"[subbed]drawbox=x=0:y=ih-16:w=iw*min(t/{dur:.3f}\\,1):h=16:color=0xc4a44c@0.95:t=fill[out]"
+            f"[subbed]drawbox=x=0:y=ih-16:w=iw*min(t/{dur:.3f}\\,1):h=16:color=0x45b3a2@0.95:t=fill[out]"
         )
         cmd = [
             "ffmpeg", "-y",

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/cn';
 import { GlowingEffect } from './GlowingEffect';
@@ -16,7 +17,7 @@ export function GlowCard({
   return (
     <div
       className={cn(
-        'relative rounded-2xl border border-hairline bg-white/[0.02] backdrop-blur-sm',
+        'relative rounded-xl border border-hairline bg-panel',
         className
       )}
     >
@@ -200,7 +201,7 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -234,7 +235,8 @@ export function Modal({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 
@@ -257,7 +259,7 @@ export function Drawer({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -288,6 +290,7 @@ export function Drawer({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

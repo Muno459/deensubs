@@ -34,8 +34,8 @@ export function GoldArea({
       <AreaChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
         <defs>
           <linearGradient id="goldFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#c4a44c" stopOpacity={0.35} />
-            <stop offset="100%" stopColor="#c4a44c" stopOpacity={0.02} />
+            <stop offset="0%" stopColor="#45b3a2" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="#45b3a2" stopOpacity={0.02} />
           </linearGradient>
         </defs>
         <XAxis
@@ -50,7 +50,7 @@ export function GoldArea({
         <Area
           type="monotone"
           dataKey={y}
-          stroke="#e3c86e"
+          stroke="#6ecfbf"
           strokeWidth={2}
           fill="url(#goldFill)"
           animationDuration={900}
@@ -77,7 +77,7 @@ export function GoldBars({
         <XAxis dataKey={x} tick={{ fill: '#8f8a7c', fontSize: 11 }} axisLine={false} tickLine={false} />
         <YAxis tick={{ fill: '#8f8a7c', fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
         <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(196,164,76,0.06)' }} />
-        <Bar dataKey={y} fill="#c4a44c" radius={[4, 4, 0, 0]} animationDuration={900} />
+        <Bar dataKey={y} fill="#45b3a2" radius={[4, 4, 0, 0]} animationDuration={900} />
       </BarChart>
     </ResponsiveContainer>
   );

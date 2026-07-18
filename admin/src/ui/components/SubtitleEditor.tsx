@@ -116,7 +116,7 @@ export function SubtitleEditor({ job, onClose }: { job: any; onClose: () => void
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-[11px] text-muted">
-            <input type="checkbox" checked={onlyFlagged} onChange={(e) => setOnlyFlagged(e.target.checked)} className="accent-[#c4a44c]" />
+            <input type="checkbox" checked={onlyFlagged} onChange={(e) => setOnlyFlagged(e.target.checked)} className="accent-[#45b3a2]" />
             flagged only
           </label>
           <Button onClick={save} disabled={!dirty || saving} className="px-4 py-1.5">

@@ -7,7 +7,7 @@ import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 
 function CategoryForm({ initial, onDone, onCancel }: { initial?: any; onDone: () => void; onCancel: () => void }) {
-  const [form, setForm] = useState<any>(initial || { name: '', name_ar: '', color: '#c4a44c' });
+  const [form, setForm] = useState<any>(initial || { name: '', name_ar: '', color: '#45b3a2' });
   const [saving, setSaving] = useState(false);
   const toast = useToast();
   return (
@@ -20,7 +20,7 @@ function CategoryForm({ initial, onDone, onCancel }: { initial?: any; onDone: ()
       </Field>
       <Field label="Color">
         <div className="flex items-center gap-2">
-          <input type="color" value={form.color || '#c4a44c'} onChange={(e) => setForm({ ...form, color: e.target.value })}
+          <input type="color" value={form.color || '#45b3a2'} onChange={(e) => setForm({ ...form, color: e.target.value })}
             className="h-9 w-12 cursor-pointer rounded-lg border border-hairline bg-transparent" />
           <input className={inputCls + ' font-mono'} value={form.color || ''} onChange={(e) => setForm({ ...form, color: e.target.value })} />
         </div>
@@ -110,7 +110,7 @@ export default function Catalog() {
           <div className="space-y-1">
             {cats.map((c: any) => (
               <div key={c.id} className="group flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.02]">
-                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.color || '#c4a44c' }} />
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.color || '#45b3a2' }} />
                 <span className="text-[13px] text-cream">{c.name}</span>
                 {c.name_ar && <span dir="rtl" className="font-arabic text-[13px] text-muted">{c.name_ar}</span>}
                 <span className="ml-auto font-mono text-[10px] text-faint">/{c.slug}</span>

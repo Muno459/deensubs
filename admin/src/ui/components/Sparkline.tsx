@@ -23,12 +23,12 @@ export function Sparkline({
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className={className}>
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#c4a44c" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="#c4a44c" stopOpacity="0" />
+          <stop offset="0%" stopColor="#45b3a2" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="#45b3a2" stopOpacity="0" />
         </linearGradient>
       </defs>
       <path d={area} fill={`url(#${id})`} />
-      <path d={line} fill="none" stroke="#e3c86e" strokeWidth="1.5" strokeLinecap="round" />
+      <path d={line} fill="none" stroke="#6ecfbf" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }

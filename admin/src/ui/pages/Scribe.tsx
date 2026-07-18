@@ -714,7 +714,7 @@ export default function Scribe() {
           )}
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <label className="flex items-center gap-1.5 text-[11px] text-muted">
-              <input type="checkbox" checked={fullVideo} onChange={(e) => setFullVideo(e.target.checked)} className="accent-[#c4a44c]" />
+              <input type="checkbox" checked={fullVideo} onChange={(e) => setFullVideo(e.target.checked)} className="accent-[#45b3a2]" />
               Full video (for publishing + clips)
             </label>
             <div className="flex items-center gap-1.5">
@@ -882,7 +882,7 @@ export default function Scribe() {
           <div className="max-h-96 space-y-0.5 overflow-y-auto">
             {batch.entries.map((e: any) => (
               <label key={e.url} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.02]">
-                <input type="checkbox" className="accent-[#c4a44c]"
+                <input type="checkbox" className="accent-[#45b3a2]"
                   checked={batch.picked.has(e.url)}
                   onChange={() => {
                     const picked = new Set(batch.picked);

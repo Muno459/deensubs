@@ -55,7 +55,7 @@ export default function Comments() {
                   type="checkbox"
                   checked={selected.has(c.id)}
                   onChange={() => toggle(c.id)}
-                  className="mt-1.5 h-3.5 w-3.5 accent-[#c4a44c]"
+                  className="mt-1.5 h-3.5 w-3.5 accent-[#45b3a2]"
                 />
                 {c.user_avatar ? (
                   <img src={c.user_avatar} alt="" referrerPolicy="no-referrer" className="mt-0.5 h-8 w-8 shrink-0 rounded-full border border-hairline" />

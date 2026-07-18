@@ -71,13 +71,13 @@ export function buildClipAss(opts: {
   // Style presets — Fontsize is in PlayRes units (1080x1920)
   const styles: Record<ClipStyle, { caption: string; title: string; upper: boolean }> = {
     bold: {
-      caption: `Style: Caption,${capFont},92,&H00FFFFFF,&H004CA4C4,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,9,3,2,60,60,560,1`,
+      caption: `Style: Caption,${capFont},92,&H00FFFFFF,&H00A2B345,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,9,3,2,60,60,560,1`,
       title: `Style: Title,Geist,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&HB4000000,-1,0,0,0,100,100,0,0,3,0,14,8,70,70,110,1`,
       upper: true,
     },
     gold: {
-      caption: `Style: Caption,${capFont},80,&H00DAE6EA,&H006EC8E3,&H00000000,&H8C000000,-1,0,0,0,100,100,0.5,0,1,7,2,2,70,70,560,1`,
-      title: `Style: Title,Geist,54,&H004CA4C4,&H00FFFFFF,&H00000000,&HB4000000,-1,0,0,0,100,100,0.5,0,3,0,12,8,70,70,110,1`,
+      caption: `Style: Caption,${capFont},80,&H00DFEAEC,&H00BFCF6E,&H00000000,&H8C000000,-1,0,0,0,100,100,0.5,0,1,7,2,2,70,70,560,1`,
+      title: `Style: Title,Geist,54,&H00A2B345,&H00FFFFFF,&H00000000,&HB4000000,-1,0,0,0,100,100,0.5,0,3,0,12,8,70,70,110,1`,
       upper: false,
     },
     minimal: {
