@@ -105,14 +105,14 @@ export async function aiClipDirection(
     if (!wordLines) return null;
     const raw = await llmChat(env, [
       { role: 'system', content: `You are a professional subtitle editor for viral Islamic short-form clips. You receive the ORIGINAL ARABIC speech as timestamped words. Translate it into English caption CARDS. Output ONLY JSONL, one card per line:
-{"a":ABS_START_SEC,"b":ABS_END_SEC,"t":"a complete readable English phrase","v":"bold","hl":"KEYWORD"}
+{"a":ABS_START_SEC,"b":ABS_END_SEC,"t":"a short complete English phrase","hl":"KEYWORD"}
 Rules:
-- Every card is a COMPLETE, STANDALONE phrase: 3-9 words, max ~80 characters, a full clause with its own meaning. NEVER 1-2 word fragments, never a phrase that only makes sense with the previous card.
+- Every card is a COMPLETE, STANDALONE phrase: 3-7 words, MAX 42 CHARACTERS (hard limit — it must fit two short lines on a phone), one sentence maximum, a full clause with its own meaning. NEVER 1-2 word fragments.
 - "a" = the timestamp of the first Arabic word the card covers; "b" = when its last word ends. Cards appear exactly as their words are spoken. Typical card: 1.2-3.5s. No overlaps, chronological.
 - Translation: faithful, natural, dignified. Keep honorifics (Allah ﷻ, the Prophet ﷺ, RA/AS). Established transliterations stay (fiqh, dua, Sharia...). Quranic quotes use established translation wording.
 - Pacing: aim for at most ~17 characters per second of display time — when speech is fast, use fewer, tighter words per card (still complete phrases).
 - PUNCTUATE properly so the reader always knows where the thought stands: a card that COMPLETES a sentence ends with . ! or ?; a card continuing into the next ends with a comma or nothing (use … only for a genuinely suspended thought). Never leave a sentence-final card unpunctuated.
-- VARIETY like real TikTok: "v" picks the render — "bold" (UPPERCASE white, heavy outline — the default, use for most cards) with "hl" naming ONE power word from the card to highlight bright yellow; "box" (white bubble, sentence case — use for calm/quote moments, ~a third of cards); "live" (word-by-word highlight — exactly ONE card per clip, the single punchiest sentence). Mix them by feel, not a fixed pattern.
+- "hl" optionally names ONE power word from the card to highlight (bright yellow). Use it on roughly half the cards.
 - The FIRST card lands within 1.3s of ${start.toFixed(1)}s; the FINAL card ends cleanly on the last spoken word before ${end.toFixed(1)}s.
 - Cover ALL the speech. No commentary, no markdown.` },
       { role: 'user', content: `Hook (for tone): ${hook}\nTimed Arabic words (sec word):\n${wordLines}` },
@@ -133,16 +133,25 @@ Rules:
         const t = String(o.t || '').trim();
         if (!t || isNaN(a) || isNaN(b) || b - a < 0.25) continue;
         if (t.split(/\s+/).length < 2 && cards.length) continue; // no fragment cards
-        let text = t;
-        if (text.length > 88) {
-          const cut = text.lastIndexOf(' ', 88);
-          text = text.slice(0, cut > 40 ? cut : 88);
+        // Hard cap ≤46 chars: split over-long cards at the best word boundary
+        // with time divided by character share (never a text wall).
+        const hl = typeof o.hl === 'string' ? o.hl.slice(0, 24) : undefined;
+        const pieces: { t: string; frac: number }[] = [];
+        let rest = t;
+        while (rest.length > 46) {
+          const cut = rest.lastIndexOf(' ', 42);
+          if (cut < 12) break;
+          pieces.push({ t: rest.slice(0, cut), frac: 0 });
+          rest = rest.slice(cut + 1);
         }
-        cards.push({
-          a, b, t: text,
-          v: o.v === 'box' || o.v === 'live' ? o.v : 'bold',
-          hl: typeof o.hl === 'string' ? o.hl.slice(0, 24) : undefined,
-        });
+        pieces.push({ t: rest, frac: 0 });
+        const totalLen = pieces.reduce((n, p2) => n + p2.t.length, 0) || 1;
+        let tCur = a;
+        for (const piece of pieces) {
+          const span = (b - a) * (piece.t.length / totalLen);
+          cards.push({ a: tCur, b: tCur + span, t: piece.t, hl: hl && piece.t.toUpperCase().includes(hl.toUpperCase()) ? hl : undefined });
+          tCur += span;
+        }
       } catch {}
     }
     cards.sort((x, y) => x.a - y.a);
@@ -153,7 +162,7 @@ Rules:
     // (~15 chars/sec, min 0.9s), borrowing any gap before the next card.
     for (let i = 0; i < cards.length; i++) {
       const c = cards[i];
-      const need = c.a + Math.max(0.9, c.t.length / 15);
+      const need = c.a + Math.max(0.8, c.t.length / 15);
       const limit = i + 1 < cards.length ? cards[i + 1].a - 0.05 : end;
       if (c.b < need) c.b = Math.max(c.b, Math.min(need, limit));
     }
@@ -163,19 +172,12 @@ Rules:
       const c = cards[i];
       const n = cards[i + 1];
       const cps = c.t.length / Math.max(0.3, c.b - c.a);
-      const joined = (/[.!?]$/.test(c.t) ? c.t : c.t.replace(/[,…]?$/, ',')) + ' ' + n.t;
-      if (cps > 19 && joined.length <= 88) {
+      const joined = c.t.replace(/[,…]?$/, ',') + ' ' + n.t;
+      if (cps > 19 && joined.length <= 42 && !/[.!?]$/.test(c.t)) {
         cards.splice(i, 2, { a: c.a, b: n.b, t: joined });
       } else {
         i++;
       }
-    }
-    // Variety guard: quotes stay in bubbles, but if the model over-picked
-    // the box look, flip the rest to bold so the mix reads like real TikTok.
-    const isQuote = (t: string) => /^["\u201c].*["\u201d]$/.test(t.trim()) || /\(Quran /.test(t);
-    const boxes = cards.filter((c) => c.v === 'box' && !isQuote(c.t));
-    if (boxes.length > cards.length * 0.45) {
-      boxes.forEach((c, i) => { if (i % 3 !== 2) c.v = 'bold'; });
     }
     return cards.length >= 3 ? cards : null;
   } catch {
@@ -244,7 +246,7 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
             start: cStart,
             end: cEnd,
             hook: clip.hook || '',
-            style: normalizeStyle(clip.style || 'tiktok'),
+            style: normalizeStyle(clip.style || 'bubble'),
             cards: cards || undefined,
             framing: clip.framing === 'fit' ? 'fit' : 'fill',
           });

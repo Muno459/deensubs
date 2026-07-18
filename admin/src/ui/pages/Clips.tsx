@@ -10,7 +10,8 @@ import { useToast } from '../components/Toast';
 import { AiFillButton } from '../components/AiFill';
 
 const STYLES = [
-  { id: 'tiktok', label: 'TikTok Native', desc: 'Black text in white bubbles — the default TikTok caption look' },
+  { id: 'bubble', label: 'TikTok Bubble', desc: 'Black text in white bubbles, two clean lines — the native look' },
+  { id: 'tiktok', label: 'TikTok Bold', desc: 'UPPERCASE white with heavy outline and a yellow keyword' },
   { id: 'bold', label: 'Bold', desc: 'UPPERCASE white, heavy outline — maximum stopping power' },
   { id: 'accent', label: 'Accent', desc: 'DeenSubs cream + teal karaoke accent — elegant' },
   { id: 'minimal', label: 'Minimal', desc: 'Clean white, thin outline — calm and premium' },
@@ -22,7 +23,7 @@ function Composer({ job, moment, onClose, onCreated }: { job: any; moment: Momen
   const [start, setStart] = useState(moment?.start ?? 0);
   const [end, setEnd] = useState(moment?.end ?? Math.min(45, job.duration || 45));
   const [hook, setHook] = useState(moment?.hook ?? '');
-  const [style, setStyle] = useState('tiktok');
+  const [style, setStyle] = useState('bubble');
   const [framing, setFraming] = useState<'fill' | 'fit'>('fill');
   const [creating, setCreating] = useState(false);
   const [cues, setCues] = useState<any[]>([]);

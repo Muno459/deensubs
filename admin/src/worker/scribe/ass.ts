@@ -7,10 +7,10 @@
 
 import type { Cue } from './types';
 
-export type ClipStyle = 'tiktok' | 'bold' | 'accent' | 'minimal';
+export type ClipStyle = 'tiktok' | 'bubble' | 'bold' | 'accent' | 'minimal';
 /** Old rows stored 'gold'; it maps to the teal accent preset. */
 export function normalizeStyle(s: string): ClipStyle {
-  return s === 'gold' ? 'accent' : (['tiktok', 'bold', 'accent', 'minimal'].includes(s) ? (s as ClipStyle) : 'tiktok');
+  return s === 'gold' ? 'accent' : (['tiktok', 'bubble', 'bold', 'accent', 'minimal'].includes(s) ? (s as ClipStyle) : 'bubble');
 }
 
 const PLAY_W = 1080;
@@ -60,7 +60,7 @@ function groupCue(cue: Cue, clipStart: number): { start: number; end: number; te
   return out;
 }
 
-export type CaptionCard = { a: number; b: number; t: string; v?: 'box' | 'bold' | 'live'; hl?: string };
+export type CaptionCard = { a: number; b: number; t: string; hl?: string };
 
 export function buildClipAss(opts: {
   cues: Cue[]; // cues overlapping the clip range, absolute times
@@ -76,11 +76,19 @@ export function buildClipAss(opts: {
   const arabic = cues.some((c) => hasArabic(c.text));
   const capFont = arabic ? 'Noto Naskh Arabic' : 'Geist';
 
-  // Style presets — Fontsize is in PlayRes units (1080x1920)
+  // Style presets — ONE locked caption treatment per style, whole clip.
+  // Fontsize is in PlayRes units (1080x1920)
   const styles: Record<ClipStyle, { caption: string; title: string; upper: boolean }> = {
     tiktok: {
-      // TikTok's native caption bubble: black text in a white per-line box
-      // (BorderStyle=4; Outline doubles as box padding), sentence case, static.
+      // TikTok Bold: UPPERCASE white, heavy black outline, one static
+      // yellow keyword per card (hl). The dominant creator look.
+      caption: `Style: Caption,${arabic ? 'Noto Naskh Arabic' : 'Inter'},84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,11,3.5,2,70,70,560,1`,
+      title: `Style: Title,Inter,56,&H00141414,&H00141414,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.3,0,4,18,0,8,70,70,110,1`,
+      upper: true,
+    },
+    bubble: {
+      // TikTok's native caption bubble: black text in white per-line boxes
+      // (BorderStyle=4; Outline doubles as box padding), sentence case.
       caption: `Style: Caption,${arabic ? 'Noto Naskh Arabic' : 'Inter'},76,&H00141414,&H00141414,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.3,0,4,16,0,2,70,70,560,1`,
       title: `Style: Title,Inter,56,&H00141414,&H00141414,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.3,0,4,18,0,8,70,70,110,1`,
       upper: false,
@@ -113,42 +121,27 @@ export function buildClipAss(opts: {
   }
 
   if (cards?.length) {
-    // LLM-directed cards, three TikTok variants: white bubble (box),
-    // bold outline with one bright-yellow keyword (bold), and
-    // word-by-word live highlight (live). Static — no scale animation.
+    // LLM-directed cards. ONE locked treatment for the whole clip:
+    // tiktok = bold uppercase + static yellow keyword; bubble = white boxes.
+    // Static rendering only — tiny fade, no per-word events, no flicker.
     const YEL = '\\c&H00E7FF&';
     const WHT = '\\c&HFFFFFF&';
     for (const card of cards) {
       const a = Math.max(0, card.a - start);
       const b = Math.min(dur, card.b - start);
       if (b - a < 0.15) continue;
-      if (style !== 'tiktok') {
-        const text = preset.upper && !hasArabic(card.t) ? card.t.toUpperCase() : card.t;
-        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(60,40)}${esc(text)}`);
-        continue;
-      }
-      const v = card.v === 'box' || hasArabic(card.t) ? 'box' : card.v === 'live' ? 'live' : 'bold';
-      if (v === 'box') {
-        // \\blur rounds the bubble corners
-        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(40,30)\\blur2.4}${esc(card.t)}`);
-      } else if (v === 'live') {
-        // one event per word window; the active word glows yellow
-        const ws = card.t.toUpperCase().split(/\s+/).filter(Boolean);
-        const total = ws.reduce((n, w) => n + w.length, 0) || 1;
-        let t0 = a;
-        for (let wi = 0; wi < ws.length; wi++) {
-          const t1 = wi === ws.length - 1 ? b : t0 + (b - a) * (ws[wi].length / total);
-          const line = ws.map((w, j) => (j === wi ? `{${YEL}}${esc(w)}{${WHT}}` : esc(w))).join(' ');
-          events.push(`Dialogue: 0,${assTime(t0)},${assTime(t1)},CaptionBold,,0,0,0,,{\\fad(20,10)}${line}`);
-          t0 = t1;
-        }
-      } else {
-        // bold outline, UPPERCASE, one yellow keyword
+      if (style === 'tiktok' && !hasArabic(card.t)) {
         const up = card.t.toUpperCase();
         const hl = (card.hl || '').toUpperCase().trim();
         let line = esc(up);
         if (hl && up.includes(hl)) line = esc(up).replace(esc(hl), `{${YEL}}${esc(hl)}{${WHT}}`);
-        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},CaptionBold,,0,0,0,,{\\fad(40,30)}${line}`);
+        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(40,30)}${line}`);
+      } else if (style === 'bubble' || (style === 'tiktok' && hasArabic(card.t))) {
+        // \\blur rounds the bubble corners
+        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(40,30)\\blur2.4}${esc(card.t)}`);
+      } else {
+        const text = preset.upper && !hasArabic(card.t) ? card.t.toUpperCase() : card.t;
+        events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,{\\fad(60,40)}${esc(text)}`);
       }
     }
   } else {
@@ -179,7 +172,6 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${preset.caption}
-${style === 'tiktok' ? `Style: CaptionBold,${arabic ? 'Noto Naskh Arabic' : 'Inter'},86,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,11,3.5,2,70,70,560,1` : ''}
 ${preset.title}
 
 [Events]

@@ -951,7 +951,7 @@ app.post('/api/clips/batch', async (c) => {
   for (const m of moments.slice(0, count || 3)) {
     const id = genJobId();
     await c.env.DB.prepare('INSERT INTO clips (id, job_id, start, end, hook, style, framing, status) VALUES (?,?,?,?,?,?,?,?)')
-      .bind(id, job_id, m.start, m.end, m.hook, 'tiktok', 'fill', 'running').run();
+      .bind(id, job_id, m.start, m.end, m.hook, 'bubble', 'fill', 'running').run();
     try {
       await c.env.CLIP_WORKFLOW.create({ id: 'clip-' + id, params: { clipId: id } });
       created.push(id);
@@ -978,7 +978,7 @@ app.post('/api/clips', async (c) => {
   if (end - start > 180) return c.json({ error: 'clips are capped at 3 minutes' }, 400);
   const id = genJobId();
   await c.env.DB.prepare('INSERT INTO clips (id, job_id, start, end, hook, style, framing, status) VALUES (?,?,?,?,?,?,?,?)')
-    .bind(id, job_id, start, end, hook || '', style || 'tiktok', framing === 'fit' ? 'fit' : 'fill', 'running').run();
+    .bind(id, job_id, start, end, hook || '', style || 'bubble', framing === 'fit' ? 'fit' : 'fill', 'running').run();
   try {
     await c.env.CLIP_WORKFLOW.create({ id: 'clip-' + id, params: { clipId: id } });
   } catch (err: any) {
