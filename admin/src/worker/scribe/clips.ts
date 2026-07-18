@@ -14,12 +14,12 @@ export async function suggestMoments(env: ScribeEnv, cues: Cue[], count = 5): Pr
   // Group ~4 cues per line: full-lecture coverage in a compact prompt
   // (the old version sliced to 30k chars = only the first ~15% of a long talk)
   const lines: string[] = [];
-  for (let i = 0; i < cues.length; i += 4) {
-    const g = cues.slice(i, i + 4);
-    lines.push(`${i}-${Math.min(i + 3, cues.length - 1)}\t${Math.round(g[0].start)}-${Math.round(g[g.length - 1].end)}s\t${g.map((c) => c.text).join(' ')}`);
+  for (let i = 0; i < cues.length; i += 8) {
+    const g = cues.slice(i, i + 8);
+    lines.push(`${i}\t${Math.round(g[0].start)}s\t${g.map((c) => c.text).join(' ').slice(0, 160)}`);
   }
-  const linesText = lines.join('\n');
-  const raw = await llmChat(
+  const linesText = lines.join('\n').slice(0, 45000);
+  const callOnce = (model?: string, maxTokens = 2000) => llmChat(
     env,
     [
       {
@@ -36,15 +36,35 @@ Answer with ONLY a JSON array (no markdown):
 [{"start_cue": n, "end_cue": n, "hook": "5-9 word title that stops the scroll", "reason": "why this works", "score": 1-10}]
 Pick the ${count} strongest, ranked best first. hook: punchy, faithful to content, no clickbait lies, keep honorifics (ﷺ, ﷻ).`,
       },
-      { role: 'user', content: `Cue groups (indexRange, seconds, text):\n${linesText.slice(0, 90000)}` },
+      { role: 'user', content: `Cue groups (startIndex, startSeconds, text — indices are cue numbers, use them for start_cue/end_cue):\n${linesText}` },
     ],
-    2000
+    maxTokens,
+    model
   );
-  const start = raw.indexOf('[');
-  const end = raw.lastIndexOf(']');
+  let raw = '';
+  try {
+    raw = await callOnce();
+  } catch {}
+  if (!raw.includes('[')) {
+    // fallback: the strong model with a shorter budget
+    try { raw = await callOnce('ag/claude-sonnet-4-6', 2500); } catch (e: any) {
+      throw new Error('moment scan failed on both models: ' + String(e?.message || e).slice(0, 150));
+    }
+  }
+  let start = raw.indexOf('[');
+  let end = raw.lastIndexOf(']');
   let arr: any[] = [];
   if (start >= 0 && end > start) {
     try { arr = JSON.parse(raw.slice(start, end + 1)); } catch {}
+  }
+  if (!arr.length) {
+    // model answered but not in-format — one strong-model retry
+    try {
+      raw = await callOnce('ag/claude-sonnet-4-6', 2500);
+      start = raw.indexOf('[');
+      end = raw.lastIndexOf(']');
+      if (start >= 0 && end > start) arr = JSON.parse(raw.slice(start, end + 1));
+    } catch {}
   }
   const moments: Moment[] = [];
   for (const m of Array.isArray(arr) ? arr : []) {
@@ -76,24 +96,29 @@ export async function aiClipDirection(
   words?: { text: string; start: number; end: number }[]
 ): Promise<CaptionCard[] | null> {
   try {
-    const lines = cues.map((c) => `${c.start.toFixed(1)}-${c.end.toFixed(1)}\t${c.text}`).join('\n');
+    // Source-first: the director translates DIRECTLY from the timed Arabic
+    // words, producing caption-native English phrasing with exact beat timing.
     const wordLines = (words || [])
-      .slice(0, 700)
+      .slice(0, 800)
       .map((w) => `${w.start.toFixed(2)} ${w.text}`)
-      .join(' | ');
+      .join('\n');
+    if (!wordLines) return null;
     const raw = await llmChat(env, [
-      { role: 'system', content: `You are a viral short-form video editor (TikTok/Reels style). Break the subtitle text into rapid caption CARDS. Output ONLY JSONL, one card per line:
-{"a":ABS_START_SEC,"b":ABS_END_SEC,"t":"1-5 words","em":1,"fx":"punch"}
+      { role: 'system', content: `You are a professional subtitle editor for viral Islamic short-form clips. You receive the ORIGINAL ARABIC speech as timestamped words. Translate it into English caption CARDS. Output ONLY JSONL, one card per line:
+{"a":ABS_START_SEC,"b":ABS_END_SEC,"t":"a complete readable English phrase"}
 Rules:
-- Time card boundaries to the ORIGINAL ARABIC WORD TIMESTAMPS provided — cards must flip exactly when the corresponding words are spoken.
-- Cards in order, non-overlapping, 0.4-1.8s each, ideally 1-4 words, max ~28 characters.
-- "t" uses the translation cues' words VERBATIM — never paraphrase. Break at meaningful phrase boundaries.
-- "em":1 marks the single most impactful card per sentence (inverted bubble). Use sparingly.
-- "fx":"punch" on emphasis beats (max one per 4s). "fx":"flash" for a hard transition/revelation beat (max 2). "fx":"shake" ONLY for one truly explosive moment, if any.
-- Virality: the FIRST card lands within 1.3 seconds of clip start (the scroll-stop window) and should carry a value/curiosity punch; keep relentless card rhythm through second 3 (the drop-off cliff); no dead air over speech; the FINAL card ends cleanly on the last word — no lingering (clean endings loop better, and replays are the heaviest ranking signal).
-- Cover ALL spoken text between ${start.toFixed(1)}s and ${end.toFixed(1)}s. No commentary, no markdown.` },
-      { role: 'user', content: `Hook: ${hook}\nTranslation cues (absStart-absEnd\ttext):\n${lines}\n\nArabic word timings (sec word | ...):\n${wordLines}` },
-    ], 4000, 'ag/claude-sonnet-4-6');
+- Every card is a COMPLETE, STANDALONE phrase: 3-9 words, max ~80 characters, a full clause with its own meaning. NEVER 1-2 word fragments, never a phrase that only makes sense with the previous card.
+- "a" = the timestamp of the first Arabic word the card covers; "b" = when its last word ends. Cards appear exactly as their words are spoken. Typical card: 1.2-3.5s. No overlaps, chronological.
+- Translation: faithful, natural, dignified. Keep honorifics (Allah ﷻ, the Prophet ﷺ, RA/AS). Established transliterations stay (fiqh, dua, Sharia...). Quranic quotes use established translation wording.
+- The FIRST card lands within 1.3s of ${start.toFixed(1)}s; the FINAL card ends cleanly on the last spoken word before ${end.toFixed(1)}s.
+- Cover ALL the speech. No commentary, no markdown.` },
+      { role: 'user', content: `Hook (for tone): ${hook}\nTimed Arabic words (sec word):\n${wordLines}` },
+    ], 6000, 'ag/claude-opus-4-6-thinking').catch(() =>
+      llmChat(env, [
+        { role: 'system', content: 'Return the JSONL caption cards as instructed.' },
+        { role: 'user', content: `Hook: ${hook}\nTimed Arabic words:\n${wordLines}` },
+      ], 4000, 'ag/claude-sonnet-4-6')
+    );
     const cards: CaptionCard[] = [];
     for (let line of raw.split('\n')) {
       line = line.trim().replace(/^```(json)?|```$/g, '').trim();
@@ -104,7 +129,13 @@ Rules:
         const b = Math.min(end, Number(o.b));
         const t = String(o.t || '').trim();
         if (!t || isNaN(a) || isNaN(b) || b - a < 0.25) continue;
-        cards.push({ a, b, t: t.slice(0, 60), em: o.em ? 1 : 0, fx: ['punch', 'shake', 'flash'].includes(o.fx) ? o.fx : undefined });
+        if (t.split(/\s+/).length < 2 && cards.length) continue; // no fragment cards
+        let text = t;
+        if (text.length > 88) {
+          const cut = text.lastIndexOf(' ', 88);
+          text = text.slice(0, cut > 40 ? cut : 88);
+        }
+        cards.push({ a, b, t: text });
       } catch {}
     }
     cards.sort((x, y) => x.a - y.a);
@@ -162,31 +193,35 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
                 .map((w: any) => ({ text: w.text, start: w.start, end: w.end }));
             }
           } catch {}
-          const cards = await aiClipDirection(env, cues, clip.start, clip.end, clip.hook || '', words);
+          // Snap bounds to actual speech (mechanical dead-air removal)
+          let cStart = clip.start;
+          let cEnd = clip.end;
+          if (words.length) {
+            cStart = Math.max(clip.start, Math.round((words[0].start - 0.25) * 10) / 10);
+            cEnd = Math.min(clip.end, Math.round((words[words.length - 1].end + 0.35) * 10) / 10);
+            if (cEnd - cStart < 5) { cStart = clip.start; cEnd = clip.end; }
+          }
+          const cards = await aiClipDirection(env, cues, cStart, cEnd, clip.hook || '', words);
           const ass = buildClipAss({
             cues,
-            start: clip.start,
-            end: clip.end,
+            start: cStart,
+            end: cEnd,
             hook: clip.hook || '',
             style: normalizeStyle(clip.style || 'tiktok'),
             cards: cards || undefined,
             framing: clip.framing === 'fit' ? 'fit' : 'fill',
           });
-          const fx = (cards || [])
-            .filter((c) => c.fx)
-            .map((c) => ({ t: Math.max(0, +(c.a - clip.start).toFixed(2)), type: c.fx }));
+
 
           const start = await containerCall(env, 'clip-' + clipId, '/clip', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               url: `${CDN_BASE}/${job.source_key}`,
-              start: clip.start,
-              end: clip.end,
+              start: cStart,
+              end: cEnd,
               ass_b64: btoa(unescape(encodeURIComponent(ass))),
               framing: clip.framing === 'fit' ? 'fit' : 'fill',
-              fx: cards ? fx : undefined,
-              kb: cards ? 1 : 0,
               poster: 1,
             }),
           });

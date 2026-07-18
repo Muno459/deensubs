@@ -941,6 +941,27 @@ app.post('/api/clips/suggest', async (c) => {
   }
 });
 
+// One click: find the top moments and render them all
+app.post('/api/clips/batch', async (c) => {
+  const { job_id, count } = await c.req.json();
+  const obj = await c.env.MEDIA_BUCKET.get(`scribe/${job_id}/cues.json`);
+  if (!obj) return c.json({ error: 'Job cues not found' }, 404);
+  const moments = await suggestMoments(c.env as any, await obj.json(), Math.min(count || 3, 5));
+  const created: string[] = [];
+  for (const m of moments.slice(0, count || 3)) {
+    const id = genJobId();
+    await c.env.DB.prepare('INSERT INTO clips (id, job_id, start, end, hook, style, framing, status) VALUES (?,?,?,?,?,?,?,?)')
+      .bind(id, job_id, m.start, m.end, m.hook, 'tiktok', 'fill', 'running').run();
+    try {
+      await c.env.CLIP_WORKFLOW.create({ id: 'clip-' + id, params: { clipId: id } });
+      created.push(id);
+    } catch (err: any) {
+      await c.env.DB.prepare("UPDATE clips SET status='error', error=? WHERE id=?").bind(err.message, id).run();
+    }
+  }
+  return c.json({ created, moments: moments.slice(0, count || 3) });
+});
+
 app.get('/api/clips', async (c) => {
   const jobId = c.req.query('job_id');
   const q = jobId

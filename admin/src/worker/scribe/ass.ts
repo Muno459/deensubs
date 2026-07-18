@@ -60,7 +60,7 @@ function groupCue(cue: Cue, clipStart: number): { start: number; end: number; te
   return out;
 }
 
-export type CaptionCard = { a: number; b: number; t: string; em?: number; fx?: string };
+export type CaptionCard = { a: number; b: number; t: string };
 
 export function buildClipAss(opts: {
   cues: Cue[]; // cues overlapping the clip range, absolute times
@@ -105,12 +105,10 @@ export function buildClipAss(opts: {
 
   const events: string[] = [];
 
-  // Hook title: TikTok bubble. Fill mode = upper-center (~21% height, clear
-  // of faces which sit mid-frame); fit mode = in the top blur band.
+  // Hook title: plain top placement (alignment 8 + style margin)
   if (hook.trim()) {
-    const y = framing === 'fit' ? 150 : 190; // fill mode: high enough to clear faces (heads sit mid-frame at full-bleed zoom)
     events.push(
-      `Dialogue: 1,${assTime(0.15)},${assTime(Math.max(0.5, dur - 0.1))},Title,,0,0,0,,{\\fad(220,180)\\an8\\pos(540,${y})}${esc(hook.trim())}`
+      `Dialogue: 1,${assTime(0.15)},${assTime(Math.max(0.5, dur - 0.1))},Title,,0,0,0,,{\\fad(220,180)}${esc(hook.trim())}`
     );
   }
 
@@ -122,13 +120,8 @@ export function buildClipAss(opts: {
       if (b - a < 0.15) continue;
       const text = preset.upper && !hasArabic(card.t) ? card.t.toUpperCase() : card.t;
       const isTiktok = style === 'tiktok';
-      // Wrap-neutral animation only: \fscy scales height without changing
-      // line width, so libass never re-wraps mid-display (the old \fscx pop
-      // temporarily widened glyphs and re-broke lines). Sizes are static.
-      const pop = isTiktok
-        ? '{\\fad(40,30)' + (card.em ? '\\c&HFFFFFF&\\4c&H141414&' : '') + '}'
-        : '{\\fad(60,40)\\t(0,110,\\fscy108)\\t(110,190,\\fscy100)' +
-          (card.em ? '\\c&HA2B345&' : '') + '}';
+      // Readability first: same clean bubble for every card, no scale animation.
+      const pop = isTiktok ? '{\\fad(40,30)}' : '{\\fad(60,40)}';
       events.push(`Dialogue: 0,${assTime(a)},${assTime(b)},Caption,,0,0,0,,${pop}${esc(text)}`);
     }
   } else {

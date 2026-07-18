@@ -134,6 +134,7 @@ export default function Clips() {
   const [jobId, setJobId] = useState('');
   const [playing, setPlaying] = useState<any | null>(null);
   const [moments, setMoments] = useState<Moment[] | null>(null);
+  const [batching, setBatching] = useState(false);
   const [finding, setFinding] = useState(false);
   const [findErr, setFindErr] = useState('');
   const [composing, setComposing] = useState<{ job: any; moment: Moment | null } | null>(null);
