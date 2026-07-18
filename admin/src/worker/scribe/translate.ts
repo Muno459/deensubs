@@ -7,6 +7,7 @@
 // JSONL cues {"w":[first,last],"t":"translation"}.
 
 import type { Cue, ScribeEnv, Word } from './types';
+import { findQuranQuotes, citeQuote, type QuranQuote } from './quran';
 
 export type CleanWord = { i: number; text: string; start: number; end: number; speaker: string };
 
@@ -255,7 +256,40 @@ export async function translateWords(
 ): Promise<Cue[]> {
   const words = cleanWords(allWords);
   if (!words.length) throw new Error('No speech words found in ASR result');
-  const windows = makeWindows(words);
+  type WCue = Cue & { w: [number, number] };
+
+  // Quranic quotes → LOCKED cues with canonical Uthmani text + Saheeh
+  // International translation and citation. The LLM never sees these spans.
+  let quotes: QuranQuote[] = [];
+  try { quotes = await findQuranQuotes(env, words); } catch {}
+  const lockedCues: WCue[] = [];
+  for (const qt of quotes) {
+    const cite = citeQuote(qt.verses);
+    qt.verses.forEach((v, vi) => {
+      const first = words[v.wStart];
+      const last = words[v.wEnd];
+      if (!first || !last) return;
+      lockedCues.push({
+        start: first.start,
+        end: Math.max(last.end, first.start + 0.6),
+        text: `“${v.en}”` + (vi === qt.verses.length - 1 ? ` (Quran ${cite})` : ''),
+        source: v.ar,
+        w: [v.wStart, v.wEnd],
+        q: v.key,
+      });
+    });
+  }
+
+  // LLM windows cover only the unlocked ranges
+  const lockedSpans = quotes.map((q) => [q.wStart, q.wEnd] as [number, number]).sort((a, b) => a[0] - b[0]);
+  const freeRanges: [number, number][] = [];
+  let cursor = 0;
+  for (const [a, b] of lockedSpans) {
+    if (a > cursor) freeRanges.push([cursor, a - 1]);
+    cursor = Math.max(cursor, b + 1);
+  }
+  if (cursor < words.length) freeRanges.push([cursor, words.length - 1]);
+  const windows = freeRanges.flatMap(([a, b]) => makeWindows(words.slice(a, b + 1)));
 
   // Windows are independent (context tail is best-effort), so run in batches
   const results: { w: [number, number]; t: string }[][] = new Array(windows.length);
@@ -274,7 +308,6 @@ export async function translateWords(
   // Stitch windows → cues with exact word-derived timing (keep word spans
   // internally so long cues can be SPLIT at real word boundaries, never
   // truncated into silent gaps)
-  type WCue = Cue & { w: [number, number] };
   let cues: WCue[] = [];
   for (let i = 0; i < windows.length; i++) {
     for (const c of results[i]) {
@@ -290,11 +323,30 @@ export async function translateWords(
       });
     }
   }
+  cues.push(...lockedCues);
   cues.sort((a, b) => a.start - b.start);
 
   // Split cues longer than ~8.5s at sentence/clause boundaries, timing the
   // split at the proportional source-word boundary
+  const splitLocked = (cue: WCue): WCue[] => {
+    const dur = cue.end - cue.start;
+    if (dur <= 12 || cue.w[1] - cue.w[0] < 4) return [cue];
+    const text = cue.text;
+    const marks = [...text.matchAll(/[.!?؟…,;:—]\s+/g)].map((m) => m.index! + m[0].length);
+    if (!marks.length) return [cue];
+    const mid = text.length / 2;
+    const splitAt = marks.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p));
+    if (splitAt < 10 || text.length - splitAt < 10) return [cue];
+    const share = splitAt / text.length;
+    const wSplit = Math.max(cue.w[0] + 1, Math.min(cue.w[1], cue.w[0] + Math.round((cue.w[1] - cue.w[0]) * share)));
+    const srcWords = cue.source.split(' ');
+    const sSplit = Math.max(1, Math.min(srcWords.length - 1, Math.round(srcWords.length * share)));
+    const a: WCue = { ...cue, end: words[wSplit - 1].end, w: [cue.w[0], wSplit - 1], text: text.slice(0, splitAt).trim(), source: srcWords.slice(0, sSplit).join(' ') };
+    const b: WCue = { ...cue, start: words[wSplit].start, w: [wSplit, cue.w[1]], text: text.slice(splitAt).trim(), source: srcWords.slice(sSplit).join(' ') };
+    return [...splitLocked(a), ...splitLocked(b)];
+  };
   const splitOnce = (cue: WCue): WCue[] => {
+    if (cue.q) return splitLocked(cue);
     const dur = cue.end - cue.start;
     if (dur <= 8.5 || cue.w[1] - cue.w[0] < 4) return [cue];
     const text = cue.text;
@@ -359,11 +411,13 @@ export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): P
   const runBatch = async (offset: number) => {
     const batch = out.slice(offset, offset + BATCH);
     const lines = batch.map((c, i) => {
+      if ((c as any).q) return null; // canonical verse cue — locked
       const dur = Math.max(0.3, c.end - c.start);
       const cps = Math.round(c.text.length / dur);
       const flag = cps > 20 ? ` [CPS ${cps} TOO FAST — condense]` : '';
       return `${offset + i}\nSRC: ${c.source}\nTRN: ${c.text}${flag}`;
-    }).join('\n\n');
+    }).filter(Boolean).join('\n\n');
+    if (!lines) return;
     try {
       const raw = await llmChat(env, [
         { role: 'system', content: `You are a Netflix-standard subtitle QA reviewer for Islamic lectures (${targetLang} target). Review source↔translation pairs. Output ONLY JSONL fixes for cues that need them (mistranslation, dropped meaning, awkward phrasing, CPS violations to condense, honorific mistakes):
@@ -376,7 +430,7 @@ Rules: max ~84 chars, keep honorifics (Allah ﷻ, Prophet ﷺ, RA/AS/RH), keep t
         if (!t.startsWith('{')) continue;
         try {
           const f = JSON.parse(t);
-          if (typeof f.i === 'number' && typeof f.t === 'string' && out[f.i] && f.t.trim()) {
+          if (typeof f.i === 'number' && typeof f.t === 'string' && out[f.i] && !(out[f.i] as any).q && f.t.trim()) {
             out[f.i] = { ...out[f.i], text: f.t.trim() };
             fixes++;
           }

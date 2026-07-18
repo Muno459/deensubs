@@ -145,14 +145,15 @@ export function SubtitleEditor({ job, onClose }: { job: any; onClose: () => void
                       {fmtDuration(c.start)} → {fmtDuration(c.end)}
                     </button>
                     {flags.map((f) => <Badge key={f} tone="red" className="px-1.5 py-0 text-[9px]">{f}</Badge>)}
-                    <button
+                    {(c as any).q && <Badge tone="gold" className="px-1.5 py-0 text-[9px]">Quran {(c as any).q}</Badge>}
+                    {!(c as any).q && <button
                       onClick={() => retranslate(i)}
                       disabled={busy !== null}
                       title="Retranslate this cue with AI"
                       className="ml-auto flex h-6 w-6 items-center justify-center rounded text-faint opacity-0 transition-all hover:bg-gold/10 hover:text-gold-bright group-hover:opacity-100"
                     >
                       {busy === i ? <Spinner className="h-3 w-3" /> : <Icon name="sparkles" className="h-3 w-3" />}
-                    </button>
+                    </button>}
                   </div>
                   <p dir="auto" className="mt-1 font-arabic text-[13px] leading-snug text-muted">{c.source}</p>
                   <textarea

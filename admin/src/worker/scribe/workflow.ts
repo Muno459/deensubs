@@ -7,6 +7,7 @@ import { runAsr, loadAsr } from './asr';
 import { translateWords, qaPass, takeUsage } from './translate';
 import { generateMetadata, generateChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
+import { assessQuality } from './quality';
 import { renderSrt } from './srt';
 import { updateJob, type Cue, type ScribeEnv } from './types';
 
@@ -164,6 +165,18 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         if (lang === primary) {
           primaryCueCount = tr.cueCount;
           await updateJob(env.DB, jobId, { cue_count: tr.cueCount });
+          // Quality report: mechanical metrics + cross-lingual semantic audit
+          const qKey = `scribe/${jobId}/quality.json`;
+          if (!tr.cached || !(await env.MEDIA_BUCKET.head(qKey))) {
+            await step.do('quality', { retries: { limit: 1, delay: '30 seconds' }, timeout: '15 minutes' }, async () => {
+              try {
+                const r = await assessQuality(env as any, jobId, cuesKey);
+                return { grade: r.grade, score: r.score, flagged: r.flags.length };
+              } catch (e: any) {
+                return { error: String(e?.message || e).slice(0, 200) };
+              }
+            });
+          }
         }
       }
       await markStage(env, jobId, 'render');

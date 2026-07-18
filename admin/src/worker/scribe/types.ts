@@ -27,6 +27,7 @@ export type Cue = {
   end: number; // seconds, from words[w1].end
   text: string; // translated text
   source: string; // original-language text (joined words)
+  q?: string; // Quran verse key ("2:255") — canonical LOCKED cue, never LLM-edited
 };
 
 export type AsrResult = {

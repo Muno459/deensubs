@@ -9,7 +9,7 @@ import { api } from '../lib/api';
 import { fmtDuration } from '../lib/format';
 import { Spinner, Badge } from './Primitives';
 
-type Cue = { start: number; end: number; text: string; source: string };
+type Cue = { start: number; end: number; text: string; source: string; q?: string };
 
 declare global {
   interface Window {
@@ -156,7 +156,7 @@ export function PreviewPlayer({ job }: { job: any }) {
             <div className="pointer-events-none absolute inset-x-0 bottom-14 flex justify-center px-6">
               <p
                 dir="auto"
-                className="max-w-[85%] rounded-md bg-black/75 px-3 py-1.5 text-center text-[15px] font-medium leading-snug text-white shadow-lg"
+                className={`max-w-[85%] rounded-md bg-black/75 px-3 py-1.5 text-center text-[15px] font-medium leading-snug text-white shadow-lg ${active.q ? 'italic' : ''}`}
               >
                 {showSource ? active.source : active.text}
               </p>

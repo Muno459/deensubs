@@ -655,6 +655,26 @@ app.post('/api/upload', async (c) => {
   return c.json({ key });
 });
 
+// Quality report (mechanical metrics + semantic audit); POST re-runs it
+app.get('/api/scribe/:id/quality', async (c) => {
+  const lang = c.req.query('lang');
+  const suffix = lang && lang !== 'primary' ? `.${lang}` : '';
+  const obj = await c.env.MEDIA_BUCKET.get(`scribe/${c.req.param('id')}/quality${suffix}.json`);
+  if (!obj) return c.json({ error: 'No quality report yet' }, 404);
+  return c.json(await obj.json());
+});
+app.post('/api/scribe/:id/quality', async (c) => {
+  const id = c.req.param('id');
+  const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
+  if (!job) return c.json({ error: 'Not found' }, 404);
+  try {
+    const { assessQuality } = await import('./scribe/quality');
+    return c.json(await assessQuality(c.env as any, id, `scribe/${id}/cues.json`));
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e).slice(0, 300) }, 500);
+  }
+});
+
 // AI drafts any admin form (see ai/fill.ts for kinds)
 app.post('/api/ai/fill', async (c) => {
   const body = await c.req.json().catch(() => ({}));

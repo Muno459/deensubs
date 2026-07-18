@@ -142,6 +142,79 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   );
 }
 
+function QualityCard({ job }: { job: any }) {
+  const q = useApi<any>(job.status === 'done' ? `/api/scribe/${job.id}/quality` : null);
+  const [rerunning, setRerunning] = useState(false);
+  const toast = useToast();
+  if (job.status !== 'done') return null;
+  const r = q.data;
+  const gradeColor = (g: string) =>
+    g === 'A' ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+    : g === 'B' ? 'text-gold-bright border-gold/40 bg-gold/10'
+    : g === 'C' ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+    : 'text-red-400 border-red-500/40 bg-red-500/10';
+  return (
+    <div className="rounded-xl border border-hairline bg-panel/60 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted">Quality report</p>
+        <button
+          disabled={rerunning}
+          onClick={async () => {
+            setRerunning(true);
+            try { await api(`/api/scribe/${job.id}/quality`, { method: 'POST' }); q.refetch(); toast.push('Quality re-assessed'); }
+            catch (e: any) { toast.push(e.message, 'error'); }
+            setRerunning(false);
+          }}
+          className="text-[11px] text-muted hover:text-cream"
+        >
+          {rerunning ? 'Measuring...' : 'Re-measure'}
+        </button>
+      </div>
+      {!r ? (
+        <p className="text-[12px] text-faint">{q.loading ? 'Loading...' : 'No report yet — hit Re-measure.'}</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-xl border text-xl font-bold ${gradeColor(r.grade)}`}>{r.grade}</div>
+            <div className="text-[12px] leading-relaxed text-muted">
+              <span className="font-semibold text-cream">{r.score}/100</span> · {r.metrics.cues} cues · {r.metrics.coverage_pct}% coverage
+              {r.metrics.verse_cues > 0 && <> · <span className="text-gold-bright">{r.metrics.verse_cues} Quran verse cues</span></>}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {[
+              ['Semantic flags', `${r.metrics.audit_flagged}/${r.metrics.audit_cues}`],
+              ['CPS p90', r.metrics.cps_p90],
+              ['Gaps >8s', r.metrics.gaps_over_8s],
+              ['Arabic leak', r.metrics.arabic_leak],
+              ['Overlaps', r.metrics.overlaps],
+              ['>10s cues', r.metrics.cues_over_10s],
+            ].map(([k, v]) => (
+              <div key={k as string} className="rounded-lg bg-inset px-2 py-1.5">
+                <p className="text-[13px] font-semibold tabular-nums text-cream">{v as any}</p>
+                <p className="text-[9px] uppercase tracking-wider text-faint">{k}</p>
+              </div>
+            ))}
+          </div>
+          {r.flags?.length > 0 && (
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted">Lowest-similarity cues (review these)</p>
+              <div className="max-h-40 space-y-1 overflow-y-auto">
+                {r.flags.slice(0, 12).map((f: any) => (
+                  <div key={f.i} className="rounded-lg bg-inset px-2 py-1.5 text-[11px]">
+                    <span className="font-mono text-faint">{fmtDuration(f.start)} · sim {f.sim}</span>
+                    <p className="truncate text-cream/80">{f.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose: () => void }) {
   const meta = useApi<any>(open ? '/api/meta' : null);
   const [form, setForm] = useState<any>(null);
@@ -468,6 +541,7 @@ function JobDetail({ job }: { job: any }) {
             </a>
           )}
         </div>
+        <QualityCard job={job} />
       </div>
       <div>
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted">Subtitle preview</p>
@@ -853,6 +927,9 @@ export default function Scribe() {
                       {j.language_code && <span>{j.language_code} → {j.target_lang}</span>}
                       {j.download_method && <span className="font-mono text-[10px]">{j.download_method}</span>}
                       {j.duration > 0 && <span>{fmtDuration(j.duration)}</span>}
+                      {(() => { try { const q = JSON.parse(j.quality || ''); return q?.grade ? (
+                        <span className={`rounded px-1 font-bold ${q.grade === 'A' ? 'text-emerald-400' : q.grade === 'B' ? 'text-gold-bright' : q.grade === 'C' ? 'text-amber-400' : 'text-red-400'}`}>{q.grade}</span>
+                      ) : null; } catch { return null; } })()}
                       {j.cue_count > 0 && <span>{j.cue_count} cues</span>}
                       {j.asr_seconds > 0 && (
                         <span className="tabular-nums" title="Estimated cost: ElevenLabs ASR + LLM tokens">
