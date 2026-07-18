@@ -105,10 +105,10 @@ app.get('/api/overview', async (c) => {
   ]);
   return c.json({
     stats,
-    dailyHits: (dailyHits as any).data || [],
+    dailyHits: aeRows(dailyHits),
     topVideos: topVideos.results,
-    topPages: (topPages as any).data || [],
-    countries: (countries as any).data || [],
+    topPages: aeRows(topPages),
+    countries: aeRows(countries),
     recentComments: recentComments.results,
     recentVideos: recentVideos.results,
     scribeJobs: scribeJobs.results,
@@ -130,11 +130,11 @@ app.get('/api/analytics', async (c) => {
     queryAE(c.env, `SELECT concat(blob9, ' · ', blob10, ' · ', blob8) AS user_agent, count() AS hits FROM deensubs_analytics WHERE ${W} AND blob9 != '' GROUP BY user_agent ORDER BY hits DESC LIMIT 20`),
   ]);
   return c.json({
-    dailyHits: (dailyHits as any).data || [],
-    topPages: (topPages as any).data || [],
-    topVideos: (topVideos as any).data || [],
-    referers: (referers as any).data || [],
-    agents: (agents as any).data || [],
+    dailyHits: aeRows(dailyHits),
+    topPages: aeRows(topPages),
+    topVideos: aeRows(topVideos),
+    referers: aeRows(referers),
+    agents: aeRows(agents),
   });
 });
 
@@ -298,7 +298,7 @@ app.get('/api/watch', async (c) => {
     queryAE(c.env, `SELECT blob2 AS event_type, count() AS count FROM deensubs_analytics WHERE ${W} GROUP BY event_type ORDER BY count DESC`),
     queryAE(c.env, `SELECT index1 AS video_slug, count() AS events, round(avg(if(double2 > 0, double1 * 100.0 / double2, 0)), 1) AS avg_pct FROM deensubs_analytics WHERE ${W} AND index1 != '' AND index1 != 'unknown' GROUP BY video_slug ORDER BY events DESC LIMIT 25`),
   ]);
-  const compRows = ((completion as any).data || []).map((r: any) => ({ ...r, viewers: r.events }));
+  const compRows = aeRows(completion).map((r: any) => ({ ...r, viewers: r.events }));
   const slugs = [...new Set(compRows.map((r: any) => r.video_slug).filter(Boolean))];
   let titles: Record<string, string> = {};
   if (slugs.length) {
@@ -308,7 +308,7 @@ app.get('/api/watch', async (c) => {
     titles = Object.fromEntries((rows.results as any[]).map((r) => [r.slug, r.title]));
   }
   return c.json({
-    events: (events as any).data || [],
+    events: aeRows(events),
     completion: compRows.map((r: any) => ({ ...r, title: titles[r.video_slug] || r.video_slug })),
     topWatched: compRows.map((r: any) => ({ video_slug: r.video_slug, unique_viewers: r.viewers, events: r.events, title: titles[r.video_slug] || r.video_slug })),
     connections: [],
@@ -614,6 +614,17 @@ app.get('/api/scribe/:id/file', async (c) => {
     },
   });
 });
+
+/** AE SQL returns numerics as strings — coerce every row value that looks numeric. */
+function aeRows(res: any): any[] {
+  return (res?.data || []).map((row: any) => {
+    const out: any = {};
+    for (const [k, v] of Object.entries(row)) {
+      out[k] = typeof v === 'string' && v !== '' && !isNaN(Number(v)) && k !== 'day' ? Number(v) : v;
+    }
+    return out;
+  });
+}
 
 /** Terminate the job's most recent workflow instance (tracked in wf_instance),
  * falling back to the base id. Prevents zombie instances from re-writing artifacts. */

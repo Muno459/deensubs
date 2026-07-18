@@ -587,9 +587,13 @@ class Handler(BaseHTTPRequestHandler):
                      "-f", "rawvideo", "-"], capture_output=True, timeout=60)
                 rgb = probe.stdout[:3]
                 if len(rgb) == 3:
-                    # Wider key + 2px alpha erosion shaves the pink fringe ring
+                    # Full deterministic finish: chroma key -> 3px fringe shave ->
+                    # bottom alpha fade (last 10%) -> transparent side/top pad.
+                    # Geometry never trusts the model; expressions need no dims.
                     chain = (f"colorkey=0x{rgb.hex().upper()}:0.25:0.12,format=rgba,"
-                             "split[c][a];[a]alphaextract,erosion,erosion[sh];[c][sh]alphamerge")
+                             "split[c][a];[a]alphaextract,erosion,erosion,erosion[sh];[c][sh]alphamerge,"
+                             "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*clip((H-Y)/(0.10*H),0,1)',"
+                             "pad='ceil(iw*1.16/2)*2':'ceil(ih*1.05/2)*2':(ow-iw)/2:oh-ih:color=black@0")
             if not chain:
                 chain = (
                      "colortemperature=temperature=10000:mix=0.9,"
