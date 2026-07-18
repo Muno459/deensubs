@@ -636,6 +636,25 @@ app.post('/api/scribe/:id/resume', async (c) => {
   return c.json({ ok: true, resumed: true, instance });
 });
 
+// Fetch the video track for an audio-only job: transcript + subtitles are
+// reused, only download (+ render/done) re-run. Unlocks publish + native preview.
+app.post('/api/scribe/:id/fetch-video', async (c) => {
+  const id = c.req.param('id');
+  const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
+  if (!job) return c.json({ error: 'Not found' }, 404);
+  if (/\.(mp4|webm|mkv|mov)$/i.test(job.source_key || '')) return c.json({ error: 'Job already has video' }, 400);
+  await terminateJob(c.env, job);
+  if (job.source_key) await c.env.MEDIA_BUCKET.delete(job.source_key).catch(() => {});
+  const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
+  const instance = `${id}-v${genJobId().slice(0, 4)}`;
+  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', step = 'download', error = NULL, download_pct = 0, source_key = NULL, full_video = 1, wf_instance = ? WHERE id = ?").bind(instance, id).run();
+  await c.env.SCRIBE_WORKFLOW.create({
+    id: instance,
+    params: { jobId: id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: true },
+  });
+  return c.json({ ok: true, fetching: true });
+});
+
 // Force a fresh translation (clears cue artifacts, keeps download + ASR)
 app.post('/api/scribe/:id/retranslate-all', async (c) => {
   const id = c.req.param('id');

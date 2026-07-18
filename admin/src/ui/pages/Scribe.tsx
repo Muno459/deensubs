@@ -43,14 +43,17 @@ function parseTimes(raw: string | null): Record<string, number> {
 
 function stageDuration(times: Record<string, number>, stage: string, now: number): number | null {
   // Visual stages; `translate` spans the internal translate + render steps.
+  // Prefer explicit end marks (survive resumes); fall back to next-stage start.
   const order = ['download', 'asr', 'translate', 'metadata', 'done'];
   const start = times[stage];
   if (!start) return null;
-  let end: number | undefined;
+  const end = times[`${stage}_end`];
+  if (end && end >= start) return (end - start) / 1000;
+  let next: number | undefined;
   for (let i = order.indexOf(stage) + 1; i < order.length; i++) {
-    if (times[order[i]]) { end = times[order[i]]; break; }
+    if (times[order[i]]) { next = times[order[i]]; break; }
   }
-  return ((end ?? now) - start) / 1000;
+  return ((next ?? now) - start) / 1000;
 }
 
 function fmtSecs(s: number | null): string {
@@ -293,6 +296,7 @@ function JobDetail({ job }: { job: any }) {
     return () => clearInterval(t);
   }, [dub.status, job.id]);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [fetchingVideo, setFetchingVideo] = useState(false);
   const isVideoSource = /\.(mp4|webm|mkv|mov)$/i.test(job.source_key || '');
   useEffect(() => {
     if (!job.srt_key) return;
@@ -364,9 +368,23 @@ function JobDetail({ job }: { job: any }) {
                 <Icon name="video" className="h-3 w-3" /> Publish as video
               </button>
             ) : (
-              <span className="inline-flex items-center rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] text-faint" title="yt-dlp downloads audio only; publish requires a direct video-file URL">
-                audio-only — not publishable
-              </span>
+              <button
+                disabled={fetchingVideo}
+                onClick={async () => {
+                  setFetchingVideo(true);
+                  try {
+                    await api(`/api/scribe/${job.id}/fetch-video`, { method: 'POST' });
+                    toast.push('Fetching video — publish unlocks when it lands');
+                  } catch (e: any) {
+                    toast.push(e.message, 'error');
+                  }
+                  setFetchingVideo(false);
+                }}
+                title="Downloads the video for this URL (transcript + subtitles reused), then Publish unlocks"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-ink transition-all hover:bg-gold-bright active:scale-[0.97] disabled:opacity-50"
+              >
+                <Icon name="video" className="h-3 w-3" /> {fetchingVideo ? 'Starting...' : 'Fetch video to publish'}
+              </button>
             )
           )}
           {job.status === 'done' && (

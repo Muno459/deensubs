@@ -17,12 +17,22 @@ export type ScribeParams = {
   fullVideo?: boolean;
 };
 
+/** Atomically stamp a stage timestamp via SQL json_patch — no read-modify-write
+ * race between concurrent instances. Keep-first unless force: real work restamps
+ * its own start/end; cache-hit replays leave prior timings untouched. */
+async function stampTime(env: ScribeEnv, jobId: string, key: string, force = true) {
+  await env.DB.prepare(
+    `UPDATE scribe_jobs SET stage_times = CASE
+       WHEN ?1 = 1 OR json_extract(COALESCE(stage_times, '{}'), ?2) IS NULL
+       THEN json_patch(COALESCE(stage_times, '{}'), ?3)
+       ELSE stage_times END
+     WHERE id = ?4`
+  ).bind(force ? 1 : 0, '$.' + key, JSON.stringify({ [key]: new Date().toISOString() }), jobId).run();
+}
+
 async function markStage(env: ScribeEnv, jobId: string, stage: string, extra: Record<string, any> = {}) {
-  const row: any = await env.DB.prepare('SELECT stage_times FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-  let times: Record<string, string> = {};
-  try { times = JSON.parse(row?.stage_times || '{}'); } catch {}
-  if (!times[stage]) times[stage] = new Date().toISOString();
-  await updateJob(env.DB, jobId, { step: stage, stage_times: JSON.stringify(times), error: null, ...extra });
+  await stampTime(env, jobId, stage, false);
+  await updateJob(env.DB, jobId, { step: stage, error: null, ...extra });
 }
 
 async function addTokens(env: ScribeEnv, jobId: string, tokens: number) {
@@ -52,10 +62,13 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             return {
               key: row.source_key, method: (row.download_method || 'direct') as any,
               contentType: '', bytes: 0, title: row.title, channel: row.channel,
-              thumbUrl: row.thumb_url, durationSec: row.duration || 0,
+              thumbUrl: row.thumb_url, durationSec: row.duration || 0, cached: true,
             };
           }
-          return download(env, jobId, url, !!fullVideo);
+          await stampTime(env, jobId, 'download');
+          const res = await download(env, jobId, url, !!fullVideo);
+          await stampTime(env, jobId, 'download_end');
+          return { ...res, cached: false };
         }
       );
       const row: any = await env.DB.prepare('SELECT title, channel, thumb_url FROM scribe_jobs WHERE id = ?').bind(jobId).first();
@@ -84,10 +97,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
                 asrKey, languageCode: data.language_code || '',
                 wordCount: words.length,
                 durationSec: data.audio_duration_secs || words[words.length - 1].end || 0,
+                cached: true,
               };
             }
           }
-          return runAsr(env, jobId, dl.key, dl.durationSec || 0);
+          await stampTime(env, jobId, 'asr');
+          const res = await runAsr(env, jobId, dl.key, dl.durationSec || 0);
+          await stampTime(env, jobId, 'asr_end');
+          return { ...res, cached: false };
         }
       );
       await markStage(env, jobId, 'translate', {
@@ -100,6 +117,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
 
       // 3. Translate — one pass per target language (primary first)
       let primaryCueCount = 0;
+      let anyFresh = false;
       for (const lang of langs) {
         const cuesKey = lang === primary ? `scribe/${jobId}/cues.json` : `scribe/${jobId}/cues.${lang}.json`;
         const tr = await step.do(
@@ -111,6 +129,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               const cues: any[] = await existing.json();
               if (cues.length) return { cuesKey, cueCount: cues.length, tokens: 0, cached: true };
             }
+            if (lang === primary) await stampTime(env, jobId, 'translate');
             const data = await loadAsr(env, asr.asrKey);
             const cues = await translateWords(env, data.words, lang);
             await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(cues), {
@@ -120,6 +139,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           }
         );
         await addTokens(env, jobId, tr.tokens);
+        if (!tr.cached) anyFresh = true;
 
         // Netflix QA repair pass (skipped when cues came from a finished run)
         if (!tr.cached) {
@@ -168,6 +188,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         }
         return { srtKey, srcKey: `scribe/${jobId}/source.srt` };
       });
+      if (anyFresh) await stampTime(env, jobId, 'translate_end');
       await markStage(env, jobId, 'metadata', { srt_key: out.srtKey, srt_source_key: out.srcKey });
 
       // 5. Metadata + chapters from the transcript
@@ -175,6 +196,13 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         'metadata',
         { retries: { limit: 2, delay: '15 seconds' }, timeout: '10 minutes' },
         async () => {
+          const cur: any = await env.DB.prepare('SELECT title, title_ar, description, chapters FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+          if (cur?.title && cur?.description) {
+            let chapters: any[] = [];
+            try { chapters = JSON.parse(cur.chapters || '[]'); } catch {}
+            return { title: cur.title, title_ar: cur.title_ar, description: cur.description, chapters, tokens: 0 };
+          }
+          await stampTime(env, jobId, 'metadata');
           const obj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
           if (!obj) throw new Error('cues missing from R2');
           const cues = await obj.json<Cue[]>();
@@ -185,6 +213,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               httpMetadata: { contentType: 'application/json' },
             });
           }
+          await stampTime(env, jobId, 'metadata_end');
           return { ...m, chapters, tokens: takeUsage() };
         }
       );

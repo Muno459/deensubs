@@ -76,8 +76,13 @@ def run_download(job_id: str, url: str, cookies: str | None = None, video: bool 
     last_err = "no attempts"
     for proxy in attempts:
         if video:
-            fmt = ["-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*[height<=1080]+ba/b",
-                   "--merge-output-format", "mp4"]
+            # h264 first (universal browser decode; ext=mp4 alone can grab AV1),
+            # faststart so moov leads and CDN playback/seek starts instantly
+            fmt = ["-f", "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*[height<=1080]+ba/b",
+                   "--merge-output-format", "mp4",
+                   "--remux-video", "mp4",
+                   "--ppa", "Merger:-movflags +faststart",
+                   "--ppa", "VideoRemuxer:-movflags +faststart"]
         else:
             # Native audio stream, no re-encode: ffmpeg conversion of long
             # lectures crawls on fractional vCPUs and ElevenLabs accepts
