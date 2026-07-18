@@ -8,6 +8,7 @@ import { BlurFade } from '../components/BlurFade';
 import { BorderBeam } from '../components/BorderBeam';
 import { Icon } from '../components/Icon';
 import { AiFillButton } from '../components/AiFill';
+import { ImageField, R2Picker } from '../components/ImageField';
 
 type Video = {
   id: number; title: string; title_ar: string | null; slug: string; description: string | null;
@@ -21,31 +22,6 @@ const EMPTY: Partial<Video> = {
   title: '', title_ar: '', slug: '', description: '', source: '', duration: 0,
   video_key: '', srt_key: '', srt_ar_key: '', thumb_key: '', category_id: null, scholar_id: null,
 };
-
-function R2Picker({ open, onClose, prefix, onPick }: { open: boolean; onClose: () => void; prefix: string; onPick: (key: string) => void }) {
-  const { data, loading } = useApi<any>(open ? `/api/r2?prefix=${encodeURIComponent(prefix)}` : null);
-  return (
-    <Modal open={open} onClose={onClose} title={`Browse R2 · ${prefix || 'root'}`}>
-      {loading ? (
-        <div className="flex h-40 items-center justify-center"><Spinner /></div>
-      ) : (
-        <div className="max-h-96 space-y-1 overflow-y-auto">
-          {(data?.objects || []).map((o: any) => (
-            <button
-              key={o.key}
-              onClick={() => { onPick(o.key); onClose(); }}
-              className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-gold/10"
-            >
-              <span className="min-w-0 truncate font-mono text-[12px] text-cream/85">{o.key}</span>
-              <span className="shrink-0 text-[11px] text-muted">{fmtBytes(o.size)}</span>
-            </button>
-          ))}
-          {!data?.objects?.length && <p className="p-3 text-[13px] text-muted">Nothing under this prefix.</p>}
-        </div>
-      )}
-    </Modal>
-  );
-}
 
 function KeyField({ label, value, onChange, prefix }: { label: string; value: string; onChange: (v: string) => void; prefix: string }) {
   const [browsing, setBrowsing] = useState(false);
@@ -142,7 +118,7 @@ function VideoForm({ initial, meta, onDone, onCancel }: { initial: Partial<Video
       <KeyField label="Video key" prefix="videos/" value={form.video_key || ''} onChange={(v) => set('video_key', v)} />
       <KeyField label="Subtitles (EN)" prefix="subs/" value={form.srt_key || ''} onChange={(v) => set('srt_key', v)} />
       <KeyField label="Subtitles (AR)" prefix="subs/" value={form.srt_ar_key || ''} onChange={(v) => set('srt_ar_key', v)} />
-      <KeyField label="Thumbnail" prefix="thumbs/" value={form.thumb_key || ''} onChange={(v) => set('thumb_key', v)} />
+      <ImageField label="Thumbnail" prefix="thumbs/" value={form.thumb_key || ''} onChange={(v) => set('thumb_key', v)} />
       {err && <ErrorNote message={err} />}
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>

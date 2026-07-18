@@ -41,7 +41,15 @@ async function copyObject(env: PublishEnv, from: string, to: string): Promise<vo
 }
 
 /** Ask the container for candidate thumbnail frames; store them under the job. */
-export async function generateThumbCandidates(env: PublishEnv, jobId: string): Promise<{ key: string; ts: number }[]> {
+export async function generateThumbCandidates(env: PublishEnv, jobId: string, refresh = false): Promise<{ key: string; ts: number }[]> {
+  const manifestKey = `scribe/${jobId}/thumbs.json`;
+  if (!refresh) {
+    const m = await env.MEDIA_BUCKET.get(manifestKey);
+    if (m) {
+      const cached: { key: string; ts: number }[] = await m.json();
+      if (cached.length) return cached;
+    }
+  }
   const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(jobId).first();
   if (!job?.source_key) throw new Error('job has no source media');
   const dur = job.duration || 60;
@@ -56,8 +64,8 @@ export async function generateThumbCandidates(env: PublishEnv, jobId: string): P
   const { id } = (await start.json()) as { id: string };
 
   let info: any = null;
-  for (let i = 0; i < 36; i++) {
-    await new Promise((r) => setTimeout(r, 2500));
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
     const st = await containerCall(env, 'thumbs-' + jobId, `/jobs/${id}`);
     info = st.ok ? await st.json() : null;
     if (info?.status === 'done' || info?.status === 'error') break;
@@ -76,6 +84,9 @@ export async function generateThumbCandidates(env: PublishEnv, jobId: string): P
   }
   containerCall(env, 'thumbs-' + jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
   if (!candidates.length) throw new Error('no thumbnail candidates produced');
+  await env.MEDIA_BUCKET.put(manifestKey, JSON.stringify(candidates), {
+    httpMetadata: { contentType: 'application/json' },
+  });
   return candidates;
 }
 

@@ -5,6 +5,7 @@ import { GlowCard, SectionTitle, PageLoader, Button, Modal, Field, inputCls, Bad
 import { BlurFade } from '../components/BlurFade';
 import { Icon } from '../components/Icon';
 import { AiFillButton } from '../components/AiFill';
+import { ImageField } from '../components/ImageField';
 import { useToast } from '../components/Toast';
 
 function CategoryForm({ initial, onDone, onCancel }: { initial?: any; onDone: () => void; onCancel: () => void }) {
@@ -86,14 +87,8 @@ function ScholarForm({ initial, onDone, onCancel }: { initial?: any; onDone: () 
       <Field label="Bio">
         <textarea rows={3} className={inputCls + ' resize-y'} value={form.bio || ''} onChange={(e) => setForm({ ...form, bio: e.target.value })} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Photo key">
-          <input className={inputCls + ' font-mono'} value={form.photo || ''} onChange={(e) => setForm({ ...form, photo: e.target.value })} placeholder="scholars/..." />
-        </Field>
-        <Field label="Hero photo key">
-          <input className={inputCls + ' font-mono'} value={form.photo_hero || ''} onChange={(e) => setForm({ ...form, photo_hero: e.target.value })} placeholder="scholars/..." />
-        </Field>
-      </div>
+      <ImageField label="Photo" prefix="scholars/" value={form.photo || ''} onChange={(key) => setForm({ ...form, photo: key })} />
+      <ImageField label="Hero photo" hint="Wide banner used on the scholar page" prefix="scholars/" value={form.photo_hero || ''} onChange={(key) => setForm({ ...form, photo_hero: key })} />
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         <Button disabled={saving || !form.name} onClick={async () => {

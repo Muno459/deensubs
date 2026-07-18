@@ -307,6 +307,48 @@ def run_clip(job_id: str, payload: dict) -> None:
             os.remove(ass_path)
 
 
+def run_thumbs(job_id: str, url: str, timestamps: list, variants: bool = False) -> None:
+    """Extract one frame per timestamp. faststart mp4 + range-capable CDN makes
+    -ss on a URL input a near-instant HTTP seek, so frames run in parallel.
+    variants=True additionally emits 320/480/640w WebP for each frame."""
+    files: dict = {}
+    errors: list = []
+    lock = threading.Lock()
+
+    def grab(i: int, ts: float) -> None:
+        out = os.path.join(DIR, f"{job_id}-t{i}.jpg")
+        p = subprocess.run(
+            ["ffmpeg", "-y", "-ss", str(ts), "-i", url, "-frames:v", "1",
+             "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", out],
+            capture_output=True, text=True, timeout=120)
+        if p.returncode != 0 or not os.path.exists(out):
+            with lock:
+                errors.append(f"t{i}: {(p.stderr or '')[-200:]}")
+            return
+        with lock:
+            files[f"t{i}.jpg"] = out
+        if variants:
+            for w in (320, 480, 640):
+                vout = os.path.join(DIR, f"{job_id}-t{i}-{w}w.webp")
+                vp = subprocess.run(
+                    ["ffmpeg", "-y", "-i", out, "-vf", f"scale={w}:-2", "-quality", "82", vout],
+                    capture_output=True, text=True, timeout=60)
+                if vp.returncode == 0 and os.path.exists(vout):
+                    with lock:
+                        files[f"t{i}-{w}w.webp"] = vout
+
+    threads = [threading.Thread(target=grab, args=(i, float(ts))) for i, ts in enumerate(timestamps)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    with jobs_lock:
+        if files:
+            jobs[job_id].update(status="done", files=files, names=list(files.keys()))
+        else:
+            jobs[job_id].update(status="error", error="; ".join(errors) or "no frames produced")
+
+
 def run_mux(job_id: str, video_url: str, audio_url: str) -> None:
     """Replace a video's audio track (dubbing mux). Streams both inputs."""
     out_path = os.path.join(DIR, f"{job_id}.mp4")

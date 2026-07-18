@@ -6,6 +6,7 @@ import { download } from './download';
 import { runAsr, loadAsr } from './asr';
 import { translateWords, qaPass, takeUsage } from './translate';
 import { generateMetadata, generateChapters } from './metadata';
+import { generateThumbCandidates } from './publish';
 import { renderSrt } from './srt';
 import { updateJob, type Cue, type ScribeEnv } from './types';
 
@@ -218,6 +219,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         }
       );
       await addTokens(env, jobId, meta.tokens);
+
+      // Pre-generate thumbnail candidates so the publish wizard opens instantly
+      if (/\.(mp4|webm|mkv|mov)$/i.test(dl.key)) {
+        await step.do('thumbs', { retries: { limit: 1, delay: '15 seconds' }, timeout: '5 minutes' }, async () => {
+          const c = await generateThumbCandidates(env as any, jobId).catch(() => []);
+          return { count: c.length };
+        });
+      }
 
       await markStage(env, jobId, 'done', {
         status: 'done',

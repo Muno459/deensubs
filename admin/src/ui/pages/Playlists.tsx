@@ -5,9 +5,10 @@ import { GlowCard, SectionTitle, PageLoader, ErrorNote, Button, Modal, Field, in
 import { BlurFade } from '../components/BlurFade';
 import { Icon } from '../components/Icon';
 import { AiFillButton } from '../components/AiFill';
+import { ImageField } from '../components/ImageField';
 import { useToast } from '../components/Toast';
 
-function PlaylistForm({ initial, onDone, onCancel }: { initial?: any; onDone: () => void; onCancel: () => void }) {
+function PlaylistForm({ initial, onDone, onCancel, videos = [] }: { initial?: any; onDone: () => void; onCancel: () => void; videos?: any[] }) {
   const [form, setForm] = useState<any>(initial || { title: '', title_ar: '', description: '', cover_key: '' });
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -30,9 +31,14 @@ function PlaylistForm({ initial, onDone, onCancel }: { initial?: any; onDone: ()
       <Field label="Description">
         <textarea rows={3} className={inputCls + ' resize-y'} value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
       </Field>
-      <Field label="Cover key" hint="Optional R2 key, e.g. thumbs/some-video.jpg — defaults to the first video's thumbnail on the site">
-        <input className={inputCls + ' font-mono'} value={form.cover_key || ''} onChange={(e) => setForm({ ...form, cover_key: e.target.value })} />
-      </Field>
+      <ImageField
+        label="Cover"
+        hint="Optional — without one, the site uses the first video's thumbnail"
+        prefix="thumbs/"
+        value={form.cover_key || ''}
+        onChange={(key) => setForm({ ...form, cover_key: key })}
+        choices={videos.map((v: any) => ({ key: v.thumb_key, label: v.title }))}
+      />
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         <Button

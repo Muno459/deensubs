@@ -638,6 +638,23 @@ app.post('/api/scribe/:id/resume', async (c) => {
 
 // Fetch the video track for an audio-only job: transcript + subtitles are
 // reused, only download (+ render/done) re-run. Unlocks publish + native preview.
+// Direct image upload to R2 (thumbs/ uploads also mirror into MEDIA_KV,
+// which is where the site serves thumbnails from)
+app.post('/api/upload', async (c) => {
+  const prefix = (c.req.query('prefix') || 'uploads/').replace(/[^\w/-]/g, '');
+  const ct = c.req.header('content-type') || '';
+  if (!/^image\/(jpeg|png|webp|gif|avif)$/.test(ct)) return c.json({ error: 'Image uploads only (jpeg/png/webp/gif/avif)' }, 400);
+  const bytes = await c.req.arrayBuffer();
+  if (bytes.byteLength > 8 * 1024 * 1024) return c.json({ error: 'Max 8MB' }, 400);
+  if (!bytes.byteLength) return c.json({ error: 'Empty upload' }, 400);
+  const ext = ct.split('/')[1].replace('jpeg', 'jpg');
+  const base = (c.req.query('name') || 'image').toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
+  const key = `${prefix}${base}-${Date.now().toString(36)}.${ext}`;
+  await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType: ct } });
+  if (key.startsWith('thumbs/')) await (c.env as any).MEDIA_KV?.put(key, bytes, { metadata: { ct } }).catch(() => {});
+  return c.json({ key });
+});
+
 // AI drafts any admin form (see ai/fill.ts for kinds)
 app.post('/api/ai/fill', async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -706,7 +723,7 @@ import { generateThumbCandidates, publishScribeJob } from './scribe/publish';
 
 app.post('/api/scribe/:id/thumbs', async (c) => {
   try {
-    const candidates = await generateThumbCandidates(c.env as any, c.req.param('id'));
+    const candidates = await generateThumbCandidates(c.env as any, c.req.param('id'), c.req.query('refresh') === '1');
     return c.json({ candidates });
   } catch (err: any) {
     return c.json({ error: err.message }, 400);
