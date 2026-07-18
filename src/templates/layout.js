@@ -56,7 +56,6 @@ ${meta.video ? `<meta name="twitter:player" content="${e(canonical)}"><meta name
 <script>try{var t=localStorage.getItem('ds_theme');var q=new URLSearchParams(location.search).get('theme');if(q==='light'||q==='dark')t=q;if(!t)t='light';document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme='light'}</script>
 <link rel="preconnect" href="${CDN}"><link rel="dns-prefetch" href="${CDN}">
 <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/fonts/cormorant-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>${FONTS_CSS}${CSS}</style></head><body>
 <a href="#main-content" class="skip-link">Skip to content</a>
 ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/bg/pattern-t.png" alt="" loading="lazy" fetchpriority="low" decoding="async" onload="this.classList.add('ld')"><img class="bgp-b" src="/bg/pattern-b.png" alt="" loading="lazy" fetchpriority="low" decoding="async" onload="this.classList.add('ld')"></div>` : ''}

@@ -60,11 +60,11 @@ feeds.get('/robots.txt', (c) => new Response(`User-agent: *\nAllow: /\nDisallow:
 // Service Worker — auto-versioned per deploy
 import BUILD_VERSION from '../scripts/build-version.txt';
 
-const OFFLINE_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline — DeenSubs</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#050507;color:#eae6da;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}.c{max-width:360px}h1{color:#45b3a2;font-size:1.4rem;margin-bottom:.5rem}p{color:#807c72;font-size:.85rem;line-height:1.6;margin-bottom:1.5rem}a{color:#45b3a2;text-decoration:none;padding:.5rem 1.5rem;border:1px solid rgba(62,166,152,.2);border-radius:8px;font-size:.85rem;transition:border-color .2s}a:hover{border-color:#45b3a2}</style></head><body><div class="c"><h1>You\u2019re offline</h1><p>Check your connection and try again. Previously visited pages may still be available.</p><a href="/">Retry</a></div></body></html>`;
+const OFFLINE_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline — DeenSubs</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#eae6da;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}.c{max-width:360px}h1{color:#45b3a2;font-size:1.4rem;margin-bottom:.5rem}p{color:#807c72;font-size:.85rem;line-height:1.6;margin-bottom:1.5rem}a{color:#45b3a2;text-decoration:none;padding:.5rem 1.5rem;border:1px solid rgba(62,166,152,.2);border-radius:8px;font-size:.85rem;transition:border-color .2s}a:hover{border-color:#45b3a2}</style></head><body><div class="c"><h1>You\u2019re offline</h1><p>Check your connection and try again. Previously visited pages may still be available.</p><a href="/">Retry</a></div></body></html>`;
 
 function buildSW(version) {
   return `var V='ds-${version}',IC='ds-img-${version}',MAX=500,
-PRECACHE=['/fonts/outfit-latin.woff2','/fonts/cormorant-latin.woff2','/fonts/amiri-400-arabic.woff2','/fonts/amiri-400-latin.woff2','/favicon.svg'];
+PRECACHE=['/fonts/outfit-latin.woff2','/fonts/amiri-400-arabic.woff2','/fonts/amiri-400-latin.woff2','/favicon.svg'];
 
 self.addEventListener('install',function(e){
   e.waitUntil(caches.open(V).then(function(c){return c.addAll(PRECACHE)}));
