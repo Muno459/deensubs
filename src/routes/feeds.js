@@ -15,6 +15,14 @@ import outfitLatExt from '../fonts/outfit-latin-ext.woff2';
 import outfitLat from '../fonts/outfit-latin.woff2';
 import patternT from '../artifacts/pattern-t.png';
 import patternB from '../artifacts/pattern-b.png';
+/*
+ * pattern-flat.png — alpha mask derived from "Golden Color Traditional Islamic Pattern"
+ * via Vecteezy (Free License): https://www.vecteezy.com/vector-art/47131621
+ * Source EPS: src/artifacts/vecteezy_golden-color-traditional-islamic-pattern_47131621.eps
+ * Regenerate with tools/pattern/make-flat-mask.py. Attribution kept in code only
+ * (owner decision, July 2026) — the Free License expects visible credit; see AGENTS.md.
+ */
+import patternF from '../artifacts/pattern-flat.png';
 import { FAVICON_SVG } from '../components/logo.js';
 
 const FONT_MAP = {
@@ -44,7 +52,7 @@ feeds.get('/fonts/:name', (c) => {
 });
 
 // Background pattern artwork (see layout.js for Vecteezy license/attribution)
-const BG_MAP = { 'pattern-t': patternT, 'pattern-b': patternB };
+const BG_MAP = { 'pattern-t': patternT, 'pattern-b': patternB, 'pattern-flat': patternF };
 feeds.get('/bg/:name', (c) => {
   const data = BG_MAP[c.req.param('name').replace('.png', '')];
   if (!data) return c.text('Not found', 404);

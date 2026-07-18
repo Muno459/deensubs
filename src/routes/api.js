@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { VIDEO_COLS, VIDEO_JOIN, readDB, writeDB } from '../lib/db.js';
-import { getSearchSuggestions } from '../lib/kv-cache.js';
+import { getSearchSuggestions, kvGet } from '../lib/kv-cache.js';
 
 const api = new Hono();
 
@@ -54,6 +54,19 @@ api.get('/api/videos/:slug', async (c) => {
   const video = await getVideo(c.env, slug);
   if (!video) return c.json({ error: 'Not found' }, 404);
   return c.json({ video: { title: video.title, slug: video.slug, description: video.description, source: video.source, category_name: video.category_name, scholar_name: video.scholar_name, views: video.views, likes: video.likes, duration: video.duration, created_at: video.created_at, has_subtitles: !!video.srt_key } });
+});
+
+// Quiz questions for a video — generated from the lecture's subtitles.
+// Read-only: results are never stored; scoring happens entirely client-side.
+// Shape: { questions: [{ q, options: [..], answer: <index>, why?: <string> }] }
+api.get('/api/quiz/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  const data = await kvGet(c.env, 'quiz:' + slug, async () => {
+    const row = await readDB(c.env).prepare('SELECT q.questions FROM quizzes q JOIN videos v ON q.video_id = v.id WHERE v.slug = ? AND v.enabled = 1').bind(slug).first();
+    return row ? JSON.parse(row.questions) : null;
+  }, 3600);
+  if (!data || !data.questions || !data.questions.length) return c.json({ error: 'not_found' }, 404);
+  return c.json(data);
 });
 
 api.post('/api/videos/:slug/like', async (c) => {

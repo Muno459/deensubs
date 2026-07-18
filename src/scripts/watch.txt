@@ -545,3 +545,58 @@ document.querySelectorAll('.sc').forEach(function(card){
     var link=document.createElement('link');link.rel='prefetch';link.href=card.href;document.head.appendChild(link)});
 });
 })();
+
+// ── Quiz yourself — client-side only; nothing is saved ──
+(function(){
+var qzModal=document.getElementById('qz-modal'),qzBody=document.getElementById('qz-body'),qzBtn=document.getElementById('qz-btn');
+if(!qzBtn||!qzModal)return;
+var qSlug=decodeURIComponent(location.pathname.split('/').pop());
+var QZ=null,qi=0,qScore=0,qAnswered=false;
+function qzOpen(){qzModal.classList.add('qz-open');document.body.classList.add('no-scroll');qzLoad()}
+function qzClose(){qzModal.classList.remove('qz-open');document.body.classList.remove('no-scroll')}
+qzBtn.onclick=qzOpen;
+document.getElementById('qz-close').onclick=qzClose;
+qzModal.addEventListener('click',function(ev){if(ev.target===qzModal)qzClose()});
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&qzModal.classList.contains('qz-open'))qzClose()});
+function qesc(t){var d=document.createElement('div');d.textContent=t;return d.innerHTML}
+function qzLoad(){
+  if(QZ){qzIntro();return}
+  qzBody.innerHTML='<div class="qz-state"><p class="qz-muted">Loading quiz…</p></div>';
+  fetch('/api/quiz/'+qSlug).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){QZ=d.questions;qzIntro()})
+  .catch(function(){qzBody.innerHTML='<div class="qz-state"><span class="qz-k">Quiz yourself</span><h3>Coming soon</h3><p class="qz-muted">Questions for this lecture haven&rsquo;t been prepared yet &mdash; check back soon.</p></div>'})
+}
+function qzIntro(){
+  qi=0;qScore=0;
+  qzBody.innerHTML='<div class="qz-state"><span class="qz-k">Quiz yourself</span><h3>'+QZ.length+' questions on this lecture</h3><p class="qz-muted">Test what you retained. You&rsquo;ll see the correct answer after each question &mdash; nothing is saved or graded.</p><button class="qz-primary" id="qz-start">Start quiz</button></div>';
+  document.getElementById('qz-start').onclick=qzQuestion;
+}
+function qzQuestion(){
+  qAnswered=false;var q=QZ[qi];
+  var html='<div class="qz-prog"><span>Question '+(qi+1)+' of '+QZ.length+'</span><div class="qz-bar"><i style="width:'+Math.round(qi/QZ.length*100)+'%"></i></div></div>';
+  html+='<h3 class="qz-q">'+qesc(q.q)+'</h3><div id="qz-opts">';
+  for(var i=0;i<q.options.length;i++)html+='<button class="qz-opt" data-i="'+i+'">'+qesc(q.options[i])+'</button>';
+  html+='</div><p class="qz-why" id="qz-why" hidden></p><button class="qz-primary" id="qz-next" hidden></button>';
+  qzBody.innerHTML=html;
+  var opts=qzBody.querySelectorAll('.qz-opt');
+  opts.forEach(function(o){o.onclick=function(){
+    if(qAnswered)return;qAnswered=true;
+    var pick=+o.dataset.i,right=q.answer;
+    if(pick===right)qScore++;
+    opts.forEach(function(b,bi){b.disabled=true;if(bi===right)b.classList.add('qz-right')});
+    if(pick!==right)o.classList.add('qz-wrong');
+    var why=document.getElementById('qz-why');
+    why.hidden=false;
+    why.innerHTML=(pick===right?'<b class="qz-ok">Correct.</b> ':'<b class="qz-no">Not quite.</b> ')+(q.why?qesc(q.why):'');
+    var next=document.getElementById('qz-next');
+    next.hidden=false;next.textContent=qi+1<QZ.length?'Next question':'See results';
+    next.onclick=function(){qi++;if(qi<QZ.length)qzQuestion();else qzResults()};
+  }});
+}
+function qzResults(){
+  var pct=qScore/QZ.length,msg=pct===1?'Perfect recall, ma sha Allah!':pct>=0.6?'Solid retention &mdash; a rewatch will lock it in.':'Worth another watch &mdash; repetition builds retention.';
+  qzBody.innerHTML='<div class="qz-state"><span class="qz-k">Results</span><div class="qz-score">'+qScore+'<span> / '+QZ.length+'</span></div><p class="qz-muted">'+msg+' Your result isn&rsquo;t saved anywhere.</p><div class="qz-row"><button class="qz-primary" id="qz-retake">Retake quiz</button><button class="qz-ghost" id="qz-done">Close</button></div></div>';
+  document.getElementById('qz-retake').onclick=qzIntro;
+  document.getElementById('qz-done').onclick=qzClose;
+}
+if(location.hash==='#quiz')qzOpen();
+})();

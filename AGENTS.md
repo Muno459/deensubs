@@ -102,7 +102,9 @@ Templates import `.min.*` versions. Source files stay readable.
 
 `src/artifacts/pattern-t.png` / `pattern-b.png` — Islamic lattice rendered from a Vecteezy EPS (Free License). The artwork is gold; CSS re-tints it to the teal brand accent via `hue-rotate(131deg)` on `.bgp img`. Served via `/bg/*` (Data import rule in wrangler.toml). Opt-in per page via `meta.pattern: true` — currently only the main browsing pages (home, `/category/*`, `/symposium`). All other pages (watch, search, scholars, etc.) render without it. Images fade in on load (`.bgp img.ld` in main.css).
 
-**License note** — the Vecteezy Free License expects visible attribution; the footer link was removed by owner decision (July 2026), and attribution now lives only in the `src/templates/layout.js` code comment. If Vecteezy compliance is raised, either restore a visible credit or obtain a Pro license.
+`src/artifacts/pattern-flat.png` — alpha mask of a girih star-lattice ("Golden Color Traditional Islamic Pattern" via Vecteezy, Free License, item 47131621). Used in category banner heroes (`.cat-hero::after`) as a wide strip tinted per category color via CSS `mask-image`, fading toward the right. Regenerate with `tools/pattern/make-flat-mask.py`.
+
+**License note** — both Vecteezy artworks are Free License, which expects visible attribution; all visible credits were removed by owner decision (July 2026), and attribution now lives only in code comments (`src/templates/layout.js`, `src/routes/feeds.js`). If Vecteezy compliance is raised, either restore a visible credit or obtain a Pro license.
 
 ## Maintenance Mode
 
