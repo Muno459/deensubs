@@ -44,6 +44,8 @@ export function ImageField({
   prefix,
   hint,
   choices,
+  aiPrompt,
+  gradeable,
 }: {
   label: string;
   value: string;
@@ -51,13 +53,37 @@ export function ImageField({
   prefix: string;
   hint?: string;
   choices?: { key: string; label?: string }[];
+  /** When set, shows a Generate button producing brand art from this prompt */
+  aiPrompt?: string;
+  /** Shows Re-grade: deterministic v2 de-tint (works on real-person portraits) */
+  gradeable?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const [aiBusy, setAiBusy] = useState<string | null>(null);
   const toast = useToast();
   const options = (choices || []).filter((c) => c.key);
+
+  async function aiCall(kind: string, extra: any, doneMsg: string) {
+    setAiBusy(kind);
+    try {
+      const r = await fetch('/api/ai/image', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ kind, prefix, ...extra }),
+      });
+      const j: any = await r.json();
+      if (!r.ok) throw new Error(j.error || 'AI image failed');
+      onChange(j.key);
+      toast.push(doneMsg);
+    } catch (e: any) {
+      toast.push(e.message, 'error');
+    }
+    setAiBusy(null);
+  }
 
   async function upload(f: File) {
     setUploading(true);
@@ -101,6 +127,21 @@ export function ImageField({
           <button type="button" onClick={() => setBrowsing(true)} className={btnCls}>
             <Icon name="folder" className="h-3 w-3" /> Browse
           </button>
+          {aiPrompt && (
+            <button type="button" disabled={aiBusy !== null} onClick={() => aiCall('generate', { prompt: aiPrompt, name: label }, 'Generated')}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/10 px-2.5 py-1.5 text-[11px] font-medium text-gold-bright transition-all hover:bg-gold/20 active:scale-[0.97] disabled:opacity-50">
+              {aiBusy === 'generate' ? <Spinner className="h-3 w-3" /> : <Icon name="sparkles" className="h-3 w-3" />}
+              {aiBusy === 'generate' ? 'Generating (~30s)...' : 'Generate'}
+            </button>
+          )}
+          {gradeable && value && (
+            <button type="button" disabled={aiBusy !== null} onClick={() => aiCall('grade', { imageKey: value }, 'Re-graded to the v2 brand — golden tint removed')}
+              title="Neutralize the old golden tint (deterministic, keeps likeness exactly)"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gold/30 bg-gold/10 px-2.5 py-1.5 text-[11px] font-medium text-gold-bright transition-all hover:bg-gold/20 active:scale-[0.97] disabled:opacity-50">
+              {aiBusy === 'grade' ? <Spinner className="h-3 w-3" /> : <Icon name="sparkles" className="h-3 w-3" />}
+              {aiBusy === 'grade' ? 'Grading...' : 'Re-grade'}
+            </button>
+          )}
           {value && (
             <button type="button" onClick={() => onChange('')} className={btnCls}>
               Clear

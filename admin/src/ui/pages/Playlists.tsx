@@ -35,6 +35,7 @@ function PlaylistForm({ initial, onDone, onCancel, videos = [] }: { initial?: an
         label="Cover"
         hint="Optional — without one, the site uses the first video's thumbnail"
         prefix="thumbs/"
+        aiPrompt={`Minimal elegant cover art for an Islamic lecture series titled "${form.title || 'Islamic lectures'}": subtle teal geometric girih pattern accents on a deep charcoal background, clean editorial composition, flat full-bleed artwork (no book mockup, no frame, no shadow), no text, no people`}
         value={form.cover_key || ''}
         onChange={(key) => setForm({ ...form, cover_key: key })}
         choices={videos.map((v: any) => ({ key: v.thumb_key, label: v.title }))}

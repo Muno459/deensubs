@@ -541,6 +541,34 @@ class Handler(BaseHTTPRequestHandler):
                 jobs[job_id] = {"status": "running", "kind": "mux"}
             threading.Thread(target=run_mux, args=(job_id, payload["video_url"], payload["audio_url"]), daemon=True).start()
             return self._send(200, {"id": job_id})
+        if self.path == "/grade":
+            # Deterministic v2 brand re-grade: neutralize golden/sepia cast +
+            # warm rim glow (verified filter chain), preserve likeness exactly.
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                return self._send(400, {"error": "bad JSON"})
+            g_url = payload.get("url", "")
+            if not re.match(r"^https?://", g_url):
+                return self._send(400, {"error": "valid url required"})
+            out = os.path.join(DIR, f"grade-{uuid.uuid4()}.png")
+            chain = ("colortemperature=temperature=10000:mix=0.9,"
+                     "huesaturation=saturation=-0.85:colors=y+r+m:strength=10,"
+                     "eq=saturation=0.55:brightness=-0.015:contrast=1.05")
+            proc = subprocess.run(["ffmpeg", "-y", "-i", g_url, "-vf", chain, out],
+                                  capture_output=True, text=True, timeout=120)
+            if proc.returncode != 0 or not os.path.exists(out):
+                return self._send(500, {"error": (proc.stderr or "grade failed")[-300:]})
+            size = os.path.getsize(out)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            with open(out, "rb") as fh:
+                shutil.copyfileobj(fh, self.wfile)
+            os.remove(out)
+            return None
         if self.path == "/thumbs":
             try:
                 length = int(self.headers.get("Content-Length", "0"))

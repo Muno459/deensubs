@@ -140,14 +140,14 @@ export function SubtitleEditor({ job, onClose }: { job: any; onClose: () => void
                     active === i ? 'border-gold/40 bg-gold/[0.05]' : 'border-transparent hover:border-hairline hover:bg-white/[0.015]'
                   }`}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex cursor-pointer items-center gap-2" onClick={() => seekTo(i)}>
                     <button onClick={() => seekTo(i)} className="font-mono text-[10px] tabular-nums text-faint hover:text-gold-bright">
                       {fmtDuration(c.start)} → {fmtDuration(c.end)}
                     </button>
                     {flags.map((f) => <Badge key={f} tone="red" className="px-1.5 py-0 text-[9px]">{f}</Badge>)}
                     {(c as any).q && <Badge tone="gold" className="px-1.5 py-0 text-[9px]">Quran {(c as any).q}</Badge>}
                     {!(c as any).q && <button
-                      onClick={() => retranslate(i)}
+                      onClick={(e) => { e.stopPropagation(); retranslate(i); }}
                       disabled={busy !== null}
                       title="Retranslate this cue with AI"
                       className="ml-auto flex h-6 w-6 items-center justify-center rounded text-faint opacity-0 transition-all hover:bg-gold/10 hover:text-gold-bright group-hover:opacity-100"
@@ -155,7 +155,7 @@ export function SubtitleEditor({ job, onClose }: { job: any; onClose: () => void
                       {busy === i ? <Spinner className="h-3 w-3" /> : <Icon name="sparkles" className="h-3 w-3" />}
                     </button>}
                   </div>
-                  <p dir="auto" className="mt-1 font-arabic text-[13px] leading-snug text-muted">{c.source}</p>
+                  <p dir="auto" onClick={() => seekTo(i)} className="mt-1 cursor-pointer font-arabic text-[13px] leading-snug text-muted">{c.source}</p>
                   <textarea
                     value={c.text}
                     onChange={(e) => update(i, e.target.value)}

@@ -87,8 +87,8 @@ function ScholarForm({ initial, onDone, onCancel }: { initial?: any; onDone: () 
       <Field label="Bio">
         <textarea rows={3} className={inputCls + ' resize-y'} value={form.bio || ''} onChange={(e) => setForm({ ...form, bio: e.target.value })} />
       </Field>
-      <ImageField label="Photo" prefix="scholars/" value={form.photo || ''} onChange={(key) => setForm({ ...form, photo: key })} />
-      <ImageField label="Hero photo" hint="Wide banner used on the scholar page" prefix="scholars/" value={form.photo_hero || ''} onChange={(key) => setForm({ ...form, photo_hero: key })} />
+      <ImageField label="Photo" prefix="scholars/" gradeable value={form.photo || ''} onChange={(key) => setForm({ ...form, photo: key })} />
+      <ImageField label="Hero photo" hint="Wide banner used on the scholar page" prefix="scholars/" gradeable value={form.photo_hero || ''} onChange={(key) => setForm({ ...form, photo_hero: key })} />
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         <Button disabled={saving || !form.name} onClick={async () => {

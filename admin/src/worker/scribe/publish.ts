@@ -90,7 +90,7 @@ export async function generateThumbCandidates(env: PublishEnv, jobId: string, re
   return candidates;
 }
 
-export async function publishScribeJob(env: PublishEnv, jobId: string, opts: PublishOptions = {}) {
+export async function publishScribeJob(env: PublishEnv, jobId: string, opts: PublishOptions = {}, ctx?: { waitUntil(p: Promise<any>): void }) {
   const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(jobId).first();
   if (!job) throw new Error('Job not found');
   if (job.status !== 'done') throw new Error(`Job status is ${job.status}, must be done`);
@@ -104,10 +104,11 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   const existing = await env.DB.prepare('SELECT id FROM videos WHERE slug = ?').bind(slug).first();
   if (existing) throw new Error(`slug already exists: ${slug}`);
 
-  // 1. Copy media + subtitles to canonical keys (every target language)
-  const videoKey = `videos/${slug}.${ext}`;
+  // 1. Reference the media in place (copying GBs through the worker was the
+  // publish bottleneck; retention + delete exempt scribe keys referenced by
+  // videos). Small subtitle files still get canonical copies.
+  const videoKey = job.source_key as string;
   const srtKey = `subs/${slug}.srt`;
-  await copyObject(env, job.source_key, videoKey);
   if (job.srt_key) await copyObject(env, job.srt_key, srtKey);
   const isArabicSource = (job.language_code || '').startsWith('ar');
   const srtArKey = isArabicSource && job.srt_source_key ? `subs/${slug}-ar.srt` : null;
@@ -172,6 +173,8 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     langs.length ? JSON.stringify(langs) : null
   ).run();
 
+  // 3b + 4 run in the background — the admin gets their response immediately
+  const indexAndPurge = async () => {
   // 3b. Index cues: FTS for transcript search + Vectorize for semantic search
   try {
     const cuesObj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
@@ -203,6 +206,9 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   // 4. Fresh cache for the site
   const keys = await env.CACHE.list();
   for (const k of keys.keys) await env.CACHE.delete(k.name);
+  };
+  if (ctx) ctx.waitUntil(indexAndPurge());
+  else await indexAndPurge();
 
   return { slug, video_key: videoKey, thumb_key: thumbKey, srt_key: srtKey, srt_ar_key: srtArKey };
 }

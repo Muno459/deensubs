@@ -118,7 +118,7 @@ function VideoForm({ initial, meta, onDone, onCancel }: { initial: Partial<Video
       <KeyField label="Video key" prefix="videos/" value={form.video_key || ''} onChange={(v) => set('video_key', v)} />
       <KeyField label="Subtitles (EN)" prefix="subs/" value={form.srt_key || ''} onChange={(v) => set('srt_key', v)} />
       <KeyField label="Subtitles (AR)" prefix="subs/" value={form.srt_ar_key || ''} onChange={(v) => set('srt_ar_key', v)} />
-      <ImageField label="Thumbnail" prefix="thumbs/" value={form.thumb_key || ''} onChange={(v) => set('thumb_key', v)} />
+      <ImageField label="Thumbnail" prefix="thumbs/" gradeable value={form.thumb_key || ''} onChange={(v) => set('thumb_key', v)} />
       {err && <ErrorNote message={err} />}
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>

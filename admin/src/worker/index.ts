@@ -612,6 +612,8 @@ app.delete('/api/scribe/:id', async (c) => {
   const id = c.req.param('id');
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
   if (!job) return c.json({ error: 'Not found' }, 404);
+  const ref = await c.env.DB.prepare("SELECT slug FROM videos WHERE video_key LIKE 'scribe/' || ? || '/%' LIMIT 1").bind(id).first();
+  if (ref) return c.json({ error: `Published video /watch/${(ref as any).slug} uses this job's media — delete the video first` }, 400);
   await terminateJob(c.env, job);
   // Remove artifacts
   const list = await c.env.MEDIA_BUCKET.list({ prefix: `scribe/${id}/` });
@@ -670,6 +672,17 @@ app.post('/api/scribe/:id/quality', async (c) => {
   try {
     const { assessQuality } = await import('./scribe/quality');
     return c.json(await assessQuality(c.env as any, id, `scribe/${id}/cues.json`));
+  } catch (e: any) {
+    return c.json({ error: String(e?.message || e).slice(0, 300) }, 500);
+  }
+});
+
+// AI image generation / editing / brand re-grade
+app.post('/api/ai/image', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  try {
+    const { aiImage } = await import('./ai/image');
+    return c.json(await aiImage(c.env as any, body.kind, body));
   } catch (e: any) {
     return c.json({ error: String(e?.message || e).slice(0, 300) }, 500);
   }
@@ -753,7 +766,7 @@ app.post('/api/scribe/:id/thumbs', async (c) => {
 app.post('/api/scribe/:id/publish', async (c) => {
   try {
     const opts = await c.req.json();
-    const result = await publishScribeJob(c.env as any, c.req.param('id'), opts);
+    const result = await publishScribeJob(c.env as any, c.req.param('id'), opts, c.executionCtx);
     const user = c.get('user');
     c.executionCtx.waitUntil(
       c.env.DB.prepare('INSERT INTO admin_logs (admin_id, action, target, details) VALUES (?, ?, ?, ?)')
@@ -1141,7 +1154,11 @@ async function retentionSweep(env: Env) {
   const old = await env.DB.prepare(
     "SELECT id FROM scribe_jobs WHERE created_at < datetime('now', '-30 days') AND status IN ('done','error')"
   ).all();
+  // Never delete artifacts a published video references in place
+  const refs = await env.DB.prepare("SELECT video_key FROM videos WHERE video_key LIKE 'scribe/%'").all();
+  const referenced = new Set((refs.results as any[]).map((r) => r.video_key.split('/')[1]));
   for (const row of old.results as any[]) {
+    if (referenced.has(row.id)) continue;
     const list = await env.MEDIA_BUCKET.list({ prefix: `scribe/${row.id}/` });
     for (const obj of list.objects) await env.MEDIA_BUCKET.delete(obj.key);
     await env.DB.prepare('DELETE FROM scribe_jobs WHERE id = ?').bind(row.id).run();
