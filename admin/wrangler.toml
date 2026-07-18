@@ -61,7 +61,7 @@ crons = ["*/5 * * * *"]
 [[containers]]
 class_name = "YtdlpContainer"
 image = "./container/Dockerfile"
-max_instances = 3
+max_instances = 8
 instance_type = "standard-2"
 
 [[durable_objects.bindings]]

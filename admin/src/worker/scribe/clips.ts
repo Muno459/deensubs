@@ -105,13 +105,14 @@ export async function aiClipDirection(
     if (!wordLines) return null;
     const raw = await llmChat(env, [
       { role: 'system', content: `You are a professional subtitle editor for viral Islamic short-form clips. You receive the ORIGINAL ARABIC speech as timestamped words. Translate it into English caption CARDS. Output ONLY JSONL, one card per line:
-{"a":ABS_START_SEC,"b":ABS_END_SEC,"t":"a complete readable English phrase"}
+{"a":ABS_START_SEC,"b":ABS_END_SEC,"t":"a complete readable English phrase","v":"bold","hl":"KEYWORD"}
 Rules:
 - Every card is a COMPLETE, STANDALONE phrase: 3-9 words, max ~80 characters, a full clause with its own meaning. NEVER 1-2 word fragments, never a phrase that only makes sense with the previous card.
 - "a" = the timestamp of the first Arabic word the card covers; "b" = when its last word ends. Cards appear exactly as their words are spoken. Typical card: 1.2-3.5s. No overlaps, chronological.
 - Translation: faithful, natural, dignified. Keep honorifics (Allah ﷻ, the Prophet ﷺ, RA/AS). Established transliterations stay (fiqh, dua, Sharia...). Quranic quotes use established translation wording.
 - Pacing: aim for at most ~17 characters per second of display time — when speech is fast, use fewer, tighter words per card (still complete phrases).
 - PUNCTUATE properly so the reader always knows where the thought stands: a card that COMPLETES a sentence ends with . ! or ?; a card continuing into the next ends with a comma or nothing (use … only for a genuinely suspended thought). Never leave a sentence-final card unpunctuated.
+- VARIETY like real TikTok: "v" picks the render — "bold" (UPPERCASE white, heavy outline — the default, use for most cards) with "hl" naming ONE power word from the card to highlight bright yellow; "box" (white bubble, sentence case — use for calm/quote moments, ~a third of cards); "live" (word-by-word highlight — exactly ONE card per clip, the single punchiest sentence). Mix them by feel, not a fixed pattern.
 - The FIRST card lands within 1.3s of ${start.toFixed(1)}s; the FINAL card ends cleanly on the last spoken word before ${end.toFixed(1)}s.
 - Cover ALL the speech. No commentary, no markdown.` },
       { role: 'user', content: `Hook (for tone): ${hook}\nTimed Arabic words (sec word):\n${wordLines}` },
@@ -137,7 +138,11 @@ Rules:
           const cut = text.lastIndexOf(' ', 88);
           text = text.slice(0, cut > 40 ? cut : 88);
         }
-        cards.push({ a, b, t: text });
+        cards.push({
+          a, b, t: text,
+          v: o.v === 'box' || o.v === 'live' ? o.v : 'bold',
+          hl: typeof o.hl === 'string' ? o.hl.slice(0, 24) : undefined,
+        });
       } catch {}
     }
     cards.sort((x, y) => x.a - y.a);
@@ -158,12 +163,19 @@ Rules:
       const c = cards[i];
       const n = cards[i + 1];
       const cps = c.t.length / Math.max(0.3, c.b - c.a);
-      const joined = c.t.replace(/[,…]?$/, ',') + ' ' + n.t;
+      const joined = (/[.!?]$/.test(c.t) ? c.t : c.t.replace(/[,…]?$/, ',')) + ' ' + n.t;
       if (cps > 19 && joined.length <= 88) {
         cards.splice(i, 2, { a: c.a, b: n.b, t: joined });
       } else {
         i++;
       }
+    }
+    // Variety guard: quotes stay in bubbles, but if the model over-picked
+    // the box look, flip the rest to bold so the mix reads like real TikTok.
+    const isQuote = (t: string) => /^["\u201c].*["\u201d]$/.test(t.trim()) || /\(Quran /.test(t);
+    const boxes = cards.filter((c) => c.v === 'box' && !isQuote(c.t));
+    if (boxes.length > cards.length * 0.45) {
+      boxes.forEach((c, i) => { if (i % 3 !== 2) c.v = 'bold'; });
     }
     return cards.length >= 3 ? cards : null;
   } catch {
@@ -225,6 +237,8 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
             if (cEnd - cStart < 5) { cStart = clip.start; cEnd = clip.end; }
           }
           const cards = await aiClipDirection(env, cues, cStart, cEnd, clip.hook || '', words);
+          await env.DB.prepare('UPDATE clips SET cards = ? WHERE id = ?')
+            .bind(cards ? JSON.stringify(cards) : null, clipId).run().catch(() => {});
           const ass = buildClipAss({
             cues,
             start: cStart,
@@ -236,7 +250,7 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
           });
 
 
-          const start = await containerCall(env, 'clip-' + clipId, '/clip', {
+          const start = await containerCall(env, 'clips', '/clip', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -254,13 +268,13 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
           let info: any = null;
           for (let i = 0; i < 240; i++) {
             await new Promise((r) => setTimeout(r, 5000));
-            const st = await containerCall(env, 'clip-' + clipId, `/jobs/${id}`);
+            const st = await containerCall(env, 'clips', `/jobs/${id}`);
             info = st.ok ? await st.json() : null;
             if (info?.status === 'done' || info?.status === 'error') break;
           }
           if (info?.status !== 'done') throw new Error('render failed: ' + (info?.error || 'timeout'));
 
-          const file = await containerCall(env, 'clip-' + clipId, `/files/${id}`);
+          const file = await containerCall(env, 'clips', `/files/${id}`);
           if (!file.ok || !file.body) throw new Error('clip file fetch failed');
           const key = `clips/${clipId}.mp4`;
           // Clips are small (a minute of 1080x1920) — buffered put is fine
@@ -269,14 +283,14 @@ export class ClipRenderer extends WorkflowEntrypoint<ClipEnv, ClipParams> {
           });
           // Poster frame for the gallery (best-effort)
           try {
-            const poster = await containerCall(env, 'clip-' + clipId, `/files/${id}?name=poster.jpg`);
+            const poster = await containerCall(env, 'clips', `/files/${id}?name=poster.jpg`);
             if (poster.ok) {
               await env.MEDIA_BUCKET.put(`clips/${clipId}.jpg`, await poster.arrayBuffer(), {
                 httpMetadata: { contentType: 'image/jpeg' },
               });
             }
           } catch {}
-          containerCall(env, 'clip-' + clipId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
+          containerCall(env, 'clips', `/files/${id}`, { method: 'DELETE' }).catch(() => {});
           return { key };
         }
       );
