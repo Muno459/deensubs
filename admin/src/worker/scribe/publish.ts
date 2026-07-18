@@ -22,6 +22,7 @@ export type PublishOptions = {
   category_id?: number | null;
   scholar_id?: number | null;
   thumb_ts?: number; // seconds into the video for the thumbnail frame
+  thumb_key?: string; // OR a ready image key (AI-translated original / custom upload)
 };
 
 type PublishEnv = ScribeEnv & { CACHE: KVNamespace; MEDIA_KV: KVNamespace; AI?: Ai; VECTORIZE?: VectorizeIndex };
@@ -119,12 +120,16 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     await copyObject(env, `scribe/${jobId}/${lang}.srt`, `subs/${slug}.${lang}.srt`).catch(() => {});
   }
 
-  // 2. Thumbnail: frame + responsive WebP variants, generated upfront
-  const ts = opts.thumb_ts ?? Math.max(1, Math.round((job.duration || 60) * 0.3));
+  // 2. Thumbnail + responsive WebP variants, generated upfront. Source is
+  // either a chosen video frame (thumb_ts) or a ready image (thumb_key —
+  // the AI-translated original or a custom upload).
+  const fromImage = !!opts.thumb_key;
+  const thumbSrc = fromImage ? `${CDN_BASE}/${opts.thumb_key}` : `${CDN_BASE}/${job.source_key}`;
+  const ts = fromImage ? 0 : opts.thumb_ts ?? Math.max(1, Math.round((job.duration || 60) * 0.3));
   const start = await containerCall(env, 'thumbs-' + jobId, '/thumbs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: `${CDN_BASE}/${job.source_key}`, timestamps: [ts], variants: true }),
+    body: JSON.stringify({ url: thumbSrc, timestamps: [ts], variants: true }),
   });
   if (!start.ok) throw new Error(`thumbs start failed: HTTP ${start.status}`);
   const { id } = (await start.json()) as { id: string };

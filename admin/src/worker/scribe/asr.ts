@@ -71,30 +71,39 @@ async function chunkedAsr(env: ScribeEnv, jobId: string, sourceKey: string): Pro
 
   const names: string[] = info.names || [];
   const durations: number[] = info.durations || [];
+
+  // Segments are independent — stage + transcribe them ALL in parallel
+  // (sequential chunks made a 2h file take 3x longer than needed).
+  // Offsets come from ffprobe durations, so merge order is deterministic.
+  const offsets: number[] = [];
+  let acc = 0;
+  for (let n = 0; n < names.length; n++) {
+    offsets.push(acc);
+    acc += durations[n] || CHUNK_SEC;
+  }
+  const results = await Promise.all(names.map(async (name, n) => {
+    const file = await containerCall(env, cName, `/files/${id}?name=${name}`);
+    if (!file.ok || !file.body) throw new Error(`segment fetch failed: ${name}`);
+    const chunkKey = `scribe/${jobId}/${name}`;
+    await streamToR2(env.MEDIA_BUCKET, chunkKey, file.body, 'audio/mp4');
+    const data = await sttCall(env, `${CDN_BASE}/${chunkKey}`);
+    await env.MEDIA_BUCKET.delete(chunkKey).catch(() => {});
+    return { n, data };
+  }));
+
   const allWords: Word[] = [];
   let text = '';
   let languageCode = '';
-  let offset = 0;
-
-  for (let n = 0; n < names.length; n++) {
-    // Stage the segment in R2 so ElevenLabs can fetch it by URL
-    const file = await containerCall(env, cName, `/files/${id}?name=${names[n]}`);
-    if (!file.ok || !file.body) throw new Error(`segment fetch failed: ${names[n]}`);
-    const chunkKey = `scribe/${jobId}/${names[n]}`;
-    await streamToR2(env.MEDIA_BUCKET, chunkKey, file.body, 'audio/mp4');
-
-    const data = await sttCall(env, `${CDN_BASE}/${chunkKey}`);
+  for (const { n, data } of results.sort((a, b) => a.n - b.n)) {
     if (!languageCode) languageCode = data.language_code || '';
     text += (text ? ' ' : '') + (data.text || '');
     for (const w of data.words || []) {
-      allWords.push({ ...w, start: w.start + offset, end: w.end + offset });
+      allWords.push({ ...w, start: w.start + offsets[n], end: w.end + offsets[n] });
     }
-    offset += durations[n] || CHUNK_SEC;
-    await env.MEDIA_BUCKET.delete(chunkKey).catch(() => {});
   }
 
   containerCall(env, cName, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
-  return { language_code: languageCode, text, words: allWords, audio_duration_secs: offset };
+  return { language_code: languageCode, text, words: allWords, audio_duration_secs: acc };
 }
 
 export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, durationSec = 0): Promise<AsrResult> {

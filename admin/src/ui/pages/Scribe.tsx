@@ -219,6 +219,10 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
   const meta = useApi<any>(open ? '/api/meta' : null);
   const [form, setForm] = useState<any>(null);
   const [cands, setCands] = useState<{ key: string; ts: number }[] | null>(null);
+  const [transThumb, setTransThumb] = useState<string | 'loading' | 'none' | null>(null);
+  const [customThumb, setCustomThumb] = useState<string | null>(null);
+  const [chosenKey, setChosenKey] = useState<string | null>(null);
+  const thumbFileRef = useRef<HTMLInputElement>(null);
   const [candErr, setCandErr] = useState('');
   const [chosenTs, setChosenTs] = useState<number | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -243,6 +247,17 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
         if (r.candidates?.length) setChosenTs(r.candidates[0].ts);
       })
       .catch((e) => { setCands([]); setCandErr(e.message); });
+    // Automagic: translate the original platform thumbnail (Arabic → English)
+    if (job.thumb_url) {
+      setTransThumb('loading');
+      api('/api/ai/image', { method: 'POST', body: JSON.stringify({ kind: 'thumb_translate', jobId: job.id }) })
+        .then((r) => { setTransThumb(r.key); setChosenKey((k) => k ?? r.key); })
+        .catch(() => setTransThumb('none'));
+    } else {
+      setTransThumb('none');
+    }
+    setCustomThumb(null);
+    setChosenKey(null);
     // AI drafts the rest: category/scholar picks + Arabic title + slug (silent best-effort)
     let live = true;
     api('/api/ai/fill', { method: 'POST', body: JSON.stringify({ kind: 'publish', jobId: job.id }) })
@@ -305,32 +320,85 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
             </Field>
           </div>
 
-          <div>
-            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Thumbnail frame</p>
-            {cands === null ? (
-              <div className="flex h-24 items-center justify-center gap-2 text-[12px] text-muted">
-                <Spinner className="h-4 w-4" /> Extracting frames from the video...
-              </div>
-            ) : cands.length === 0 ? (
-              <p className="text-[12px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}. A frame at 30% will be used on publish.</p>
-            ) : (
-              <div className="grid grid-cols-3 gap-2">
-                {cands.map((cand) => (
-                  <button
-                    key={cand.key}
-                    onClick={() => setChosenTs(cand.ts)}
-                    className={`relative overflow-hidden rounded-lg border-2 transition-all ${
-                      chosenTs === cand.ts ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'
-                    }`}
-                  >
-                    <img src={`https://cdn.deensubs.com/${cand.key}?v=${job.id}`} alt="" className="aspect-video w-full object-cover" />
-                    <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] tabular-nums text-cream">
-                      {Math.floor(cand.ts / 60)}:{String(cand.ts % 60).padStart(2, '0')}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+          <div
+            onPaste={async (e) => {
+              const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/'));
+              if (!f) return;
+              e.preventDefault();
+              try {
+                const r = await fetch(`/api/upload?prefix=${encodeURIComponent(`scribe/${job.id}/`)}&name=custom-thumb`, {
+                  method: 'POST', headers: { 'content-type': f.type }, body: f, credentials: 'include',
+                });
+                const j: any = await r.json();
+                if (!r.ok) throw new Error(j.error || 'upload failed');
+                setCustomThumb(j.key);
+                setChosenKey(j.key);
+                toast.push('Pasted thumbnail uploaded');
+              } catch (er: any) { toast.push(er.message, 'error'); }
+            }}
+          >
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Thumbnail</p>
+              <button type="button" onClick={() => thumbFileRef.current?.click()} className="text-[11px] text-muted hover:text-cream">
+                Upload custom (or just Ctrl+V a copied image)
+              </button>
+              <input ref={thumbFileRef} type="file" accept="image/*" className="hidden"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!f) return;
+                  try {
+                    const r = await fetch(`/api/upload?prefix=${encodeURIComponent(`scribe/${job.id}/`)}&name=custom-thumb`, {
+                      method: 'POST', headers: { 'content-type': f.type }, body: f, credentials: 'include',
+                    });
+                    const j: any = await r.json();
+                    if (!r.ok) throw new Error(j.error || 'upload failed');
+                    setCustomThumb(j.key);
+                    setChosenKey(j.key);
+                  } catch (er: any) { toast.push(er.message, 'error'); }
+                }} />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {transThumb === 'loading' && (
+                <div className="flex aspect-video items-center justify-center gap-1.5 rounded-lg border border-hairline bg-inset text-center text-[10px] text-muted">
+                  <Spinner className="h-3 w-3" /> Translating original...
+                </div>
+              )}
+              {transThumb && transThumb !== 'loading' && transThumb !== 'none' && (
+                <button onClick={() => { setChosenKey(transThumb); setChosenTs(null); }}
+                  className={`relative overflow-hidden rounded-lg border-2 transition-all ${chosenKey === transThumb ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'}`}>
+                  <img src={`https://cdn.deensubs.com/${transThumb}?v=${job.id}`} alt="" className="aspect-video w-full object-cover" />
+                  <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[10px] text-gold-bright">✨ Original · translated</span>
+                </button>
+              )}
+              {customThumb && (
+                <button onClick={() => { setChosenKey(customThumb); setChosenTs(null); }}
+                  className={`relative overflow-hidden rounded-lg border-2 transition-all ${chosenKey === customThumb ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'}`}>
+                  <img src={`https://cdn.deensubs.com/${customThumb}?v=${Date.now()}`} alt="" className="aspect-video w-full object-cover" />
+                  <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[10px] text-cream">Custom</span>
+                </button>
+              )}
+              {(cands || []).map((cand) => (
+                <button
+                  key={cand.key}
+                  onClick={() => { setChosenTs(cand.ts); setChosenKey(null); }}
+                  className={`relative overflow-hidden rounded-lg border-2 transition-all ${
+                    chosenKey === null && chosenTs === cand.ts ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'
+                  }`}
+                >
+                  <img src={`https://cdn.deensubs.com/${cand.key}?v=${job.id}`} alt="" className="aspect-video w-full object-cover" />
+                  <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] tabular-nums text-cream">
+                    {Math.floor(cand.ts / 60)}:{String(cand.ts % 60).padStart(2, '0')}
+                  </span>
+                </button>
+              ))}
+              {cands === null && (
+                <div className="flex aspect-video items-center justify-center gap-1.5 rounded-lg border border-hairline bg-inset text-[10px] text-muted">
+                  <Spinner className="h-3 w-3" /> Extracting frames...
+                </div>
+              )}
+            </div>
+            {cands?.length === 0 && <p className="mt-1 text-[11px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}.</p>}
             <p className="mt-1.5 text-[11px] text-faint">Responsive WebP variants (320/480/640) are generated on publish and mirrored to KV.</p>
           </div>
 
@@ -345,7 +413,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 try {
                   const r = await api(`/api/scribe/${job.id}/publish`, {
                     method: 'POST',
-                    body: JSON.stringify({ ...form, thumb_ts: chosenTs ?? undefined }),
+                    body: JSON.stringify({ ...form, thumb_ts: chosenKey ? undefined : chosenTs ?? undefined, thumb_key: chosenKey ?? undefined }),
                   });
                   setDone(r);
                   toast.push(`Published /watch/${r.slug}`);
@@ -795,7 +863,7 @@ export default function Scribe() {
           <div className="mt-4 flex flex-wrap gap-2">
             <input
               className={inputCls + ' min-w-64 flex-1 py-2.5 font-mono text-[12.5px]'}
-              placeholder="https://youtube.com/watch?v=...   or a direct .mp4 / .mp3 URL"
+              placeholder="https://youtube.com, x.com, tiktok.com, facebook.com — any yt-dlp site   or a direct .mp4 / .mp3 URL"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submit()}

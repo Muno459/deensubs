@@ -657,6 +657,13 @@ app.post('/api/upload', async (c) => {
   return c.json({ key });
 });
 
+// Sweep observability: when did the auto-resume cron last fire?
+app.get('/api/scribe/sweep-status', async (c) => {
+  const hb = await c.env.CACHE.get('sweep:heartbeat');
+  const recent = await c.env.DB.prepare("SELECT target, details, created_at FROM admin_logs WHERE action = 'auto_resume' ORDER BY id DESC LIMIT 5").all().catch(() => ({ results: [] }));
+  return c.json({ lastHeartbeat: hb, resumes: recent.results });
+});
+
 // Quality report (mechanical metrics + semantic audit); POST re-runs it
 app.get('/api/scribe/:id/quality', async (c) => {
   const lang = c.req.query('lang');
@@ -1131,8 +1138,13 @@ export { YtdlpContainer } from './scribe/container';
 /** Auto-resume jobs killed by infrastructure (deploy rollouts reset the
  * workflow engine mid-step). Artifact-aware steps make resumes cheap. */
 async function autoResumeSweep(env: Env) {
+  // Heartbeat proves the cron actually fires (visible at /api/scribe/sweep-status)
+  await env.CACHE.put('sweep:heartbeat', new Date().toISOString()).catch(() => {});
   const dead = await env.DB.prepare(
-    "SELECT * FROM scribe_jobs WHERE status = 'error' AND error LIKE '%Durable Object reset%' AND updated_at > datetime('now', '-1 day') LIMIT 3"
+    `SELECT * FROM scribe_jobs WHERE updated_at > datetime('now', '-1 day') AND (
+       (status = 'error' AND (error LIKE '%Durable Object reset%' OR error LIKE '%code was updated%'))
+       OR (status = 'queued' AND wf_instance IS NOT NULL AND updated_at < datetime('now', '-15 minutes'))
+     ) LIMIT 3`
   ).all();
   for (const job of dead.results as any[]) {
     for (const iid of [...new Set([job.wf_instance, job.id].filter(Boolean))]) {
@@ -1141,10 +1153,18 @@ async function autoResumeSweep(env: Env) {
     const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);
     const instance = `${job.id}-a${Math.random().toString(36).slice(2, 6)}`;
     await env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', error = 'auto-resumed after deploy reset', wf_instance = ? WHERE id = ?").bind(instance, job.id).run();
-    await env.SCRIBE_WORKFLOW.create({
-      id: instance,
-      params: { jobId: job.id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
-    }).catch(() => {});
+    try {
+      await env.SCRIBE_WORKFLOW.create({
+        id: instance,
+        params: { jobId: job.id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
+      });
+      await env.DB.prepare('INSERT INTO admin_logs (admin_id, action, target, details) VALUES (0, ?, ?, ?)')
+        .bind('auto_resume', job.id, `instance ${instance}`).run().catch(() => {});
+    } catch (e: any) {
+      // Put the job back in error so the next sweep retries instead of leaving a queued zombie
+      await env.DB.prepare("UPDATE scribe_jobs SET status = 'error', error = ? WHERE id = ?")
+        .bind('auto-resume create failed: ' + String(e?.message || e).slice(0, 150), job.id).run();
+    }
   }
 }
 
