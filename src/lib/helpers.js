@@ -114,15 +114,19 @@ export function cdn(key) {
 export { _cdn as CDN };
 
 // Scholar photo as WebP (full size for profile/cards) — served from KV via /img/
+// Bump when scholar/thumb assets are regenerated in place: the path change
+// invalidates the 1-year immutable edge cache (query strings don't).
+export const IMG_V = 'v2';
+
 export function schImg(key) {
   if (!key) return null;
-  return '/img/' + key.replace(/\.(png|jpg|jpeg)$/i, '.avif');
+  return `/img/${IMG_V}/` + key.replace(/\.(png|jpg|jpeg)$/i, '.avif');
 }
 
 // Scholar photo tiny (64px for homepage spotlight)
 export function schImgSm(key) {
   if (!key) return null;
-  return '/img/' + key.replace(/\.(png|jpg|jpeg)$/i, '-64w.avif');
+  return `/img/${IMG_V}/` + key.replace(/\.(png|jpg|jpeg)$/i, '-64w.avif');
 }
 
 // Responsive thumbnail URLs — served from KV via /img/

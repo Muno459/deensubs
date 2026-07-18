@@ -125,7 +125,7 @@ api.get('/api/vtt/*', async (c) => {
 // Edge-cached via Cache API → subsequent requests at same PoP = ~5ms
 // All images served as AVIF (universal browser support since 2022)
 api.get('/img/*', async (c) => {
-  const key = c.req.path.slice(5); // strip '/img/'
+  const key = c.req.path.slice(5).replace(/^v\d+\//, ''); // strip '/img/' + optional version segment
   if (!key) return c.text('Not found', 404);
 
   // Check CF edge cache first (fastest path)
