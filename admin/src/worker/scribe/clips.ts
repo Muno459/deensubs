@@ -116,11 +116,11 @@ Rules:
 - The FIRST card lands within 1.3s of ${start.toFixed(1)}s; the FINAL card ends cleanly on the last spoken word before ${end.toFixed(1)}s.
 - Cover ALL the speech. No commentary, no markdown.` },
       { role: 'user', content: `Hook (for tone): ${hook}\nTimed Arabic words (sec word):\n${wordLines}` },
-    ], 6000, 'ag/claude-opus-4-6-thinking').catch(() =>
+    ], 6000, 'ag/claude-sonnet-4-6').catch(() =>
       llmChat(env, [
         { role: 'system', content: 'Return the JSONL caption cards as instructed.' },
         { role: 'user', content: `Hook: ${hook}\nTimed Arabic words:\n${wordLines}` },
-      ], 4000, 'ag/claude-sonnet-4-6')
+      ], 6000, 'ag/claude-opus-4-6-thinking')
     );
     const cards: CaptionCard[] = [];
     for (let line of raw.split('\n')) {
