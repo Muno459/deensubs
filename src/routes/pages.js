@@ -9,6 +9,7 @@ import { renderCategory } from '../templates/category.js';
 import { renderSearch } from '../templates/search.js';
 import { renderScholars, renderScholar } from '../templates/scholar.js';
 import { renderAbout } from '../templates/about.js';
+import { renderPrivacy } from '../templates/privacy.js';
 import { renderBookmarks } from '../templates/bookmarks.js';
 import { renderHistory } from '../templates/history.js';
 import { render404 } from '../templates/error.js';
@@ -149,6 +150,11 @@ pages.get('/scholar/:slug', async (c) => {
 pages.get('/history', async (c) => {
   const cats = await getCategories(c.env);
   return c.html(rp(c,'Watch History', renderHistory(), cats, null, { noindex: true }));
+});
+
+pages.get('/privacy', async (c) => {
+  const cats = await getCategories(c.env);
+  return c.html(rp(c,'Privacy Policy', renderPrivacy(), cats, null, { description: 'How DeenSubs handles your data across the website and iOS app.' }));
 });
 
 pages.get('/about', async (c) => {

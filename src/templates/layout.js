@@ -130,6 +130,7 @@ ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/b
     <div class="ft-col">
       <h2>DeenSubs</h2>
       <a href="/about">About</a>
+      <a href="/privacy">Privacy</a>
       <a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener">Open source</a>
       <a href="https://x.com/deensubss" target="_blank" rel="noopener">X / Twitter</a>
       <a href="https://www.tiktok.com/@deensubs" target="_blank" rel="noopener">TikTok</a>
