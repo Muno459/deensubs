@@ -142,6 +142,14 @@ Rules:
     for (let i = 0; i < cards.length - 1; i++) {
       if (cards[i].b > cards[i + 1].a) cards[i].b = Math.max(cards[i].a + 0.25, cards[i + 1].a - 0.02);
     }
+    // Reading-time relief: a card stays up long enough to actually read
+    // (~15 chars/sec, min 0.9s), borrowing any gap before the next card.
+    for (let i = 0; i < cards.length; i++) {
+      const c = cards[i];
+      const need = c.a + Math.max(0.9, c.t.length / 15);
+      const limit = i + 1 < cards.length ? cards[i + 1].a - 0.05 : end;
+      if (c.b < need) c.b = Math.max(c.b, Math.min(need, limit));
+    }
     return cards.length >= 3 ? cards : null;
   } catch {
     return null;
