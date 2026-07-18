@@ -44,8 +44,28 @@ export async function assessQuality(env: QEnv, jobId: string, cuesKey: string): 
   const obj = await env.MEDIA_BUCKET.get(cuesKey);
   if (!obj) throw new Error('cues missing: ' + cuesKey);
   const cues: Cue[] = await obj.json();
-  const job: any = await env.DB.prepare('SELECT duration FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+  const job: any = await env.DB.prepare('SELECT duration, asr_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
   const audioDur = job?.duration || (cues.length ? cues[cues.length - 1].end : 0);
+
+  // Word coverage — the true "no missing cues" metric: fraction of ASR words
+  // whose midpoint falls inside a cue (audio-duration coverage punishes silence)
+  let wordCoverage = 100;
+  try {
+    const asrObj = job?.asr_key ? await env.MEDIA_BUCKET.get(job.asr_key) : null;
+    if (asrObj) {
+      const asr: any = await asrObj.json();
+      const ws = (asr.words || []).filter((w: any) => (w.type || 'word') === 'word' && (w.text || '').trim());
+      const spans = cues.map((c) => [c.start - 0.15, c.end + 0.15]).sort((a, b) => a[0] - b[0]);
+      let si = 0;
+      let covered = 0;
+      for (const w of ws.sort((a: any, b: any) => a.start - b.start)) {
+        const mid = (w.start + w.end) / 2;
+        while (si < spans.length && spans[si][1] < mid) si++;
+        if (si < spans.length && spans[si][0] <= mid) covered++;
+      }
+      if (ws.length) wordCoverage = Math.round((covered / ws.length) * 1000) / 10;
+    }
+  } catch {}
 
   const spoken = cues.filter((c) => c.text.trim());
   const locked = spoken.filter((c: any) => c.q);
@@ -92,6 +112,7 @@ export async function assessQuality(env: QEnv, jobId: string, cuesKey: string): 
     cues: spoken.length,
     verse_cues: locked.length,
     coverage_pct: Math.round((covered / Math.max(1, audioDur)) * 1000) / 10,
+    word_coverage_pct: wordCoverage,
     gaps_over_8s: gaps,
     overlaps,
     cues_over_10s: giants,
@@ -107,8 +128,9 @@ export async function assessQuality(env: QEnv, jobId: string, cuesKey: string): 
 
   // Grade: start at 100, deduct for each defect class
   let score = 100;
-  if (metrics.coverage_pct < 95) score -= 15;
-  else if (metrics.coverage_pct < 85) score -= 25;
+  if (metrics.word_coverage_pct < 90) score -= 25;
+  else if (metrics.word_coverage_pct < 96) score -= 15;
+  else if (metrics.word_coverage_pct < 99) score -= 5;
   score -= Math.min(10, Math.max(0, gaps - 2) * 2);
   if (overlaps > 0) score -= 5;
   if (giants > 0) score -= 5;
@@ -125,7 +147,7 @@ export async function assessQuality(env: QEnv, jobId: string, cuesKey: string): 
   await env.MEDIA_BUCKET.put(qKey, JSON.stringify(report), { httpMetadata: { contentType: 'application/json' } });
   if (!/cues\.[a-z]{2}\.json$/.test(cuesKey)) {
     await updateJob(env.DB, jobId, {
-      quality: JSON.stringify({ grade, score, flags: flags.length, cov: metrics.coverage_pct, verses: locked.length }),
+      quality: JSON.stringify({ grade, score, flags: flags.length, cov: metrics.word_coverage_pct, verses: locked.length }),
     });
   }
   return report;
