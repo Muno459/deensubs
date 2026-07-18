@@ -26,7 +26,9 @@ import GLOBAL_JS from '../scripts/global.min.txt';
  * Thanks again!
  * Vecteezy
  *
- * Attribution link lives in the footer (ft-attr).
+ * NOTE: The visible footer attribution link was removed by owner decision (July 2026).
+ * The Free License expects visible attribution — if keeping it off the visual site,
+ * consider a Vecteezy Pro license. Attribution retained here in code only.
  */
 
 export function renderPage(title, body, categories, activeCat, meta, user, url) {
@@ -129,7 +131,6 @@ ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/b
   </div>
   <div class="ft-bottom">
     <span class="ft-copy">&copy; 2026 DeenSubs — Making Islamic knowledge accessible</span>
-    <span class="ft-attr">Background pattern: <a href="https://vecteezy.com" target="_blank" rel="noopener">Vecteezy.com</a></span>
     <div class="ft-social"><a href="https://x.com/deensubss" target="_blank" rel="noopener" title="X / Twitter"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a><a href="https://www.tiktok.com/@deensubs" target="_blank" rel="noopener" title="TikTok"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.27a8.16 8.16 0 004.77 1.52V7.36a4.85 4.85 0 01-1-.67z"/></svg></a><a href="https://github.com/Muno459/deensubs" target="_blank" rel="noopener" title="GitHub"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg></a></div>
   </div>
 </div></footer>
