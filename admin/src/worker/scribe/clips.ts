@@ -130,7 +130,8 @@ Rules:
         const o = JSON.parse(line);
         const a = Math.max(start, Number(o.a));
         const b = Math.min(end, Number(o.b));
-        const t = String(o.t || '').trim();
+        // libass has no color-emoji support — anything outside the font becomes a tofu box
+        const t = String(o.t || '').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0E}\u{FE0F}\u{200D}]/gu, '').replace(/\s+/g, ' ').trim();
         if (!t || isNaN(a) || isNaN(b) || b - a < 0.25) continue;
         if (t.split(/\s+/).length < 2 && cards.length) continue; // no fragment cards
         // Hard cap ≤46 chars: split over-long cards at the best word boundary
