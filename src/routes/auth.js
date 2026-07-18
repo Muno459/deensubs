@@ -3,15 +3,30 @@ import { getCookie, genId } from '../middleware/auth.js';
 
 const auth = new Hono();
 
+// Only allow post-login redirects back to deensubs.com or its subdomains
+function safeRedirect(target) {
+  try {
+    const u = new URL(target);
+    if (u.protocol === 'https:' && (u.hostname === 'deensubs.com' || u.hostname.endsWith('.deensubs.com'))) {
+      return u.toString();
+    }
+  } catch {}
+  return '/';
+}
+
 auth.get('/auth/google', (c) => {
   const redirect_uri = new URL(c.req.url).origin + '/auth/callback';
-  const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+  const params = {
     client_id: c.env.GOOGLE_CLIENT_ID,
     redirect_uri,
     response_type: 'code',
     scope: 'openid email profile',
     prompt: 'select_account',
-  });
+  };
+  // Carry an optional return URL (e.g. admin.deensubs.com) through OAuth state
+  const redirect = c.req.query('redirect');
+  if (redirect) params.state = safeRedirect(redirect);
+  const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams(params);
   return c.redirect(url);
 });
 
@@ -56,11 +71,13 @@ auth.get('/auth/callback', async (c) => {
   const sid = genId();
   await db.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))").bind(sid, user.id).run();
 
+  const state = c.req.query('state');
   return new Response(null, {
     status: 302,
     headers: {
-      Location: '/',
-      'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+      Location: state ? safeRedirect(state) : '/',
+      // Domain-wide so admin.deensubs.com shares the session
+      'Set-Cookie': `sid=${sid}; Domain=.deensubs.com; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     },
   });
 });
@@ -71,13 +88,11 @@ auth.get('/auth/logout', async (c) => {
     await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run();
     try { await c.env.CACHE.delete('session:' + sid); } catch {}
   }
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: '/',
-      'Set-Cookie': 'sid=; Path=/; HttpOnly; Secure; Max-Age=0',
-    },
-  });
+  // Clear both the new domain-wide cookie and the legacy host-only one
+  const headers = new Headers({ Location: '/' });
+  headers.append('Set-Cookie', 'sid=; Domain=.deensubs.com; Path=/; HttpOnly; Secure; Max-Age=0');
+  headers.append('Set-Cookie', 'sid=; Path=/; HttpOnly; Secure; Max-Age=0');
+  return new Response(null, { status: 302, headers });
 });
 
 auth.post('/auth/onetap', async (c) => {
@@ -107,7 +122,7 @@ auth.post('/auth/onetap', async (c) => {
   return new Response(JSON.stringify({ ok: true }), {
     headers: {
       'Content-Type': 'application/json',
-      'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+      'Set-Cookie': `sid=${sid}; Domain=.deensubs.com; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     },
   });
 });

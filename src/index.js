@@ -22,6 +22,8 @@ app.use('*', async (c, next) => {
 
   const p = c.req.path;
   if (p === '/robots.txt' || p === '/favicon.svg' || p === '/favicon.ico') return next();
+  // Auth stays reachable during maintenance so admin.deensubs.com sign-in works
+  if (p.startsWith('/auth/')) return next();
 
   const cookies = c.req.header('Cookie') || '';
   const hasAccess = cookies.includes('ds_maint=1');
