@@ -110,6 +110,7 @@ Rules:
 - Every card is a COMPLETE, STANDALONE phrase: 3-9 words, max ~80 characters, a full clause with its own meaning. NEVER 1-2 word fragments, never a phrase that only makes sense with the previous card.
 - "a" = the timestamp of the first Arabic word the card covers; "b" = when its last word ends. Cards appear exactly as their words are spoken. Typical card: 1.2-3.5s. No overlaps, chronological.
 - Translation: faithful, natural, dignified. Keep honorifics (Allah ﷻ, the Prophet ﷺ, RA/AS). Established transliterations stay (fiqh, dua, Sharia...). Quranic quotes use established translation wording.
+- Pacing: aim for at most ~17 characters per second of display time — when speech is fast, use fewer, tighter words per card (still complete phrases).
 - PUNCTUATE properly so the reader always knows where the thought stands: a card that COMPLETES a sentence ends with . ! or ?; a card continuing into the next ends with a comma or nothing (use … only for a genuinely suspended thought). Never leave a sentence-final card unpunctuated.
 - The FIRST card lands within 1.3s of ${start.toFixed(1)}s; the FINAL card ends cleanly on the last spoken word before ${end.toFixed(1)}s.
 - Cover ALL the speech. No commentary, no markdown.` },
@@ -150,6 +151,19 @@ Rules:
       const need = c.a + Math.max(0.9, c.t.length / 15);
       const limit = i + 1 < cards.length ? cards[i + 1].a - 0.05 : end;
       if (c.b < need) c.b = Math.max(c.b, Math.min(need, limit));
+    }
+    // No gap to borrow? Merge fast neighbors: one card shown twice as long
+    // reads better than two flashes (combined text stays within one bubble).
+    for (let i = 0; i < cards.length - 1; ) {
+      const c = cards[i];
+      const n = cards[i + 1];
+      const cps = c.t.length / Math.max(0.3, c.b - c.a);
+      const joined = c.t.replace(/[,…]?$/, ',') + ' ' + n.t;
+      if (cps > 19 && joined.length <= 88) {
+        cards.splice(i, 2, { a: c.a, b: n.b, t: joined });
+      } else {
+        i++;
+      }
     }
     return cards.length >= 3 ? cards : null;
   } catch {
