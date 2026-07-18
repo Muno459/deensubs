@@ -14,6 +14,7 @@ export function renderScholars({ scholars }) {
     ${scholars.map(s => `<a href="/scholar/${e(s.slug)}" class="sch-card card-anim">
       <div class="sch-card-img">
         ${s.photo ? `<img src="${schImg(s.photo)}" alt="${e(s.name)}" loading="lazy" decoding="async">` : `<div class="sch-card-initial">${e(s.name).split(' ').pop().charAt(0)}</div>`}
+        <div class="sch-card-ov" aria-hidden="true"><span>View lectures</span><svg viewBox="404 22 260 306"><path d="M408.92,32.33v207.11c0,3.01,2.44,5.44,5.44,5.44h50.65c4.55,0,7.09,5.25,4.27,8.82l-48.93,61.85c-3.37,4.25.88,10.27,6.02,8.53l229.85-77.95c2.21-.75,3.7-2.82,3.7-5.16V32.33c0-3.01-2.44-5.44-5.44-5.44h-240.11c-3.01,0-5.44,2.44-5.44,5.44Z" fill="#fff"/><rect x="452.88" y="212.04" width="106.72" height="10.43" rx="5.21" fill="#0e6b63"/><rect x="452.88" y="190.66" width="155.78" height="10.95" rx="5.48" fill="#0e6b63"/></svg></div>
       </div>
       <div class="sch-card-body">
         <h3>${e(s.name)}</h3>
