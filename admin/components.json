@@ -1,0 +1,41 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/ui/index.css",
+    "baseColor": "neutral",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@/ui/components",
+    "ui": "@/ui/components",
+    "utils": "@/ui/lib/cn",
+    "lib": "@/ui/lib",
+    "hooks": "@/ui/hooks"
+  },
+  "iconLibrary": "lucide",
+  "registries": {
+    "@aceternity": {
+      "url": "https://ui.aceternity.com/registry/{name}.json",
+      "headers": {
+        "Authorization": "Bearer ${ACETERNITY_API_KEY}"
+      }
+    },
+    "@aceternity-pro": {
+      "url": "https://ui.aceternity.com/registry/{name}.json",
+      "headers": {
+        "Authorization": "Bearer ${ACETERNITY_API_KEY}"
+      }
+    },
+    "@magicui": "https://magicui.design/r/{name}.json",
+    "@shadcnblocks": {
+      "url": "https://www.shadcnblocks.com/r/{name}",
+      "headers": {
+        "Authorization": "Bearer ${SHADCNBLOCKS_API_KEY}"
+      }
+    }
+  }
+}

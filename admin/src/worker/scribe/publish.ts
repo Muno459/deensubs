@@ -1,0 +1,197 @@
+// Publish a finished Scribe job as a first-class video on the site.
+//
+// Everything lands in the canonical locations the site expects:
+//   videos/{slug}.mp4         — media copied from the job
+//   subs/{slug}.srt           — translated subtitles
+//   subs/{slug}-ar.srt        — original-language subtitles (Arabic sources)
+//   thumbs/{slug}.jpg         — frame extracted by the container (ffmpeg)
+//   thumbs/{slug}-{320,480,640}w.webp — responsive variants, generated
+//                               upfront and mirrored into MEDIA_KV
+// then the videos row is inserted and the KV cache purged.
+
+import type { ScribeEnv } from './types';
+import { streamToR2 } from './download';
+
+const CDN_BASE = 'https://cdn.deensubs.com';
+
+export type PublishOptions = {
+  title?: string;
+  title_ar?: string;
+  description?: string;
+  slug?: string;
+  category_id?: number | null;
+  scholar_id?: number | null;
+  thumb_ts?: number; // seconds into the video for the thumbnail frame
+};
+
+type PublishEnv = ScribeEnv & { CACHE: KVNamespace; MEDIA_KV: KVNamespace; AI?: Ai; VECTORIZE?: VectorizeIndex };
+
+async function containerCall(env: PublishEnv, name: string, path: string, init?: RequestInit): Promise<Response> {
+  const { getContainer } = await import('@cloudflare/containers');
+  const container = getContainer(env.YTDLP as any, name);
+  const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };
+  return container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
+}
+
+/** Copy an R2 object via streaming multipart (O(n), constant memory). */
+async function copyObject(env: PublishEnv, from: string, to: string): Promise<void> {
+  const obj = await env.MEDIA_BUCKET.get(from);
+  if (!obj) throw new Error('missing R2 object: ' + from);
+  await streamToR2(env.MEDIA_BUCKET, to, obj.body, obj.httpMetadata?.contentType || 'application/octet-stream');
+}
+
+/** Ask the container for candidate thumbnail frames; store them under the job. */
+export async function generateThumbCandidates(env: PublishEnv, jobId: string): Promise<{ key: string; ts: number }[]> {
+  const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+  if (!job?.source_key) throw new Error('job has no source media');
+  const dur = job.duration || 60;
+  const timestamps = [0.15, 0.4, 0.7].map((p) => Math.max(1, Math.round(dur * p)));
+
+  const start = await containerCall(env, 'thumbs-' + jobId, '/thumbs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: `${CDN_BASE}/${job.source_key}`, timestamps }),
+  });
+  if (!start.ok) throw new Error(`thumbs start failed: HTTP ${start.status}`);
+  const { id } = (await start.json()) as { id: string };
+
+  let info: any = null;
+  for (let i = 0; i < 36; i++) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const st = await containerCall(env, 'thumbs-' + jobId, `/jobs/${id}`);
+    info = st.ok ? await st.json() : null;
+    if (info?.status === 'done' || info?.status === 'error') break;
+  }
+  if (info?.status !== 'done') throw new Error('thumbs failed: ' + (info?.error || 'timeout'));
+
+  const candidates: { key: string; ts: number }[] = [];
+  for (let n = 0; n < timestamps.length; n++) {
+    const name = `t${n}.jpg`;
+    if (!(info.names || []).includes(name)) continue;
+    const file = await containerCall(env, 'thumbs-' + jobId, `/files/${id}?name=${name}`);
+    if (!file.ok) continue;
+    const key = `scribe/${jobId}/cand-${n}.jpg`;
+    await env.MEDIA_BUCKET.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: 'image/jpeg' } });
+    candidates.push({ key, ts: timestamps[n] });
+  }
+  containerCall(env, 'thumbs-' + jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
+  if (!candidates.length) throw new Error('no thumbnail candidates produced');
+  return candidates;
+}
+
+export async function publishScribeJob(env: PublishEnv, jobId: string, opts: PublishOptions = {}) {
+  const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+  if (!job) throw new Error('Job not found');
+  if (job.status !== 'done') throw new Error(`Job status is ${job.status}, must be done`);
+  const extMatch = (job.source_key || '').match(/\.(mp4|webm|mkv|mov)$/i);
+  if (!extMatch) throw new Error(`Source is ${job.source_key} — audio-only jobs cannot be published as videos`);
+  const ext = extMatch[1].toLowerCase();
+
+  const title = opts.title || job.title || jobId;
+  const slug = (opts.slug || title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+  if (!slug) throw new Error('empty slug');
+  const existing = await env.DB.prepare('SELECT id FROM videos WHERE slug = ?').bind(slug).first();
+  if (existing) throw new Error(`slug already exists: ${slug}`);
+
+  // 1. Copy media + subtitles to canonical keys (every target language)
+  const videoKey = `videos/${slug}.${ext}`;
+  const srtKey = `subs/${slug}.srt`;
+  await copyObject(env, job.source_key, videoKey);
+  if (job.srt_key) await copyObject(env, job.srt_key, srtKey);
+  const isArabicSource = (job.language_code || '').startsWith('ar');
+  const srtArKey = isArabicSource && job.srt_source_key ? `subs/${slug}-ar.srt` : null;
+  if (srtArKey) await copyObject(env, job.srt_source_key, srtArKey);
+  let langs: string[] = [];
+  try { langs = JSON.parse(job.target_langs || '[]'); } catch {}
+  for (const lang of langs.slice(1)) {
+    await copyObject(env, `scribe/${jobId}/${lang}.srt`, `subs/${slug}.${lang}.srt`).catch(() => {});
+  }
+
+  // 2. Thumbnail: frame + responsive WebP variants, generated upfront
+  const ts = opts.thumb_ts ?? Math.max(1, Math.round((job.duration || 60) * 0.3));
+  const start = await containerCall(env, 'thumbs-' + jobId, '/thumbs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: `${CDN_BASE}/${job.source_key}`, timestamps: [ts], variants: true }),
+  });
+  if (!start.ok) throw new Error(`thumbs start failed: HTTP ${start.status}`);
+  const { id } = (await start.json()) as { id: string };
+  let info: any = null;
+  for (let i = 0; i < 48; i++) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const st = await containerCall(env, 'thumbs-' + jobId, `/jobs/${id}`);
+    info = st.ok ? await st.json() : null;
+    if (info?.status === 'done' || info?.status === 'error') break;
+  }
+  if (info?.status !== 'done') throw new Error('thumbnail generation failed: ' + (info?.error || 'timeout'));
+
+  const thumbKey = `thumbs/${slug}.jpg`;
+  const fileMap: Record<string, string> = { 't0.jpg': thumbKey };
+  for (const w of [320, 480, 640]) fileMap[`t0-${w}w.webp`] = `thumbs/${slug}-${w}w.webp`;
+  for (const [name, key] of Object.entries(fileMap)) {
+    if (!(info.names || []).includes(name)) continue;
+    const file = await containerCall(env, 'thumbs-' + jobId, `/files/${id}?name=${name}`);
+    if (!file.ok) continue;
+    const bytes = await file.arrayBuffer();
+    const ctype = name.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    await env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType: ctype } });
+    // Mirror WebP variants into MEDIA_KV — the site serves thumbnails from KV
+    if (name.endsWith('.webp')) {
+      await env.MEDIA_KV.put(key, bytes, { metadata: { ct: 'image/webp' } }).catch(() => {});
+    }
+  }
+  containerCall(env, 'thumbs-' + jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
+
+  // 3. Insert the video row (with chapters + language list)
+  await env.DB.prepare(
+    'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, duration, video_key, srt_key, srt_ar_key, thumb_key, chapters, srt_langs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+  ).bind(
+    title,
+    opts.title_ar ?? job.title_ar ?? null,
+    slug,
+    opts.description ?? job.description ?? null,
+    opts.category_id ?? null,
+    opts.scholar_id ?? null,
+    Math.round(job.duration || 0),
+    videoKey,
+    job.srt_key ? srtKey : null,
+    srtArKey,
+    thumbKey,
+    job.chapters || null,
+    langs.length ? JSON.stringify(langs) : null
+  ).run();
+
+  // 3b. Index cues: FTS for transcript search + Vectorize for semantic search
+  try {
+    const cuesObj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
+    if (cuesObj) {
+      const cues: any[] = await cuesObj.json();
+      await env.DB.prepare('DELETE FROM cues_fts WHERE slug = ?').bind(slug).run().catch(() => {});
+      for (let i = 0; i < cues.length; i += 40) {
+        const batch = cues.slice(i, i + 40);
+        const stmt = env.DB.prepare('INSERT INTO cues_fts (slug, start, text, source) VALUES (?,?,?,?)');
+        await env.DB.batch(batch.map((cu) => stmt.bind(slug, Math.round(cu.start), cu.text, cu.source || '')));
+      }
+      if (env.AI && env.VECTORIZE) {
+        for (let i = 0; i < cues.length; i += 50) {
+          const batch = cues.slice(i, i + 50);
+          const emb: any = await env.AI.run('@cf/baai/bge-m3', { text: batch.map((cu) => cu.text) });
+          const vectors = (emb.data || []).map((v: number[], j: number) => ({
+            id: `${slug}#${i + j}`,
+            values: v,
+            metadata: { slug, title, start: Math.round(batch[j].start), text: batch[j].text.slice(0, 200) },
+          }));
+          if (vectors.length) await env.VECTORIZE.upsert(vectors);
+        }
+      }
+    }
+  } catch (err) {
+    console.log('cue indexing failed (non-fatal):', (err as any)?.message);
+  }
+
+  // 4. Fresh cache for the site
+  const keys = await env.CACHE.list();
+  for (const k of keys.keys) await env.CACHE.delete(k.name);
+
+  return { slug, video_key: videoKey, thumb_key: thumbKey, srt_key: srtKey, srt_ar_key: srtArKey };
+}

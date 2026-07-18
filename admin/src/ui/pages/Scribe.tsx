@@ -1,0 +1,935 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { api, useApi } from '../lib/api';
+import { fmtAgo, fmtDuration } from '../lib/format';
+import { GlowCard, Button, inputCls, Badge, ErrorNote, Modal, Spinner, Field } from '../components/Primitives';
+import { useToast } from '../components/Toast';
+import { SubtitleEditor } from '../components/SubtitleEditor';
+import { PreviewPlayer } from '../components/PreviewPlayer';
+import { BlurFade } from '../components/BlurFade';
+import { BorderBeam } from '../components/BorderBeam';
+import { Icon } from '../components/Icon';
+
+const LANGS = [
+  { code: 'en', label: 'English' }, { code: 'ar', label: 'Arabic' },
+  { code: 'fa', label: 'Farsi' }, { code: 'fr', label: 'French' },
+  { code: 'de', label: 'German' }, { code: 'es', label: 'Spanish' },
+  { code: 'tr', label: 'Turkish' }, { code: 'ru', label: 'Russian' },
+];
+
+// User-facing pipeline stages. Internal `render` is folded into Translate.
+const STAGES = [
+  { id: 'download', label: 'Download', icon: 'download' },
+  { id: 'asr', label: 'Transcribe', icon: 'captions' },
+  { id: 'translate', label: 'Translate', icon: 'globe' },
+  { id: 'metadata', label: 'Metadata', icon: 'sparkles' },
+] as const;
+
+function stageIndex(step: string): number {
+  if (step === 'queued') return -1;
+  if (step === 'render') return 2; // rendering counts as translating
+  if (step === 'done') return STAGES.length;
+  const i = STAGES.findIndex((s) => s.id === step);
+  return i < 0 ? 0 : i;
+}
+
+function parseTimes(raw: string | null): Record<string, number> {
+  try {
+    const obj = JSON.parse(raw || '{}');
+    const out: Record<string, number> = {};
+    for (const k of Object.keys(obj)) out[k] = new Date(obj[k]).getTime();
+    return out;
+  } catch { return {}; }
+}
+
+function stageDuration(times: Record<string, number>, stage: string, now: number): number | null {
+  // Visual stages; `translate` spans the internal translate + render steps.
+  const order = ['download', 'asr', 'translate', 'metadata', 'done'];
+  const start = times[stage];
+  if (!start) return null;
+  let end: number | undefined;
+  for (let i = order.indexOf(stage) + 1; i < order.length; i++) {
+    if (times[order[i]]) { end = times[order[i]]; break; }
+  }
+  return ((end ?? now) - start) / 1000;
+}
+
+function fmtSecs(s: number | null): string {
+  if (s == null || s < 0) return '';
+  if (s < 90) return `${Math.round(s)}s`;
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
+
+function Timeline({ job, now }: { job: any; now: number }) {
+  const idx = stageIndex(job.step);
+  const times = useMemo(() => parseTimes(job.stage_times), [job.stage_times]);
+  const failed = job.status === 'error';
+
+  return (
+    <div className="flex items-center">
+      {STAGES.map((s, i) => {
+        const isDone = i < idx || job.status === 'done';
+        const isActive = i === idx && job.status === 'running';
+        const isFailed = failed && i === idx;
+        const dur = isDone || isActive ? stageDuration(times, s.id, now) : null;
+        return (
+          <div key={s.id} className={`flex items-center ${i > 0 ? 'flex-1' : ''}`}>
+            {i > 0 && (
+              <div className="relative mx-1 h-px flex-1 overflow-hidden rounded bg-white/[0.07]">
+                <motion.div
+                  className="absolute inset-y-0 left-0 bg-gradient-to-r from-gold/60 to-gold"
+                  initial={false}
+                  animate={{ width: isDone || isActive ? '100%' : '0%' }}
+                  transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                />
+              </div>
+            )}
+            <div className="flex flex-col items-center gap-1">
+              <div
+                className={`relative flex h-7 w-7 items-center justify-center rounded-full border transition-colors duration-300 ${
+                  isFailed
+                    ? 'border-red-500/50 bg-red-500/10 text-red-400'
+                    : isDone
+                      ? 'border-gold/50 bg-gold/15 text-gold-bright'
+                      : isActive
+                        ? 'border-gold bg-gold/10 text-gold-bright'
+                        : 'border-white/10 bg-white/[0.02] text-muted/50'
+                }`}
+              >
+                {isActive && (
+                  <span className="absolute inset-0 animate-ping rounded-full border border-gold/40" />
+                )}
+                {isDone && !isFailed ? (
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" d="M5 13l4 4L19 7" /></svg>
+                ) : isFailed ? (
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                ) : (
+                  <Icon name={s.icon} className="h-3 w-3" />
+                )}
+              </div>
+              <span className={`text-[9px] font-semibold uppercase tracking-wider ${isActive ? 'text-gold-bright' : isDone ? 'text-cream/60' : 'text-muted/40'}`}>
+                {s.label}
+              </span>
+              <span className="h-3 text-[9px] tabular-nums text-muted/60">
+                {s.id === 'download' && isActive && job.download_pct > 0
+                  ? `${Math.round(job.download_pct)}%`
+                  : fmtSecs(dur)}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-muted transition-colors hover:bg-gold/10 hover:text-gold-bright"
+    >
+      {copied ? 'Copied' : label || 'Copy'}
+    </button>
+  );
+}
+
+function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose: () => void }) {
+  const meta = useApi<any>(open ? '/api/meta' : null);
+  const [form, setForm] = useState<any>(null);
+  const [cands, setCands] = useState<{ key: string; ts: number }[] | null>(null);
+  const [candErr, setCandErr] = useState('');
+  const [chosenTs, setChosenTs] = useState<number | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState<any | null>(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!open) { setCands(null); setDone(null); setErr(''); setCandErr(''); return; }
+    setForm({
+      title: job.title || '',
+      title_ar: job.title_ar || '',
+      description: job.description || '',
+      slug: (job.title || job.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80),
+      category_id: null,
+      scholar_id: null,
+    });
+    // Generate frame candidates via the container
+    api(`/api/scribe/${job.id}/thumbs`, { method: 'POST' })
+      .then((r) => {
+        setCands(r.candidates || []);
+        if (r.candidates?.length) setChosenTs(r.candidates[0].ts);
+      })
+      .catch((e) => { setCands([]); setCandErr(e.message); });
+  }, [open, job.id]);
+
+  if (!open || !form) return null;
+
+  return (
+    <Modal open={open} onClose={onClose} title="Publish as video" wide>
+      {done ? (
+        <div className="space-y-4 text-center">
+          <p className="text-[15px] font-semibold text-cream">Published</p>
+          <p className="text-[13px] text-muted">Media, subtitles, and responsive thumbnails are in place. Cache purged.</p>
+          <a href={`https://deensubs.com/watch/${done.slug}`} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[13px] font-semibold text-ink hover:bg-gold-bright">
+            <Icon name="external" className="h-3.5 w-3.5" /> Open /watch/{done.slug}
+          </a>
+        </div>
+      ) : (
+        <div className="space-y-3.5">
+          <Field label="Title">
+            <input className={inputCls} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Arabic title">
+              <input dir="rtl" className={inputCls + ' font-arabic'} value={form.title_ar} onChange={(e) => setForm({ ...form, title_ar: e.target.value })} />
+            </Field>
+            <Field label="Slug">
+              <input className={inputCls + ' font-mono'} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Description">
+            <textarea rows={3} className={inputCls + ' resize-y'} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Category">
+              <select className={inputCls} value={form.category_id ?? ''} onChange={(e) => setForm({ ...form, category_id: e.target.value ? parseInt(e.target.value) : null })}>
+                <option value="">None</option>
+                {(meta.data?.categories || []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Scholar">
+              <select className={inputCls} value={form.scholar_id ?? ''} onChange={(e) => setForm({ ...form, scholar_id: e.target.value ? parseInt(e.target.value) : null })}>
+                <option value="">None</option>
+                {(meta.data?.scholars || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Thumbnail frame</p>
+            {cands === null ? (
+              <div className="flex h-24 items-center justify-center gap-2 text-[12px] text-muted">
+                <Spinner className="h-4 w-4" /> Extracting frames from the video...
+              </div>
+            ) : cands.length === 0 ? (
+              <p className="text-[12px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}. A frame at 30% will be used on publish.</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {cands.map((cand) => (
+                  <button
+                    key={cand.key}
+                    onClick={() => setChosenTs(cand.ts)}
+                    className={`relative overflow-hidden rounded-lg border-2 transition-all ${
+                      chosenTs === cand.ts ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={`https://cdn.deensubs.com/${cand.key}?v=${job.id}`} alt="" className="aspect-video w-full object-cover" />
+                    <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] tabular-nums text-cream">
+                      {Math.floor(cand.ts / 60)}:{String(cand.ts % 60).padStart(2, '0')}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="mt-1.5 text-[11px] text-faint">Responsive WebP variants (320/480/640) are generated on publish and mirrored to KV.</p>
+          </div>
+
+          {err && <ErrorNote message={err} />}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button
+              disabled={publishing || !form.title || !form.slug}
+              onClick={async () => {
+                setPublishing(true);
+                setErr('');
+                try {
+                  const r = await api(`/api/scribe/${job.id}/publish`, {
+                    method: 'POST',
+                    body: JSON.stringify({ ...form, thumb_ts: chosenTs ?? undefined }),
+                  });
+                  setDone(r);
+                  toast.push(`Published /watch/${r.slug}`);
+                } catch (e: any) {
+                  setErr(e.message);
+                }
+                setPublishing(false);
+              }}
+            >
+              {publishing ? 'Publishing...' : 'Publish video'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function JobDetail({ job }: { job: any }) {
+  const [tab, setTab] = useState<'overview' | 'preview'>('overview');
+  const [srt, setSrt] = useState<string | null>(null);
+  const [dub, setDub] = useState<any>({ status: job.dub_status || 'none', key: job.dub_key });
+  const [dubBusy, setDubBusy] = useState(false);
+  const toast = useToast();
+
+  // Poll dubbing progress while active
+  useEffect(() => {
+    if (dub.status !== 'dubbing') return;
+    const t = setInterval(async () => {
+      const r = await api(`/api/scribe/${job.id}/dub`).catch(() => null);
+      if (r && r.status !== 'dubbing') {
+        setDub(r);
+        if (r.status === 'done') toast.push('Dub ready');
+        if (r.status === 'error') toast.push('Dubbing failed: ' + (r.detail || ''), 'error');
+      }
+    }, 10000);
+    return () => clearInterval(t);
+  }, [dub.status, job.id]);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const isVideoSource = /\.(mp4|webm|mkv|mov)$/i.test(job.source_key || '');
+  useEffect(() => {
+    if (!job.srt_key) return;
+    fetch(`/api/scribe/${job.id}/file?type=srt`)
+      .then((r) => (r.ok ? r.text() : null))
+      .then(setSrt)
+      .catch(() => {});
+  }, [job.id, job.srt_key]);
+
+  return (
+    <div className="border-t border-white/[0.05] pt-3">
+      <div className="mb-3 flex items-center gap-1">
+        {(['overview', 'preview'] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`rounded-lg px-3 py-1.5 text-[12px] font-medium capitalize transition-colors ${
+              tab === t ? 'bg-white/[0.06] text-cream' : 'text-muted hover:text-cream'
+            }`}>
+            {t === 'preview' ? 'Preview with subtitles' : t}
+          </button>
+        ))}
+      </div>
+      {tab === 'preview' ? (
+        job.source_key ? <PreviewPlayer job={job} /> : <p className="py-6 text-center text-[13px] text-muted">Source media not available yet.</p>
+      ) : (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="space-y-3">
+        {job.title && (
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted">Title</p>
+              <CopyButton text={job.title} />
+            </div>
+            <p className="mt-0.5 text-[13px] font-medium leading-snug text-cream">{job.title}</p>
+          </div>
+        )}
+        {job.title_ar && (
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted">Arabic title</p>
+              <CopyButton text={job.title_ar} />
+            </div>
+            <p dir="rtl" className="mt-0.5 font-arabic text-[15px] leading-snug text-cream">{job.title_ar}</p>
+          </div>
+        )}
+        {job.description && (
+          <div>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted">Description</p>
+              <CopyButton text={job.description} />
+            </div>
+            <p className="mt-0.5 text-[12.5px] leading-relaxed text-cream/80">{job.description}</p>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {job.status === 'done' && (
+            <button
+              onClick={() => (window as any).__openEditor?.(job)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-white/[0.07] active:scale-[0.97]"
+            >
+              <Icon name="edit" className="h-3 w-3" /> Edit subtitles
+            </button>
+          )}
+          {job.status === 'done' && (
+            isVideoSource ? (
+              <button
+                onClick={() => setPublishOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-ink transition-all hover:bg-gold-bright active:scale-[0.97]"
+              >
+                <Icon name="video" className="h-3 w-3" /> Publish as video
+              </button>
+            ) : (
+              <span className="inline-flex items-center rounded-lg border border-hairline bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-faint" title="yt-dlp downloads audio only; publish requires a direct video-file URL">
+                audio-only — not publishable
+              </span>
+            )
+          )}
+          {job.status === 'done' && (
+            dub.status === 'done' && dub.key ? (
+              <a href={`/api/scribe/${job.id}/dub/file`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 transition-all hover:bg-emerald-500/20 active:scale-[0.97]">
+                <Icon name="download" className="h-3 w-3" /> Dub audio
+              </a>
+            ) : dub.status === 'dubbing' ? (
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-muted">
+                <Spinner className="h-3 w-3" /> Dubbing...
+              </span>
+            ) : (
+              <button
+                disabled={dubBusy}
+                onClick={async () => {
+                  setDubBusy(true);
+                  try {
+                    await api(`/api/scribe/${job.id}/dub`, { method: 'POST', body: JSON.stringify({ lang: job.target_lang }) });
+                    setDub({ status: 'dubbing' });
+                    toast.push('Dubbing started — takes several minutes');
+                  } catch (e: any) {
+                    toast.push(e.message, 'error');
+                  }
+                  setDubBusy(false);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-white/[0.07] active:scale-[0.97]"
+              >
+                <Icon name="globe" className="h-3 w-3" /> {dubBusy ? 'Starting...' : `Dub ${String(job.target_lang).toUpperCase()}`}
+              </button>
+            )
+          )}
+          {job.srt_key && (
+            <a href={`/api/scribe/${job.id}/file?type=srt`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/10 px-2.5 py-1.5 text-[11px] font-semibold text-gold-bright transition-all hover:bg-gold/20 active:scale-[0.97]">
+              <Icon name="download" className="h-3 w-3" /> {String(job.target_lang).toUpperCase()} subtitles
+            </a>
+          )}
+          {job.srt_source_key && (
+            <a href={`/api/scribe/${job.id}/file?type=source`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-white/[0.07] active:scale-[0.97]">
+              <Icon name="download" className="h-3 w-3" /> Source subtitles
+            </a>
+          )}
+          {job.asr_key && (
+            <a href={`/api/scribe/${job.id}/file?type=asr`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-muted transition-all hover:bg-white/[0.07] active:scale-[0.97]">
+              <Icon name="download" className="h-3 w-3" /> Raw transcript
+            </a>
+          )}
+        </div>
+      </div>
+      <div>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted">Subtitle preview</p>
+        {srt ? (
+          <pre className="max-h-64 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-cream/75">
+            {srt.split('\n\n').slice(0, 10).join('\n\n')}
+          </pre>
+        ) : job.srt_key ? (
+          <div className="flex h-24 items-center justify-center"><Spinner /></div>
+        ) : (
+          <p className="text-[12px] text-muted">Not ready yet.</p>
+        )}
+      </div>
+    </div>
+      )}
+      <PublishModal job={job} open={publishOpen} onClose={() => setPublishOpen(false)} />
+    </div>
+  );
+}
+
+function CookiesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const status = useApi<any>(open ? '/api/scribe/cookies' : null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  return (
+    <Modal open={open} onClose={onClose} title="yt-dlp cookies" wide>
+      <p className="text-[12.5px] leading-relaxed text-muted">
+        YouTube increasingly requires a signed-in session. Export your cookies with a "Get cookies.txt" browser
+        extension while signed into YouTube, paste the file contents below, and every yt-dlp download will use them.
+        yt-dlp itself self-updates to the latest release before runs.
+      </p>
+      <div className="mt-3 flex items-center gap-2">
+        {status.data?.set ? (
+          <Badge tone="green">active · {status.data.lines} cookies · updated {fmtAgo(status.data.updated)}</Badge>
+        ) : (
+          <Badge tone="dim">no cookies stored</Badge>
+        )}
+      </div>
+      <textarea
+        rows={8}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={'# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t...'}
+        spellCheck={false}
+        className="mt-3 w-full resize-y rounded-xl border border-hairline bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-cream outline-none focus:border-gold/40"
+      />
+      {msg && <p className="mt-2 text-[12px] text-gold-bright">{msg}</p>}
+      <div className="mt-4 flex justify-between">
+        <Button
+          variant="danger"
+          disabled={busy || !status.data?.set}
+          onClick={async () => {
+            setBusy(true);
+            await api('/api/scribe/cookies', { method: 'DELETE' });
+            setMsg('Cookies cleared.');
+            status.refetch();
+            setBusy(false);
+          }}
+        >
+          Clear stored cookies
+        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+          <Button
+            disabled={busy || !text.trim()}
+            onClick={async () => {
+              setBusy(true);
+              setMsg('');
+              try {
+                const r = await api('/api/scribe/cookies', { method: 'PUT', body: JSON.stringify({ cookies: text }) });
+                setMsg(`Saved ${r.lines} cookies.`);
+                setText('');
+                status.refetch();
+              } catch (e: any) {
+                setMsg('Failed: ' + e.message);
+              }
+              setBusy(false);
+            }}
+          >
+            {busy ? 'Saving...' : 'Save cookies'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+export default function Scribe() {
+  const { data, loading, error, refetch } = useApi<any>('/api/scribe');
+  const [url, setUrl] = useState('');
+  const [lang, setLang] = useState('en');
+  const [extraLangs, setExtraLangs] = useState<string[]>([]);
+  const [fullVideo, setFullVideo] = useState(false);
+  const [batch, setBatch] = useState<null | { title: string; entries: any[]; picked: Set<string> }>(null);
+  const [probe, setProbe] = useState<any | null>(null);
+  const [probing, setProbing] = useState(false);
+  const [enumerating, setEnumerating] = useState(false);
+  const [editorJob, setEditorJob] = useState<any | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr, setSubmitErr] = useState('');
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
+  const [cookiesOpen, setCookiesOpen] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'done' | 'error'>('all');
+  const [q, setQ] = useState('');
+  const toast = useToast();
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    (window as any).__openEditor = (j: any) => setEditorJob(j);
+    return () => { delete (window as any).__openEditor; };
+  }, []);
+
+  const jobs = data?.jobs || [];
+  const anyRunning = jobs.some((j: any) => j.status === 'running' || j.status === 'queued');
+  const weekAgo = Date.now() - 7 * 86400e3;
+  const stats = {
+    running: jobs.filter((j: any) => j.status === 'running' || j.status === 'queued').length,
+    week: jobs.filter((j: any) => new Date((j.created_at || '').replace(' ', 'T') + 'Z').getTime() > weekAgo).length,
+    minutes: Math.round(jobs.reduce((a: number, j: any) => a + (j.asr_seconds || 0), 0) / 60),
+    cost: jobs.reduce((a: number, j: any) => a + (j.asr_seconds / 3600) * 0.4 + (j.llm_tokens / 1e6) * 0.4, 0),
+  };
+  const shownJobs = jobs.filter((j: any) => {
+    if (statusFilter === 'running' && !(j.status === 'running' || j.status === 'queued')) return false;
+    if (statusFilter === 'done' && j.status !== 'done') return false;
+    if (statusFilter === 'error' && j.status !== 'error') return false;
+    if (q.trim() && !`${j.title || ''} ${j.url}`.toLowerCase().includes(q.toLowerCase())) return false;
+    return true;
+  });
+  const prevStatus = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  }, []);
+  useEffect(() => {
+    for (const j of jobs) {
+      const prev = prevStatus.current[j.id];
+      if (prev && prev !== j.status && (j.status === 'done' || j.status === 'error')) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('DeenSubs Scribe', {
+            body: j.status === 'done' ? `Done: ${j.title || j.url}` : `Failed: ${j.title || j.url}`,
+          });
+        }
+      }
+      prevStatus.current[j.id] = j.status;
+    }
+  }, [jobs]);
+
+  // Poll while anything is in flight; tick the clock for live stage durations
+  useEffect(() => {
+    if (timer.current) clearInterval(timer.current);
+    if (anyRunning) {
+      timer.current = setInterval(() => {
+        setNow(Date.now());
+        refetch();
+      }, 3000);
+    }
+    return () => { if (timer.current) clearInterval(timer.current); };
+  }, [anyRunning, refetch]);
+
+  const looksLikePlaylist = /[?&]list=|\/playlist|\/@[\w.-]+|\/channel\//.test(url);
+
+  // Paste intelligence: instant identity probe + container pre-warm
+  useEffect(() => {
+    setProbe(null);
+    if (!/^https?:\/\/\S+$/.test(url.trim()) || looksLikePlaylist) return;
+    const u = url.trim();
+    setProbing(true);
+    const t = setTimeout(async () => {
+      api('/api/scribe/prewarm', { method: 'POST' }).catch(() => {});
+      try {
+        const fast = await api('/api/scribe/probe', { method: 'POST', body: JSON.stringify({ url: u }) });
+        setProbe(fast);
+        setProbing(false);
+        // Deep probe fills duration + cost (container, a few seconds)
+        if (!fast.duration) {
+          const deep = await api('/api/scribe/probe', { method: 'POST', body: JSON.stringify({ url: u, deep: true }) });
+          setProbe((cur: any) => (cur && cur.url === deep.url ? { ...cur, ...deep } : cur));
+        }
+      } catch {
+        setProbing(false);
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [url, looksLikePlaylist]);
+
+  async function submit() {
+    if (!url.trim() || submitting) return;
+    if (looksLikePlaylist) return enumerate();
+    setSubmitting(true);
+    setSubmitErr('');
+    try {
+      const r = await api('/api/scribe', {
+        method: 'POST',
+        body: JSON.stringify({
+          url: url.trim(),
+          target_langs: [lang, ...extraLangs],
+          full_video: fullVideo,
+          title: probe?.title,
+          channel: probe?.channel,
+          thumb_url: probe?.thumb_url,
+        }),
+      });
+      setUrl('');
+      setProbe(null);
+      setExpanded(r.job?.id || null);
+      refetch();
+    } catch (e: any) {
+      setSubmitErr(e.message);
+    }
+    setSubmitting(false);
+  }
+
+  async function enumerate() {
+    setEnumerating(true);
+    setSubmitErr('');
+    try {
+      const r = await api('/api/scribe/enumerate', { method: 'POST', body: JSON.stringify({ url: url.trim() }) });
+      if (r.error) throw new Error(r.error);
+      setBatch({ title: r.title || 'Playlist', entries: r.entries || [], picked: new Set() });
+    } catch (e: any) {
+      setSubmitErr(e.message);
+    }
+    setEnumerating(false);
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Composer */}
+      <BlurFade>
+        <GlowCard className="relative overflow-hidden p-6">
+          <BorderBeam size={170} duration={14} />
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-[15px] font-semibold tracking-tight text-cream">Add a video</h2>
+              <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-muted">
+                Direct links download at the edge. YouTube and blocked hosts spin up an isolated yt-dlp container
+                that dials through the Padborg proxies (always the latest yt-dlp, with your cookies). ElevenLabs
+                Scribe v2 transcribes, Gemini translates on word-index timing, and metadata is written from the
+                full transcript.
+              </p>
+            </div>
+            <button
+              onClick={() => setCookiesOpen(true)}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-cream"
+            >
+              <Icon name="wrench" className="h-3.5 w-3.5" /> Cookies
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <input
+              className={inputCls + ' min-w-64 flex-1 py-2.5 font-mono text-[12.5px]'}
+              placeholder="https://youtube.com/watch?v=...   or a direct .mp4 / .mp3 URL"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
+            <select className={inputCls + ' w-32 py-2.5'} value={lang} onChange={(e) => setLang(e.target.value)}>
+              {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+            </select>
+            <Button onClick={submit} disabled={submitting || enumerating || !url.trim()} className="px-5">
+              {enumerating ? 'Listing...' : submitting ? 'Starting...' : looksLikePlaylist ? 'List videos' : 'Transcribe'}
+            </Button>
+          </div>
+          {(probe || probing) && !looksLikePlaylist && (
+            <div className="mt-3 flex items-center gap-3 rounded-xl border border-hairline bg-black/25 p-2.5">
+              {probe?.thumb_url ? (
+                <img src={probe.thumb_url} alt="" className="h-14 w-24 shrink-0 rounded-lg border border-hairline object-cover" />
+              ) : (
+                <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg border border-hairline bg-white/[0.02]">
+                  {probing ? <Spinner className="h-4 w-4" /> : <Icon name="video" className="h-4 w-4 text-faint" />}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-cream">{probe?.title || (probing ? 'Looking up video...' : url)}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted">
+                  {probe?.channel && <span>{probe.channel}</span>}
+                  {probe?.duration > 0 && <span className="tabular-nums">{fmtDuration(probe.duration)}</span>}
+                  {probe?.est_cost != null && <span className="tabular-nums text-gold-bright">≈${probe.est_cost.toFixed(2)}</span>}
+                  {probe?.bytes > 0 && <span className="tabular-nums">{(probe.bytes / 1048576).toFixed(0)} MB</span>}
+                  {probe?.path && <Badge tone="dim" className="font-mono text-[9px]">{probe.path === 'yt-dlp' ? 'yt-dlp + proxy' : 'edge download'}</Badge>}
+                  {probe && !probe.duration && probe.path === 'yt-dlp' && <span className="text-faint">probing duration...</span>}
+                </div>
+                {probe?.duplicate && (
+                  <p className="mt-1 text-[11px] text-amber-400">
+                    Already transcribed: "{probe.duplicate.title || probe.duplicate.id}" ({probe.duplicate.status}) — queueing again makes a duplicate.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <label className="flex items-center gap-1.5 text-[11px] text-muted">
+              <input type="checkbox" checked={fullVideo} onChange={(e) => setFullVideo(e.target.checked)} className="accent-[#c4a44c]" />
+              Full video (for publishing + clips)
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-faint">Also translate to:</span>
+              {LANGS.filter((l) => l.code !== lang).map((l) => (
+                <button key={l.code}
+                  onClick={() => setExtraLangs((xs) => xs.includes(l.code) ? xs.filter((x) => x !== l.code) : [...xs, l.code])}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    extraLangs.includes(l.code) ? 'border-gold/40 bg-gold/10 text-gold-bright' : 'border-hairline text-faint hover:text-muted'
+                  }`}>
+                  {l.code}
+                </button>
+              ))}
+            </div>
+          </div>
+          {submitErr && <p className="mt-2 text-[12px] text-red-400">{submitErr}</p>}
+        </GlowCard>
+      </BlurFade>
+
+      {error && <ErrorNote message={error} onRetry={refetch} />}
+
+      {/* Stats strip + filters */}
+      {jobs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-hairline bg-white/[0.015] px-4 py-2.5">
+          <span className="text-[12px] text-muted"><b className="text-cream">{stats.running}</b> running</span>
+          <span className="text-[12px] text-muted"><b className="text-cream">{stats.week}</b> this week</span>
+          <span className="text-[12px] text-muted"><b className="text-cream">{stats.minutes}</b> min transcribed</span>
+          <span className="text-[12px] text-muted">≈<b className="text-gold-bright">${stats.cost.toFixed(2)}</b> spent</span>
+          <div className="ml-auto flex items-center gap-1.5">
+            {(['all', 'running', 'done', 'error'] as const).map((f) => (
+              <button key={f} onClick={() => setStatusFilter(f)}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
+                  statusFilter === f ? 'border-gold/40 bg-gold/10 text-gold-bright' : 'border-hairline text-faint hover:text-muted'
+                }`}>
+                {f}
+              </button>
+            ))}
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Filter..."
+              className="w-28 rounded-lg border border-hairline bg-black/30 px-2.5 py-1 text-[12px] text-cream outline-none placeholder:text-faint focus:border-gold/40"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Jobs */}
+      <div className="space-y-3">
+        {loading && !jobs.length && (
+          <div className="space-y-3">
+            {[0, 1].map((i) => (
+              <div key={i} className="h-28 animate-pulse rounded-2xl border border-white/[0.04] bg-white/[0.015]" />
+            ))}
+          </div>
+        )}
+        {shownJobs.map((j: any, i: number) => (
+          <BlurFade key={j.id} delay={Math.min(i * 0.03, 0.15)}>
+            <GlowCard glow={false} className="overflow-hidden">
+              <button
+                className="block w-full p-4 text-left"
+                onClick={() => setExpanded(expanded === j.id ? null : j.id)}
+              >
+                <div className="flex items-center gap-3">
+                  {j.thumb_url ? (
+                    <div className="relative hidden h-12 w-20 shrink-0 overflow-hidden rounded-lg border border-hairline sm:block">
+                      <img src={j.thumb_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      {j.step === 'download' && j.status === 'running' && (
+                        <div className="absolute inset-x-0 bottom-0 h-1 bg-black/50">
+                          <div className="h-full bg-gold transition-all duration-500" style={{ width: `${j.download_pct || 0}%` }} />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13.5px] font-medium text-cream" title={j.title || j.url}>
+                      {j.title || j.url}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+                      {j.status === 'done' && <Badge tone="green">done</Badge>}
+                      {j.status === 'error' && <Badge tone="red">failed</Badge>}
+                      {j.status === 'running' && <Badge tone="gold">running</Badge>}
+                      {j.status === 'queued' && <Badge tone="dim">queued</Badge>}
+                      {j.channel && <span className="text-cream/60">{j.channel}</span>}
+                      {j.step === 'download' && j.status === 'running' && j.download_pct > 0 && (
+                        <span className="tabular-nums text-gold-bright">{Math.round(j.download_pct)}%</span>
+                      )}
+                      {j.language_code && <span>{j.language_code} → {j.target_lang}</span>}
+                      {j.download_method && <span className="font-mono text-[10px]">{j.download_method}</span>}
+                      {j.duration > 0 && <span>{fmtDuration(j.duration)}</span>}
+                      {j.cue_count > 0 && <span>{j.cue_count} cues</span>}
+                      {j.asr_seconds > 0 && (
+                        <span className="tabular-nums" title="Estimated cost: ElevenLabs ASR + LLM tokens">
+                          ~${((j.asr_seconds / 3600) * 0.4 + (j.llm_tokens / 1e6) * 0.4).toFixed(2)}
+                        </span>
+                      )}
+                      <span>{fmtAgo(j.created_at)}</span>
+                    </div>
+                  </div>
+                  <div className="hidden w-[340px] shrink-0 sm:block">
+                    <Timeline job={j} now={now} />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {j.status === 'error' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); api(`/api/scribe/${j.id}/retry`, { method: 'POST' }).then(refetch); }}
+                        title="Retry as a new job"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-white/[0.06] hover:text-gold-bright"
+                      >
+                        <Icon name="refresh" className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmDelete(j); }}
+                      title="Delete job and files"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-red-500/10 hover:text-red-400"
+                    >
+                      <Icon name="trash" className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {j.error && <p className="mt-2 break-all text-[11px] leading-relaxed text-red-400/90">{j.error}</p>}
+                <div className="mt-3 sm:hidden">
+                  <Timeline job={j} now={now} />
+                </div>
+              </button>
+              <AnimatePresence>
+                {expanded === j.id && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-4 pb-4">
+                      <JobDetail job={j} />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </GlowCard>
+          </BlurFade>
+        ))}
+        {!loading && !shownJobs.length && (
+          <div className="rounded-2xl border border-dashed border-white/[0.08] py-14 text-center">
+            <Icon name="captions" className="mx-auto h-8 w-8 text-muted/30" />
+            <p className="mt-3 text-[13px] text-muted">No transcriptions yet. Paste a URL above to start.</p>
+          </div>
+        )}
+      </div>
+
+      {batch && (
+        <Modal open onClose={() => setBatch(null)} title={`${batch.title} — ${batch.entries.length} videos`} wide>
+          <div className="mb-3 flex items-center gap-2">
+            <Button variant="ghost" className="px-3 py-1.5 text-[12px]"
+              onClick={() => setBatch({ ...batch, picked: new Set(batch.entries.slice(0, 30).map((e: any) => e.url)) })}>
+              Select first 30
+            </Button>
+            <Button variant="ghost" className="px-3 py-1.5 text-[12px]" onClick={() => setBatch({ ...batch, picked: new Set() })}>
+              Clear
+            </Button>
+            <span className="ml-auto text-[12px] text-muted">{batch.picked.size} selected (max 30)</span>
+          </div>
+          <div className="max-h-96 space-y-0.5 overflow-y-auto">
+            {batch.entries.map((e: any) => (
+              <label key={e.url} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.02]">
+                <input type="checkbox" className="accent-[#c4a44c]"
+                  checked={batch.picked.has(e.url)}
+                  onChange={() => {
+                    const picked = new Set(batch.picked);
+                    picked.has(e.url) ? picked.delete(e.url) : picked.size < 30 && picked.add(e.url);
+                    setBatch({ ...batch, picked });
+                  }} />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-cream/85">{e.title}</span>
+                <span className="shrink-0 font-mono text-[11px] tabular-nums text-faint">{fmtDuration(e.duration)}</span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setBatch(null)}>Cancel</Button>
+            <Button disabled={!batch.picked.size} onClick={async () => {
+              const r = await api('/api/scribe/batch', {
+                method: 'POST',
+                body: JSON.stringify({ urls: [...batch.picked], target_langs: [lang, ...extraLangs], full_video: fullVideo }),
+              });
+              toast.push(`Queued ${r.created} jobs`);
+              setBatch(null);
+              setUrl('');
+              refetch();
+            }}>
+              Queue {batch.picked.size} jobs
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {editorJob && <SubtitleEditor job={editorJob} onClose={() => { setEditorJob(null); refetch(); }} />}
+
+      <CookiesModal open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
+
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete job">
+        <p className="text-[13px] leading-relaxed text-cream/80">
+          Delete this job and all its files (source media, transcript, SRTs, metadata) from R2?
+          {confirmDelete?.status === 'running' && ' The running pipeline will be terminated.'}
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button variant="danger" onClick={async () => {
+            await api(`/api/scribe/${confirmDelete.id}`, { method: 'DELETE' });
+            setConfirmDelete(null);
+            refetch();
+          }}>Delete</Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}

@@ -1,0 +1,84 @@
+name = "deensubs-admin"
+main = "src/worker/index.ts"
+compatibility_date = "2024-12-01"
+account_id = "a04f68eb4a3c42642bb23718c532d0b4"
+
+routes = [
+  { pattern = "admin.deensubs.com", custom_domain = true }
+]
+
+[limits]
+cpu_ms = 300000
+
+[assets]
+directory = "./dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "deensubs-db-weur"
+database_id = "e90d776f-5d7a-4b8e-8e3a-3c0b5e9dd0aa"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "c025d769b8584d02aedcdaca9ba9edc0"
+
+[[kv_namespaces]]
+binding = "MEDIA_KV"
+id = "3f3865624af74750b17c9aa3826f3d28"
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "deensubs-media-weur"
+
+# Scribe pipeline: durable download → ASR → translate → SRT execution
+[[workflows]]
+name = "scribe-pipeline"
+binding = "SCRIBE_WORKFLOW"
+class_name = "ScribePipeline"
+
+[[workflows]]
+name = "clip-render"
+binding = "CLIP_WORKFLOW"
+class_name = "ClipRenderer"
+
+# Workers AI (embeddings) + Vectorize (semantic transcript search)
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "deensubs-cues"
+
+# Daily retention sweep for old Scribe staging artifacts
+[triggers]
+crons = ["30 3 * * *"]
+
+# yt-dlp + ffmpeg in a Cloudflare Container (download fallback).
+# Reached only via the YTDLP Durable Object binding, never public.
+[[containers]]
+class_name = "YtdlpContainer"
+image = "./container/Dockerfile"
+max_instances = 3
+instance_type = "standard-1"
+
+[[durable_objects.bindings]]
+name = "YTDLP"
+class_name = "YtdlpContainer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["YtdlpContainer"]
+
+[vars]
+SCRIBE_LLM_MODEL = "ag/gemini-3.5-flash-low"
+SCRIBE_LLM_URL = "https://router.padborginn.dk"
+
+# Secrets (set via: echo "value" | npx wrangler secret put NAME):
+#   ADMIN_KEY     — same key as the main worker (?key= auth for scripts)
+#   AI_API_KEY    — AI router key (AI assistant)
+#   AI_BASE_URL   — AI router base URL
+#   CF_ACCOUNT_ID — for Analytics Engine SQL API
+#   CF_API_TOKEN  — for Analytics Engine SQL API
