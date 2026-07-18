@@ -5,6 +5,7 @@ import { renderPage } from './templates/layout.js';
 import { render404 } from './templates/error.js';
 import pages from './routes/pages.js';
 import api from './routes/api.js';
+import appApi from './routes/api-app.js';
 import authRoutes from './routes/auth.js';
 import admin from './routes/admin.js';
 import feeds from './routes/feeds.js';
@@ -139,6 +140,7 @@ app.use('*', async (c, next) => {
 // Mount route groups
 app.route('/', feeds);
 app.route('/', api);
+app.route('/', appApi);
 app.route('/', authRoutes);
 app.route('/', admin);
 app.route('/', pages);
