@@ -54,9 +54,12 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // 1. Download → R2
       await updateJob(env.DB, jobId, { status: 'running' });
       await markStage(env, jobId, 'download');
+      // Retries are patient on purpose: a big playlist batch can exhaust the
+      // container max_instances cap, and jobs must wait out the contention
+      // (~35 min of linear backoff) rather than fail.
       const dl = await step.do(
         'download',
-        { retries: { limit: 3, delay: '45 seconds', backoff: 'exponential' }, timeout: '30 minutes' },
+        { retries: { limit: 6, delay: '90 seconds', backoff: 'linear' }, timeout: '30 minutes' },
         async () => {
           // Resume: reuse the already-downloaded source if it exists
           const row: any = await env.DB.prepare('SELECT source_key, download_method, duration, title, channel, thumb_url FROM scribe_jobs WHERE id = ?').bind(jobId).first();

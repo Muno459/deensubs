@@ -12,7 +12,10 @@ type ContainerEnv = {
 
 export class YtdlpContainer extends Container<ContainerEnv> {
   defaultPort = 8199;
-  sleepAfter = '15m'; // idle instances shut down on their own
+  // Idle instances shut down on their own. Kept short so batch imports free
+  // their max_instances slots quickly — active work (download polls, file
+  // streaming) resets the timer, so this only trims post-work lingering.
+  sleepAfter = '3m';
 
   constructor(ctx: any, env: ContainerEnv) {
     super(ctx, env);

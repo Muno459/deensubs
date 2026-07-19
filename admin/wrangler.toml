@@ -58,10 +58,12 @@ crons = ["*/5 * * * *"]
 
 # yt-dlp + ffmpeg in a Cloudflare Container (download fallback).
 # Reached only via the YTDLP Durable Object binding, never public.
+# max_instances sizes for a full 30-video playlist batch plus enum/clips
+# overhead; account limits (6 TiB mem / 1500 vCPU concurrent) are far above.
 [[containers]]
 class_name = "YtdlpContainer"
 image = "./container/Dockerfile"
-max_instances = 8
+max_instances = 40
 instance_type = "standard-2"
 
 [[durable_objects.bindings]]
