@@ -613,13 +613,10 @@ class Handler(BaseHTTPRequestHandler):
                     # Full deterministic finish: chroma key -> 3px fringe shave ->
                     # bottom alpha fade (last 10%) -> transparent side/top pad.
                     # Geometry never trusts the model; expressions need no dims.
-                    # Side + bottom alpha fades dissolve any source crop lines;
-                    # no padding (it shrinks full-bleed busts). Fades are no-ops
-                    # on images that already have transparent margins.
+                    # Clean cutout only: chroma key + fringe erosion. No fades,
+                    # no padding — the card edge crops naturally (user decision).
                     chain = (f"colorkey=0x{rgb.hex().upper()}:0.25:0.12,format=rgba,"
-                             "split[c][a];[a]alphaextract,erosion,erosion,erosion[sh];[c][sh]alphamerge,"
-                             "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
-                             "a='alpha(X,Y)*clip((H-Y)/(0.10*H),0,1)*clip(X/(0.06*W),0,1)*clip((W-X)/(0.06*W),0,1)'")
+                             "split[c][a];[a]alphaextract,erosion,erosion,erosion[sh];[c][sh]alphamerge")
             if not chain:
                 chain = (
                      "colortemperature=temperature=10000:mix=0.9,"
