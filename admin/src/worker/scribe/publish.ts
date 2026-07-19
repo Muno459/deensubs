@@ -56,7 +56,7 @@ export async function generateThumbCandidates(env: PublishEnv, jobId: string, re
   const dur = job.duration || 60;
   const timestamps = [0.15, 0.4, 0.7].map((p) => Math.max(1, Math.round(dur * p)));
 
-  const start = await containerCall(env, 'thumbs-' + jobId, '/thumbs', {
+  const start = await containerCall(env, jobId, '/thumbs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: `${CDN_BASE}/${job.source_key}`, timestamps }),
@@ -67,7 +67,7 @@ export async function generateThumbCandidates(env: PublishEnv, jobId: string, re
   let info: any = null;
   for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 1000));
-    const st = await containerCall(env, 'thumbs-' + jobId, `/jobs/${id}`);
+    const st = await containerCall(env, jobId, `/jobs/${id}`);
     info = st.ok ? await st.json() : null;
     if (info?.status === 'done' || info?.status === 'error') break;
   }
@@ -77,18 +77,54 @@ export async function generateThumbCandidates(env: PublishEnv, jobId: string, re
   for (let n = 0; n < timestamps.length; n++) {
     const name = `t${n}.jpg`;
     if (!(info.names || []).includes(name)) continue;
-    const file = await containerCall(env, 'thumbs-' + jobId, `/files/${id}?name=${name}`);
+    const file = await containerCall(env, jobId, `/files/${id}?name=${name}`);
     if (!file.ok) continue;
     const key = `scribe/${jobId}/cand-${n}.jpg`;
     await env.MEDIA_BUCKET.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: 'image/jpeg' } });
     candidates.push({ key, ts: timestamps[n] });
   }
-  containerCall(env, 'thumbs-' + jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
+  containerCall(env, jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
   if (!candidates.length) throw new Error('no thumbnail candidates produced');
   await env.MEDIA_BUCKET.put(manifestKey, JSON.stringify(candidates), {
     httpMetadata: { contentType: 'application/json' },
   });
   return candidates;
+}
+
+/** Generate the responsive WebP variants the public site serves for a
+ * thumbs/ image (site requests -{320,480,640}w; originals alone render as
+ * broken thumbnails). No-op for non-thumbs keys or when variants exist. */
+export async function bakeThumbVariants(env: PublishEnv, key: string): Promise<void> {
+  const m = (key || '').match(/^(thumbs\/.+)\.(jpe?g|png|webp|gif|avif)$/i);
+  if (!m) return;
+  const base = m[1];
+  if (await env.MEDIA_BUCKET.head(`${base}-640w.webp`)) return; // already baked
+
+  const start = await containerCall(env, 'bake', '/thumbs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: `${CDN_BASE}/${key}`, timestamps: [0], variants: true }),
+  });
+  if (!start.ok) throw new Error(`variant bake start failed: HTTP ${start.status}`);
+  const { id } = (await start.json()) as { id: string };
+  let info: any = null;
+  for (let i = 0; i < 48; i++) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const st = await containerCall(env, 'bake', `/jobs/${id}`);
+    info = st.ok ? await st.json() : null;
+    if (info?.status === 'done' || info?.status === 'error') break;
+  }
+  if (info?.status !== 'done') throw new Error('variant bake failed: ' + (info?.error || 'timeout'));
+  for (const w of [320, 480, 640]) {
+    const name = `t0-${w}w.webp`;
+    if (!(info.names || []).includes(name)) continue;
+    const file = await containerCall(env, 'bake', `/files/${id}?name=${name}`);
+    if (!file.ok) continue;
+    const bytes = await file.arrayBuffer();
+    await env.MEDIA_BUCKET.put(`${base}-${w}w.webp`, bytes, { httpMetadata: { contentType: 'image/webp' } });
+    await env.MEDIA_KV.put(`${base}-${w}w.webp`, bytes, { metadata: { ct: 'image/webp' } }).catch(() => {});
+  }
+  containerCall(env, 'bake', `/files/${id}`, { method: 'DELETE' }).catch(() => {});
 }
 
 export async function publishScribeJob(env: PublishEnv, jobId: string, opts: PublishOptions = {}, ctx?: { waitUntil(p: Promise<any>): void }) {
@@ -126,7 +162,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   const fromImage = !!opts.thumb_key;
   const thumbSrc = fromImage ? `${CDN_BASE}/${opts.thumb_key}` : `${CDN_BASE}/${job.source_key}`;
   const ts = fromImage ? 0 : opts.thumb_ts ?? Math.max(1, Math.round((job.duration || 60) * 0.3));
-  const start = await containerCall(env, 'thumbs-' + jobId, '/thumbs', {
+  const start = await containerCall(env, jobId, '/thumbs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: thumbSrc, timestamps: [ts], variants: true }),
@@ -136,7 +172,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   let info: any = null;
   for (let i = 0; i < 48; i++) {
     await new Promise((r) => setTimeout(r, 2500));
-    const st = await containerCall(env, 'thumbs-' + jobId, `/jobs/${id}`);
+    const st = await containerCall(env, jobId, `/jobs/${id}`);
     info = st.ok ? await st.json() : null;
     if (info?.status === 'done' || info?.status === 'error') break;
   }
@@ -147,7 +183,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   for (const w of [320, 480, 640]) fileMap[`t0-${w}w.webp`] = `thumbs/${slug}-${w}w.webp`;
   for (const [name, key] of Object.entries(fileMap)) {
     if (!(info.names || []).includes(name)) continue;
-    const file = await containerCall(env, 'thumbs-' + jobId, `/files/${id}?name=${name}`);
+    const file = await containerCall(env, jobId, `/files/${id}?name=${name}`);
     if (!file.ok) continue;
     const bytes = await file.arrayBuffer();
     const ctype = name.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
@@ -157,7 +193,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
       await env.MEDIA_KV.put(key, bytes, { metadata: { ct: 'image/webp' } }).catch(() => {});
     }
   }
-  containerCall(env, 'thumbs-' + jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
+  containerCall(env, jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
 
   // 3. Insert the video row (with chapters + language list)
   await env.DB.prepare(
@@ -177,6 +213,31 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     job.chapters || null,
     langs.length ? JSON.stringify(langs) : null
   ).run();
+
+  // 3a. Attach to the site playlist this job was queued from (playlist imports).
+  // playlist_pos was fixed at queue time, so order holds even when jobs are
+  // published out of order.
+  let playlist: { id: number; title: string; slug: string } | null = null;
+  if (job.playlist_id) {
+    try {
+      const [vid, pl] = await Promise.all([
+        env.DB.prepare('SELECT id FROM videos WHERE slug = ?').bind(slug).first() as Promise<any>,
+        env.DB.prepare('SELECT id, title, slug FROM playlists WHERE id = ?').bind(job.playlist_id).first() as Promise<any>,
+      ]);
+      if (vid && pl) {
+        let pos = job.playlist_pos;
+        if (pos == null) {
+          const max: any = await env.DB.prepare('SELECT COALESCE(MAX(position), -1) as p FROM playlist_videos WHERE playlist_id = ?').bind(pl.id).first();
+          pos = (max?.p ?? -1) + 1;
+        }
+        await env.DB.prepare('INSERT OR IGNORE INTO playlist_videos (playlist_id, video_id, position) VALUES (?,?,?)')
+          .bind(pl.id, vid.id, pos).run();
+        playlist = pl;
+      }
+    } catch (err) {
+      console.log('playlist attach failed (non-fatal):', (err as any)?.message);
+    }
+  }
 
   // 3b + 4 run in the background — the admin gets their response immediately
   const indexAndPurge = async () => {
@@ -216,5 +277,5 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   if (ctx) ctx.waitUntil(indexAndPurge());
   else await indexAndPurge();
 
-  return { slug, video_key: videoKey, thumb_key: thumbKey, srt_key: srtKey, srt_ar_key: srtArKey };
+  return { slug, video_key: videoKey, thumb_key: thumbKey, srt_key: srtKey, srt_ar_key: srtArKey, playlist };
 }

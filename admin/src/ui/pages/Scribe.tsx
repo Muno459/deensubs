@@ -274,6 +274,11 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
         <div className="space-y-4 text-center">
           <p className="text-[15px] font-semibold text-cream">Published</p>
           <p className="text-[13px] text-muted">Media, subtitles, and responsive thumbnails are in place. Cache purged.</p>
+          {done.playlist && (
+            <p className="text-[13px] text-gold-bright">
+              Added to playlist <a href={`https://deensubs.com/playlist/${done.playlist.slug}`} target="_blank" rel="noreferrer" className="underline underline-offset-2">{done.playlist.title}</a>
+            </p>
+          )}
           <a href={`https://deensubs.com/watch/${done.slug}`} target="_blank" rel="noreferrer"
             className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[13px] font-semibold text-ink hover:bg-gold-bright">
             <Icon name="external" className="h-3.5 w-3.5" /> Open /watch/{done.slug}
@@ -380,6 +385,11 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
             <p className="mt-1.5 text-[11px] text-faint">Responsive WebP variants (320/480/640) are generated on publish and mirrored to KV.</p>
           </div>
 
+          {job.playlist_title && (
+            <p className="text-[12px] text-muted">
+              On publish, this video joins the playlist <span className="font-medium text-gold-bright">{job.playlist_title}</span>{job.playlist_pos != null ? ` at position ${job.playlist_pos + 1}` : ''}.
+            </p>
+          )}
           {err && <ErrorNote message={err} />}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -702,7 +712,7 @@ export default function Scribe() {
   const [lang, setLang] = useState('en');
   const [extraLangs, setExtraLangs] = useState<string[]>([]);
   const [fullVideo, setFullVideo] = useState(true);
-  const [batch, setBatch] = useState<null | { title: string; entries: any[]; picked: Set<string> }>(null);
+  const [batch, setBatch] = useState<null | { title: string; entries: any[]; picked: Set<string>; ytId: string | null; makePlaylist: boolean; plTitle: string }>(null);
   const [probe, setProbe] = useState<any | null>(null);
   const [probing, setProbing] = useState(false);
   const [enumerating, setEnumerating] = useState(false);
@@ -828,7 +838,15 @@ export default function Scribe() {
     try {
       const r = await api('/api/scribe/enumerate', { method: 'POST', body: JSON.stringify({ url: url.trim() }) });
       if (r.error) throw new Error(r.error);
-      setBatch({ title: r.title || 'Playlist', entries: r.entries || [], picked: new Set() });
+      setBatch({
+        title: r.title || 'Playlist',
+        entries: r.entries || [],
+        picked: new Set(),
+        ytId: r.yt_playlist_id || null,
+        // Real playlist URLs default to creating a site playlist; channel imports don't
+        makePlaylist: !!r.yt_playlist_id,
+        plTitle: r.title || '',
+      });
     } catch (e: any) {
       setSubmitErr(e.message);
     }
@@ -986,6 +1004,11 @@ export default function Scribe() {
                       {j.status === 'running' && <Badge tone="gold">running</Badge>}
                       {j.status === 'queued' && <Badge tone="dim">queued</Badge>}
                       {j.channel && <span className="text-cream/60">{j.channel}</span>}
+                      {j.playlist_title && (
+                        <span className="inline-flex items-center gap-1 rounded bg-gold/10 px-1.5 py-0.5 text-[10px] font-medium text-gold-bright" title={`Joins playlist "${j.playlist_title}" on publish`}>
+                          <Icon name="folder" className="h-2.5 w-2.5" /> {j.playlist_title}{j.playlist_pos != null ? ` · #${j.playlist_pos + 1}` : ''}
+                        </span>
+                      )}
                       {j.step === 'download' && j.status === 'running' && j.download_pct > 0 && (
                         <span className="tabular-nums text-gold-bright">{Math.round(j.download_pct)}%</span>
                       )}
@@ -1089,14 +1112,36 @@ export default function Scribe() {
               </label>
             ))}
           </div>
+          <div className="mt-4 rounded-xl border border-hairline bg-inset p-3">
+            <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-cream/85">
+              <input type="checkbox" className="accent-[#45b3a2]" checked={batch.makePlaylist}
+                onChange={(e) => setBatch({ ...batch, makePlaylist: e.target.checked })} />
+              Create playlist on DeenSubs — each video joins it automatically when published, in this order
+            </label>
+            {batch.makePlaylist && (
+              <input
+                className={inputCls + ' mt-2'}
+                placeholder="Playlist title"
+                value={batch.plTitle}
+                onChange={(e) => setBatch({ ...batch, plTitle: e.target.value })}
+              />
+            )}
+          </div>
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setBatch(null)}>Cancel</Button>
-            <Button disabled={!batch.picked.size} onClick={async () => {
+            <Button disabled={!batch.picked.size || (batch.makePlaylist && !batch.plTitle.trim())} onClick={async () => {
+              // Preserve the source playlist order regardless of click order
+              const urls = batch.entries.map((en: any) => en.url).filter((u: string) => batch.picked.has(u));
               const r = await api('/api/scribe/batch', {
                 method: 'POST',
-                body: JSON.stringify({ urls: [...batch.picked], target_langs: [lang, ...extraLangs], full_video: fullVideo }),
+                body: JSON.stringify({
+                  urls,
+                  target_langs: [lang, ...extraLangs],
+                  full_video: fullVideo,
+                  playlist: batch.makePlaylist && batch.plTitle.trim() ? { title: batch.plTitle.trim(), yt_id: batch.ytId } : undefined,
+                }),
               });
-              toast.push(`Queued ${r.created} jobs`);
+              toast.push(`Queued ${r.created} jobs${r.playlist_id ? ' — playlist ready, videos join it on publish' : ''}`);
               setBatch(null);
               setUrl('');
               refetch();

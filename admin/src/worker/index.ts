@@ -166,6 +166,20 @@ app.get('/api/meta', async (c) => {
 
 // ---- Videos ----
 
+/** Full site KV cache purge (same approach as publish) — rebuilt on demand. */
+async function purgeSiteCache(env: Env) {
+  const keys = await env.CACHE.list();
+  for (const k of keys.keys) await env.CACHE.delete(k.name).catch(() => {});
+}
+
+/** Post-save hook: bake responsive variants for the thumbnail and refresh the site. */
+function afterVideoSave(c: any, b: any) {
+  c.executionCtx.waitUntil((async () => {
+    if (b.thumb_key) await bakeThumbVariants(c.env, b.thumb_key).catch(() => {});
+    await purgeSiteCache(c.env);
+  })());
+}
+
 app.get('/api/videos', async (c) => {
   const videos = await c.env.DB.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.created_at DESC`).all();
   return c.json({ videos: videos.results });
@@ -176,6 +190,7 @@ app.post('/api/videos', async (c) => {
   await c.env.DB.prepare(
     'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, source, duration, video_key, srt_key, srt_ar_key, thumb_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
   ).bind(b.title, b.title_ar || null, b.slug, b.description || null, parseInt(b.category_id) || null, parseInt(b.scholar_id) || null, b.source || null, parseInt(b.duration) || 0, b.video_key, b.srt_key || null, b.srt_ar_key || null, b.thumb_key || null).run();
+  afterVideoSave(c, b);
   return c.json({ ok: true });
 });
 
@@ -184,6 +199,7 @@ app.put('/api/videos/:id', async (c) => {
   await c.env.DB.prepare(
     'UPDATE videos SET title=?, title_ar=?, slug=?, description=?, category_id=?, scholar_id=?, source=?, duration=?, video_key=?, srt_key=?, srt_ar_key=?, thumb_key=? WHERE id=?'
   ).bind(b.title, b.title_ar || null, b.slug, b.description || null, parseInt(b.category_id) || null, parseInt(b.scholar_id) || null, b.source || null, parseInt(b.duration) || 0, b.video_key, b.srt_key || null, b.srt_ar_key || null, b.thumb_key || null, parseInt(c.req.param('id'))).run();
+  afterVideoSave(c, b);
   return c.json({ ok: true });
 });
 
@@ -435,13 +451,15 @@ app.delete('/api/scribe/cookies', async (c) => {
 });
 
 type JobIdentity = { title?: string; channel?: string; thumb_url?: string };
+type JobPlaylist = { id: number; pos: number };
 
-async function createScribeJob(env: Env, url: string, targetLangs: string[], fullVideo: boolean, ident: JobIdentity = {}, createdBy?: number) {
+async function createScribeJob(env: Env, url: string, targetLangs: string[], fullVideo: boolean, ident: JobIdentity = {}, createdBy?: number, playlist?: JobPlaylist) {
   const id = genJobId();
   const primary = targetLangs[0] || 'en';
-  await env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, target_langs, full_video, status, step, title, channel, thumb_url, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  await env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, target_langs, full_video, status, step, title, channel, thumb_url, created_by, playlist_id, playlist_pos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, url, primary, JSON.stringify(targetLangs), fullVideo ? 1 : 0, 'queued', 'queued',
-      ident.title || null, ident.channel || null, ident.thumb_url || null, createdBy ?? null).run();
+      ident.title || null, ident.channel || null, ident.thumb_url || null, createdBy ?? null,
+      playlist?.id ?? null, playlist?.pos ?? null).run();
   await env.DB.prepare('UPDATE scribe_jobs SET wf_instance = ? WHERE id = ?').bind(id, id).run();
   await env.SCRIBE_WORKFLOW.create({ id, params: { jobId: id, url, targetLang: primary, targetLangs, fullVideo } });
   return id;
@@ -555,21 +573,57 @@ app.post('/api/scribe/enumerate', async (c) => {
     body: JSON.stringify({ url, cookies }),
   }));
   if (!res.ok) return c.json({ error: `enumeration failed: HTTP ${res.status}` }, 502);
-  return c.json(await res.json());
+  const data: any = await res.json();
+  // The `list=` id lets a batch map back to one site playlist across re-imports
+  data.yt_playlist_id = (url.match(/[?&]list=([\w-]+)/) || [])[1] || null;
+  return c.json(data);
 });
 
-// Queue many URLs at once
+/** Site playlist for a scribe batch: reuse by YouTube playlist id, else create. */
+async function playlistForBatch(env: Env, title: string, ytId: string | null): Promise<number> {
+  let row: any = ytId
+    ? await env.DB.prepare('SELECT id FROM playlists WHERE yt_playlist_id = ?').bind(ytId).first()
+    : null;
+  if (!row) row = await env.DB.prepare('SELECT id FROM playlists WHERE title = ?').bind(title).first();
+  if (row) {
+    if (ytId) await env.DB.prepare('UPDATE playlists SET yt_playlist_id = COALESCE(yt_playlist_id, ?) WHERE id = ?').bind(ytId, row.id).run();
+    return row.id;
+  }
+  const base = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'playlist';
+  let slug = base;
+  for (let n = 2; await env.DB.prepare('SELECT 1 FROM playlists WHERE slug = ?').bind(slug).first(); n++) slug = `${base}-${n}`;
+  const ins: any = await env.DB.prepare('INSERT INTO playlists (title, slug, yt_playlist_id) VALUES (?,?,?) RETURNING id')
+    .bind(title, slug, ytId).first();
+  return ins.id;
+}
+
+// Queue many URLs at once; optionally group them into a site playlist that
+// each job's video joins automatically on publish (in the given order).
 app.post('/api/scribe/batch', async (c) => {
-  const { urls, target_langs, full_video } = await c.req.json();
+  const { urls, target_langs, full_video, playlist } = await c.req.json();
   if (!Array.isArray(urls) || !urls.length) return c.json({ error: 'urls array required' }, 400);
   if (urls.length > 30) return c.json({ error: 'max 30 per batch' }, 400);
   const langs = Array.isArray(target_langs) && target_langs.length ? target_langs : ['en'];
+
+  let playlistId: number | null = null;
+  let basePos = 0;
+  if (playlist?.title) {
+    playlistId = await playlistForBatch(c.env, String(playlist.title).trim(), playlist.yt_id || null);
+    // Append after existing videos AND already-queued (unpublished) jobs
+    const [pub, queued] = await Promise.all([
+      c.env.DB.prepare('SELECT COALESCE(MAX(position), -1) as p FROM playlist_videos WHERE playlist_id = ?').bind(playlistId).first() as Promise<any>,
+      c.env.DB.prepare('SELECT COALESCE(MAX(playlist_pos), -1) as p FROM scribe_jobs WHERE playlist_id = ?').bind(playlistId).first() as Promise<any>,
+    ]);
+    basePos = Math.max((pub?.p ?? -1) + 1, (queued?.p ?? -1) + 1);
+  }
+
   const ids: string[] = [];
   for (const url of urls) {
     if (!/^https?:\/\//.test(url)) continue;
-    ids.push(await createScribeJob(c.env, url, langs, !!full_video, {}, c.get('user')?.id));
+    ids.push(await createScribeJob(c.env, url, langs, !!full_video, {}, c.get('user')?.id,
+      playlistId != null ? { id: playlistId, pos: basePos + ids.length } : undefined));
   }
-  return c.json({ created: ids.length, ids });
+  return c.json({ created: ids.length, ids, playlist_id: playlistId });
 });
 
 app.post('/api/scribe', async (c) => {
@@ -588,7 +642,9 @@ app.post('/api/scribe', async (c) => {
 });
 
 app.get('/api/scribe', async (c) => {
-  const jobs = await c.env.DB.prepare('SELECT * FROM scribe_jobs ORDER BY created_at DESC LIMIT 50').all();
+  const jobs = await c.env.DB.prepare(
+    'SELECT j.*, p.title as playlist_title, p.slug as playlist_slug FROM scribe_jobs j LEFT JOIN playlists p ON p.id = j.playlist_id ORDER BY j.created_at DESC LIMIT 50'
+  ).all();
   return c.json({ jobs: jobs.results });
 });
 
@@ -679,7 +735,11 @@ app.post('/api/upload', async (c) => {
   const base = (c.req.query('name') || 'image').toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
   const key = `${prefix}${base}-${Date.now().toString(36)}.${ext}`;
   await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType: ct } });
-  if (key.startsWith('thumbs/')) await (c.env as any).MEDIA_KV?.put(key, bytes, { metadata: { ct } }).catch(() => {});
+  if (key.startsWith('thumbs/')) {
+    await (c.env as any).MEDIA_KV?.put(key, bytes, { metadata: { ct } }).catch(() => {});
+    // Bake the -{320,480,640}w.webp variants the site actually serves
+    c.executionCtx.waitUntil(bakeThumbVariants(c.env as any, key).catch(() => {}));
+  }
   return c.json({ key });
 });
 
@@ -785,7 +845,7 @@ app.post('/api/scribe/:id/retry', async (c) => {
 
 // ---- Scribe publish flow (job → site video, elite path) ----
 
-import { generateThumbCandidates, publishScribeJob } from './scribe/publish';
+import { bakeThumbVariants, generateThumbCandidates, publishScribeJob } from './scribe/publish';
 
 app.post('/api/scribe/:id/thumbs', async (c) => {
   try {
@@ -813,6 +873,14 @@ app.post('/api/scribe/:id/publish', async (c) => {
 
 // ---- Playlists ----
 
+/** Purge the public site's KV-cached playlist data after any playlist mutation. */
+async function purgePlaylistCache(env: Env) {
+  for (const prefix of ['playlist', 'video-playlist:', 'cat-playlists:', 'scholar-playlists:', 'home', 'sitemap:']) {
+    const list = await env.CACHE.list({ prefix });
+    for (const k of list.keys) await env.CACHE.delete(k.name).catch(() => {});
+  }
+}
+
 app.get('/api/playlists', async (c) => {
   const playlists = await c.env.DB.prepare(
     'SELECT p.*, (SELECT COUNT(*) FROM playlist_videos pv WHERE pv.playlist_id = p.id) as video_count FROM playlists p ORDER BY p.created_at DESC'
@@ -823,10 +891,13 @@ app.get('/api/playlists', async (c) => {
 app.post('/api/playlists', async (c) => {
   const b = await c.req.json();
   if (!b.title) return c.json({ error: 'title required' }, 400);
-  const slug = (b.slug || b.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  const base = (b.slug || b.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'playlist';
+  let slug = base;
+  for (let n = 2; await c.env.DB.prepare('SELECT 1 FROM playlists WHERE slug = ?').bind(slug).first(); n++) slug = `${base}-${n}`;
   await c.env.DB.prepare('INSERT INTO playlists (title, title_ar, slug, description, cover_key) VALUES (?,?,?,?,?)')
     .bind(b.title, b.title_ar || null, slug, b.description || null, b.cover_key || null).run();
   const playlist = await c.env.DB.prepare('SELECT * FROM playlists WHERE slug = ?').bind(slug).first();
+  c.executionCtx.waitUntil(purgePlaylistCache(c.env));
   return c.json({ playlist });
 });
 
@@ -847,11 +918,13 @@ app.put('/api/playlists/:id', async (c) => {
   const b = await c.req.json();
   await c.env.DB.prepare('UPDATE playlists SET title=?, title_ar=?, description=?, cover_key=? WHERE id=?')
     .bind(b.title, b.title_ar || null, b.description || null, b.cover_key || null, parseInt(c.req.param('id'))).run();
+  c.executionCtx.waitUntil(purgePlaylistCache(c.env));
   return c.json({ ok: true });
 });
 
 app.delete('/api/playlists/:id', async (c) => {
   await c.env.DB.prepare('DELETE FROM playlists WHERE id = ?').bind(parseInt(c.req.param('id'))).run();
+  c.executionCtx.waitUntil(purgePlaylistCache(c.env));
   return c.json({ ok: true });
 });
 
@@ -861,12 +934,14 @@ app.post('/api/playlists/:id/videos', async (c) => {
   const max: any = await c.env.DB.prepare('SELECT COALESCE(MAX(position), -1) as p FROM playlist_videos WHERE playlist_id = ?').bind(id).first();
   await c.env.DB.prepare('INSERT OR IGNORE INTO playlist_videos (playlist_id, video_id, position) VALUES (?,?,?)')
     .bind(id, video_id, (max?.p ?? -1) + 1).run();
+  c.executionCtx.waitUntil(purgePlaylistCache(c.env));
   return c.json({ ok: true });
 });
 
 app.delete('/api/playlists/:id/videos/:videoId', async (c) => {
   await c.env.DB.prepare('DELETE FROM playlist_videos WHERE playlist_id = ? AND video_id = ?')
     .bind(parseInt(c.req.param('id')), parseInt(c.req.param('videoId'))).run();
+  c.executionCtx.waitUntil(purgePlaylistCache(c.env));
   return c.json({ ok: true });
 });
 
@@ -878,6 +953,7 @@ app.put('/api/playlists/:id/order', async (c) => {
     await c.env.DB.prepare('UPDATE playlist_videos SET position = ? WHERE playlist_id = ? AND video_id = ?')
       .bind(i, id, video_ids[i]).run();
   }
+  c.executionCtx.waitUntil(purgePlaylistCache(c.env));
   return c.json({ ok: true });
 });
 
