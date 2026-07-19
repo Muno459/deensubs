@@ -67,6 +67,32 @@ async function getUser(c: any): Promise<User | null> {
   return user;
 }
 
+// ElevenLabs async STT results land here (configured in their dashboard).
+// Outside /api/* on purpose: authenticated by HMAC signature, not our key.
+app.post('/hooks/elevenlabs', async (c) => {
+  const secret = (c.env as any).ELEVENLABS_WEBHOOK_SECRET as string | undefined;
+  if (!secret) return c.json({ error: 'webhook not configured' }, 503);
+  const raw = await c.req.text();
+  const sig = c.req.header('ElevenLabs-Signature') || '';
+  const t = sig.match(/t=(\d+)/)?.[1];
+  const v0 = sig.match(/v0=([a-f0-9]+)/)?.[1];
+  if (!t || !v0) return c.json({ error: 'missing signature' }, 401);
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(`${t}.${raw}`)));
+  const hex = [...mac].map((b) => b.toString(16).padStart(2, '0')).join('');
+  if (hex !== v0) return c.json({ error: 'bad signature' }, 401);
+  let payload: any;
+  try { payload = JSON.parse(raw); } catch { return c.json({ error: 'bad JSON' }, 400); }
+  const requestId = payload?.data?.request_id || payload?.request_id || payload?.data?.transcription_id;
+  if (!requestId) return c.json({ error: 'no request_id' }, 400);
+  const { sttResultKey } = await import('./scribe/asr');
+  await c.env.MEDIA_BUCKET.put(sttResultKey(String(requestId)), raw, {
+    httpMetadata: { contentType: 'application/json' },
+  });
+  return c.json({ ok: true });
+});
+
 app.use('/api/*', async (c, next) => {
   const key = c.req.query('key');
   if (key && c.env.ADMIN_KEY && key === c.env.ADMIN_KEY) {

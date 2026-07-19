@@ -209,8 +209,29 @@ async function ytdlpDownload(env: ScribeEnv, jobId: string, url: string, fullVid
 }
 
 /** Sites where a direct Worker fetch can never yield media — skip straight to yt-dlp. */
-function needsYtdlp(url: string): boolean {
+export function needsYtdlp(url: string): boolean {
   return /(youtube\.com|youtu\.be|twitter\.com|x\.com|facebook\.com|instagram\.com|tiktok\.com|twitch\.tv|vimeo\.com|dailymotion\.com)\//i.test(url);
+}
+
+// Global download slot: the yt-dlp container path funnels through shared
+// SOCKS proxies, and parallel jobs hammering the same exits get throttled or
+// banned. One job downloads at a time; the rest wait politely in their
+// workflow. The lock self-expires after 45 min so a crashed holder never
+// wedges the queue (downloads hard-timeout at 30 min).
+
+export async function acquireDownloadSlot(env: ScribeEnv, jobId: string): Promise<boolean> {
+  const row: any = await env.DB.prepare(
+    `INSERT INTO locks (name, holder, until) VALUES ('download', ?1, unixepoch() + 2700)
+     ON CONFLICT(name) DO UPDATE SET holder = ?1, until = unixepoch() + 2700
+     WHERE locks.until < unixepoch() OR locks.holder = ?1
+     RETURNING holder`
+  ).bind(jobId).first().catch(() => null);
+  return row?.holder === jobId;
+}
+
+export async function releaseDownloadSlot(env: ScribeEnv, jobId: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM locks WHERE name = 'download' AND holder = ?")
+    .bind(jobId).run().catch(() => {});
 }
 
 export async function download(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {

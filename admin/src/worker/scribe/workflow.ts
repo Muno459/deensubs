@@ -2,7 +2,7 @@
 // Heavy artifacts live in R2; stage timestamps + cost telemetry in D1.
 
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
-import { download } from './download';
+import { download, needsYtdlp, acquireDownloadSlot, releaseDownloadSlot } from './download';
 import { runAsr, loadAsr } from './asr';
 import { translateWords, qaPass, takeUsage } from './translate';
 import { generateMetadata, generateChapters } from './metadata';
@@ -54,6 +54,22 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // 1. Download → R2
       await updateJob(env.DB, jobId, { status: 'running' });
       await markStage(env, jobId, 'download');
+      // yt-dlp downloads share the SOCKS proxies — exactly ONE job may be in
+      // the download phase at a time. Queue as many videos as you like; the
+      // rest wait here (cheap workflow sleeps) for the slot. Cached resumes
+      // skip the queue entirely.
+      const slotGated = needsYtdlp(url) && !(await step.do('download-cached-check', async () => {
+        const row: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+        return !!(row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key)));
+      }));
+      if (slotGated) {
+        for (let w = 0; ; w++) {
+          const got = await step.do(`download-slot-${w}`, async () => acquireDownloadSlot(env, jobId));
+          if (got) break;
+          if (w >= 180) throw new Error('download slot never freed after 3h — check the queue');
+          await step.sleep(`download-slot-wait-${w}`, '60 seconds');
+        }
+      }
       // Retries are patient on purpose: a big playlist batch can exhaust the
       // container max_instances cap, and jobs must wait out the contention
       // (~35 min of linear backoff) rather than fail.
@@ -76,6 +92,11 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           return { ...res, cached: false };
         }
       );
+      if (slotGated) {
+        await step.do('download-slot-release', async () => {
+          await releaseDownloadSlot(env, jobId);
+        });
+      }
       const row: any = await env.DB.prepare('SELECT title, channel, thumb_url, yt_id, orig_description, channel_image_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
       const ytId = row?.yt_id || (dl as any).ytId ||
         (url.match(/(?:youtube\.com\/watch\?[^#]*v=|youtu\.be\/|youtube\.com\/(?:shorts|live|embed)\/)([\w-]{11})/) || [])[1] || null;
@@ -113,7 +134,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // 2. ASR (ElevenLabs Scribe v2; chunked automatically for long files)
       const asr = await step.do(
         'asr',
-        { retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' }, timeout: '60 minutes' },
+        { retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' }, timeout: '2 hours' },
         async () => {
           const asrKey = `scribe/${jobId}/asr.json`;
           const existing = await env.MEDIA_BUCKET.get(asrKey);
