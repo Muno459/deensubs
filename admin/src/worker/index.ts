@@ -843,6 +843,18 @@ app.post('/api/scribe/4k/upload/finish', async (c) => {
   return c.json({ ok: true, size: obj.size });
 });
 
+app.get('/api/scribe/4k/stats', async (c) => {
+  const rows = await c.env.DB.prepare(
+    "SELECT k4_status as s, COUNT(*) as n, GROUP_CONCAT(DISTINCT k4_claimed_by) as who FROM scribe_jobs WHERE k4_status IS NOT NULL AND k4_status != '' GROUP BY k4_status"
+  ).all();
+  const out: any = { capable: 0, claimed: 0, done: 0, none: 0, workers: '' };
+  for (const r of rows.results as any[]) {
+    out[r.s] = r.n;
+    if (r.s === 'claimed') out.workers = r.who || '';
+  }
+  return c.json(out);
+});
+
 app.get('/api/scribe/4k/pending-scan', async (c) => {
   // Backfill: video jobs from before capability flagging existed
   const rows = await c.env.DB.prepare(
