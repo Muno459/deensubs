@@ -159,7 +159,7 @@ function ScholarForm({ initial, onDone, onCancel, staged, onStagedConsumed }: { 
         >
           <Icon name="sparkles" className="h-5 w-5 text-gold-bright" />
           <span className="text-[13px] font-medium text-cream">Paste a photo (Ctrl+V) — or click to upload</span>
-          <span className="text-[11px] text-muted">AI cuts them out, drafts the title and bio, and fills everything in</span>
+          <span className="text-[11px] text-muted">AI extends the scene, cuts them out (the face stays the real photo), drafts the title and bio — allow 2–4 min</span>
         </button>
       ) : (
         <div className="flex items-center gap-3">

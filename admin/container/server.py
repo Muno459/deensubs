@@ -601,6 +601,71 @@ class Handler(BaseHTTPRequestHandler):
             g_url = payload.get("url", "")
             if not re.match(r"^https?://", g_url):
                 return self._send(400, {"error": "valid url required"})
+            if payload.get("canvas"):
+                # Outpaint prep: flatten any alpha onto light gray (transparent
+                # inputs make the edit model paint glows/ghosts), scale to fit
+                # 1536x1024 bottom-center with exact integer geometry, pad the
+                # rest transparent. Placement goes back in headers so the
+                # worker can composite the ORIGINAL pixels over the outpaint.
+                pr = subprocess.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "v",
+                     "-show_entries", "stream=width,height", "-of", "csv=p=0", g_url],
+                    capture_output=True, text=True, timeout=60)
+                try:
+                    w, h = map(int, pr.stdout.strip().split(","))
+                except ValueError:
+                    return self._send(500, {"error": "probe failed"})
+                cw, ch = int(w * 920 / h) // 2 * 2, 920
+                if cw > 1400:
+                    cw, ch = 1400, int(h * 1400 / w) // 2 * 2
+                ox, oy = (1536 - cw) // 2, 1024 - ch
+                out = os.path.join(DIR, f"canvas-{uuid.uuid4()}.png")
+                proc = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=0xF2F2F2:s={w}x{h}",
+                     "-i", g_url, "-filter_complex",
+                     f"[0][1]overlay=0:0:format=auto,scale={cw}:{ch},format=rgba,"
+                     f"pad=1536:1024:{ox}:{oy}:color=black@0",
+                     "-frames:v", "1", out], capture_output=True, text=True, timeout=120)
+                if proc.returncode != 0 or not os.path.exists(out):
+                    return self._send(500, {"error": (proc.stderr or "canvas failed")[-300:]})
+                size = os.path.getsize(out)
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(size))
+                for hk, hv in (("X-Ox", ox), ("X-Oy", oy), ("X-Ow", cw), ("X-Oh", ch)):
+                    self.send_header(hk, str(hv))
+                self.end_headers()
+                with open(out, "rb") as fh:
+                    shutil.copyfileobj(fh, self.wfile)
+                os.remove(out)
+                return None
+            if payload.get("overlay_url"):
+                # Composite the original photo back over the outpainted scene at
+                # the exact canvas placement — the face is never an AI re-render.
+                ov = payload["overlay_url"]
+                if not re.match(r"^https?://", ov):
+                    return self._send(400, {"error": "valid overlay_url required"})
+                try:
+                    ox, oy = int(payload["ox"]), int(payload["oy"])
+                    ow, ohh = int(payload["ow"]), int(payload["oh"])
+                except (KeyError, ValueError):
+                    return self._send(400, {"error": "ox/oy/ow/oh required"})
+                out = os.path.join(DIR, f"comp-{uuid.uuid4()}.png")
+                proc = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-i", g_url, "-i", ov, "-filter_complex",
+                     f"[1]scale={ow}:{ohh},format=rgba[m];[0][m]overlay={ox}:{oy}:format=auto",
+                     "-frames:v", "1", out], capture_output=True, text=True, timeout=120)
+                if proc.returncode != 0 or not os.path.exists(out):
+                    return self._send(500, {"error": (proc.stderr or "composite failed")[-300:]})
+                size = os.path.getsize(out)
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(size))
+                self.end_headers()
+                with open(out, "rb") as fh:
+                    shutil.copyfileobj(fh, self.wfile)
+                os.remove(out)
+                return None
             want_webp = payload.get("out") == "webp"
             out = os.path.join(DIR, f"grade-{uuid.uuid4()}." + ("webp" if want_webp else "png"))
             src = g_url

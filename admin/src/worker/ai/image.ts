@@ -113,20 +113,61 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
 
 
   if (kind === 'scholar_magic') {
-    // The magic, matched to how the site actually renders scholars: transparent
-    // cutouts on cards. Two variants per reference photo — a natural cutout and
-    // one toned in the DeenSubs teal accent (like the old gold treatment, re-branded).
+    // The magic, run as the PROVEN pipeline that shipped all 15 scholars
+    // (IMG_V v9-v11): true original photo -> outpaint the scene onto a wider
+    // 1536x1024 canvas (gpt-image-1 — the only edits model that honors a
+    // transparent canvas) -> composite the ORIGINAL pixels back at exact
+    // placement so the face is never an AI re-render -> magenta cutout ->
+    // deterministic chroma key. Outpaint is an upgrade, not a gate: any
+    // failure falls back to running the cutout on the raw photo.
     if (!payload.imageKey) throw new Error('imageKey required');
     const obj = await env.MEDIA_BUCKET.get(payload.imageKey);
     if (!obj) throw new Error('reference image not found: ' + payload.imageKey);
-    const buf = new Uint8Array(await obj.arrayBuffer());
-    const ct = obj.httpMetadata?.contentType || 'image/jpeg';
+    let editInput = new Uint8Array(await obj.arrayBuffer());
+    let editCt = obj.httpMetadata?.contentType || 'image/jpeg';
     const base = slugify(payload.name || 'scholar');
-    const KEEP = "Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify or alter features. Chest-up bust composition, clean subtle painterly editorial portrait treatment with natural colors. IMPORTANT: if the source photo is cropped at the sides, extend and complete the shoulders, arms and clothing naturally so the person's full silhouette fits INSIDE the frame with clear margins on the left and right — nothing may be cut off at the side edges — keep at least 10% empty margin on the left and right edges (scale the figure down if needed; only the bust may reach the bottom edge).";
-    const MAGENTA = 'The background must be a completely flat, uniform, solid pure magenta (#FF00FF) filling the entire frame edge to edge — no gradient, no vignette, no shadows on the background.';
-    const naturalRaw = await openaiImage(env, `Cut out the person cleanly. ${MAGENTA} The person keeps clean natural tones (neutralize heavy casts on the PERSON only — the background stays vivid pure magenta, never desaturate the background). ${KEEP}`, buf, ct, '1024x1024');
-    // Deterministic chroma-key in the container: guaranteed clean alpha
     const { getContainer } = await import('@cloudflare/containers');
+    const cAuth = { Authorization: 'Bearer ' + ((env as any).YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' };
+    const srcUrl = `${CDN}/${payload.imageKey}?v=${Date.now()}`; // bust the 30-day edge cache
+    try {
+      const prep = getContainer(env.YTDLP as any, 'grade');
+      // 1. Exact-geometry canvas; placement comes back in headers
+      const cres: Response = await prep.fetch(new Request('http://ytdlp/grade', {
+        method: 'POST', headers: cAuth,
+        body: JSON.stringify({ url: srcUrl, canvas: true }),
+        signal: AbortSignal.timeout(90_000),
+      }));
+      if (!cres.ok) throw new Error(`canvas HTTP ${cres.status}`);
+      const canvas = new Uint8Array(await cres.arrayBuffer());
+      const [ox, oy, ow, oh] = ['X-Ox', 'X-Oy', 'X-Ow', 'X-Oh'].map((h) => Number(cres.headers.get(h)));
+      if (!ow || !oh) throw new Error('canvas placement headers missing (container still rolling out?)');
+      // 2. Outpaint the scene. Never feed the model a transparent cutout and
+      //    never ask it to pose limbs — both are proven ghost/extra-hands
+      //    failure modes; scene continuation of a natural photo is what works.
+      const outp = await openaiImage(
+        env,
+        "Extend this photograph seamlessly into the transparent areas: continue the scene, background and the person's shoulders and clothing naturally with realistic slim proportions, reaching the bottom edge so the body is grounded. Do NOT add hands, arms or objects that are not already visible. Keep everything already visible EXACTLY unchanged.",
+        canvas, 'image/png', '1536x1024', undefined, 'gpt-image-1'
+      );
+      // 3. Composite the original pixels back at the exact placement
+      const tmpKey = `scribe/tmp/${base}-outp-${Date.now().toString(36)}.png`;
+      await env.MEDIA_BUCKET.put(tmpKey, outp, { httpMetadata: { contentType: 'image/png' } });
+      const mres: Response = await prep.fetch(new Request('http://ytdlp/grade', {
+        method: 'POST', headers: cAuth,
+        body: JSON.stringify({ url: `${CDN}/${tmpKey}`, overlay_url: srcUrl, ox, oy, ow, oh }),
+        signal: AbortSignal.timeout(90_000),
+      }));
+      env.MEDIA_BUCKET.delete(tmpKey).catch(() => {});
+      if (!mres.ok) throw new Error(`composite HTTP ${mres.status}`);
+      editInput = new Uint8Array(await mres.arrayBuffer());
+      editCt = 'image/png';
+    } catch (e) {
+      console.log('scholar_magic outpaint skipped:', (e as Error).message);
+    }
+    const KEEP = "Preserve the person's face, beard and headwear likeness EXACTLY — do not beautify, repaint or alter features. Chest-up bust composition with clean natural colors. The person's full silhouette fits INSIDE the frame with clear empty margins on the left and right edges (scale the figure down if needed); the robe/torso runs off the BOTTOM edge so the figure is grounded, never floating. Do NOT invent hands, arms or limbs that are not in the photo. Exclude tables, desks, microphones, cups and every other object — the person only.";
+    const MAGENTA = 'The background must be a completely flat, uniform, solid pure magenta (#FF00FF) filling the entire frame edge to edge — no gradient, no vignette, no shadows on the background.';
+    const naturalRaw = await openaiImage(env, `Cut out the person cleanly. ${MAGENTA} The person keeps clean natural tones (neutralize heavy casts on the PERSON only — the background stays vivid pure magenta, never desaturate the background). ${KEEP}`, editInput, editCt, '1024x1024');
+    // Deterministic chroma-key in the container: guaranteed clean alpha
     const keyOut = async (bytes: Uint8Array, tmpName: string): Promise<Uint8Array> => {
       const tmpKey = `scribe/tmp/${tmpName}`;
       await env.MEDIA_BUCKET.put(tmpKey, bytes, { httpMetadata: { contentType: 'image/png' } });
