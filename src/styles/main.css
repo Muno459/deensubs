@@ -607,8 +607,8 @@ button:focus-visible,.pill:focus-visible,.card:focus-visible,.wa:focus-visible{o
 /* With transparent portrait */
 .sp-hero-img{padding-right:280px;min-height:300px;align-items:flex-end}
 .sp-hero-portrait{position:absolute;right:0;bottom:0;height:345px;pointer-events:none}
-.sp-hero-portrait::before{content:'';position:absolute;inset:-34% -48% 0 -48%;background:radial-gradient(ellipse 46% 58% at 50% 66%,color-mix(in srgb,var(--accent) 20%,transparent) 0%,color-mix(in srgb,var(--accent) 8%,transparent) 42%,transparent 64%)}
-.sp-hero-portrait::after{content:'';position:absolute;inset:-34% -48% 0 -48%;background-image:url('/bg/pattern-flat.png');background-size:420px;background-repeat:repeat;opacity:.16;-webkit-mask-image:radial-gradient(ellipse 44% 56% at 50% 66%,#000 18%,transparent 62%);mask-image:radial-gradient(ellipse 44% 56% at 50% 66%,#000 18%,transparent 62%)}
+.sp-hero-portrait::before{content:'';position:absolute;inset:-22% -30% 0 -30%;background:radial-gradient(ellipse 42% 52% at 50% 62%,color-mix(in srgb,var(--accent) 16%,transparent) 0%,color-mix(in srgb,var(--accent) 6%,transparent) 38%,transparent 58%)}
+.sp-hero-portrait::after{content:'';position:absolute;inset:-22% -30% 0 -30%;background-image:url('/bg/pattern-flat.png');background-size:420px;background-repeat:repeat;opacity:.14;-webkit-mask-image:radial-gradient(ellipse 40% 50% at 50% 62%,#000 14%,transparent 56%);mask-image:radial-gradient(ellipse 40% 50% at 50% 62%,#000 14%,transparent 56%)}
 .sp-hero-portrait img{position:relative;z-index:1;height:100%;width:auto;display:block;filter:drop-shadow(0 18px 32px color-mix(in srgb,var(--accent) 22%,rgba(0,0,0,.35)))}
 
 /* Without transparent portrait — large avatar */
