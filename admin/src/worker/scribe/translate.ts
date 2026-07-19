@@ -48,7 +48,7 @@ export function makeWindows(words: CleanWord[]): CleanWord[][] {
   return windows;
 }
 
-const SYSTEM_PROMPT = (targetLang: string) => `You are an expert subtitle translator for Islamic lectures. You receive numbered words with timestamps from speech recognition and produce subtitle cues with translations.
+const SYSTEM_PROMPT = (targetLang: string) => `You are an expert subtitle translator for Islamic lectures. You receive numbered words from speech recognition and produce subtitle cues with translations.
 
 OUTPUT FORMAT — one JSON object per line, nothing else:
 {"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"t":"translation of those words"}
@@ -56,7 +56,7 @@ OUTPUT FORMAT — one JSON object per line, nothing else:
 RULES:
 - Cover EVERY word index exactly once, in order, with no gaps and no overlaps.
 - Segment at natural boundaries: sentence ends, pauses (marked [GAP]), speaker changes (marked [SPEAKER]).
-- Each cue: ideally 1.5-7 seconds of speech, translation at most 2 lines x 42 characters (~84 chars).
+- Each cue: ideally 4-16 source words, translation at most 2 lines x 42 characters (~84 chars).
 - Translate to ${targetLang}. Translate ALL meaningful content faithfully — never paraphrase away or condense meaning.
 - Clean speech artifacts: drop stutters, false starts, and filler sounds from the translation (their word indices still belong to the cue covering that span).
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
@@ -80,7 +80,7 @@ function windowPrompt(win: CleanWord[], prevTail: string): string {
       lines.push(`[SPEAKER ${w.speaker}]`);
       lastSpeaker = w.speaker;
     }
-    lines.push(`${w.i}\t${w.start.toFixed(2)}-${w.end.toFixed(2)}\t${w.text}`);
+    lines.push(`${w.i} ${w.text}`);
   }
   return lines.join('\n');
 }
@@ -404,20 +404,70 @@ export async function translateWords(
 /** Netflix-grade QA repair: strong model reviews source ↔ translation in
  * batches and fixes mistranslation, dropped content, over-long lines, and
  * reading-speed violations. Returns the repaired cue list. */
+/** Pick the cues worth an expensive model's attention: mechanical smells
+ * plus a cross-lingual embedding screen. Reviewing everything blanket-style
+ * spent ~10x the tokens confirming cues that were already fine. */
+async function suspiciousCues(env: ScribeEnv, cues: Cue[]): Promise<Set<number>> {
+  const flagged = new Set<number>();
+  for (let i = 0; i < cues.length; i++) {
+    const c = cues[i];
+    if ((c as any).q) continue; // canonical verse cue — locked
+    const dur = Math.max(0.3, c.end - c.start);
+    if (c.text.length / dur > 20) flagged.add(i); // CPS violation
+    if (c.text.length > 90) flagged.add(i);
+    if (/[؀-ۿ]/.test(c.text)) flagged.add(i); // Arabic leakage
+    if (i > 0 && c.text === cues[i - 1].text) flagged.add(i); // repetition
+    if (c.source && /الله/.test(c.source) && !/allah/i.test(c.text)) flagged.add(i);
+  }
+  // Embedding screen: low source↔translation similarity = likely mistranslation
+  try {
+    const ai = (env as any).AI;
+    const cand = cues.map((c, i) => ({ c, i }))
+      .filter(({ c, i }) => !(c as any).q && !flagged.has(i) && c.source && c.source.length >= 8 && c.text.length >= 8);
+    const EB = 45;
+    for (let i = 0; i < cand.length; i += EB) {
+      const batch = cand.slice(i, i + EB);
+      const [src, trn] = await Promise.all([
+        ai.run('@cf/baai/bge-m3', { text: batch.map(({ c }) => c.source.slice(0, 480)) }),
+        ai.run('@cf/baai/bge-m3', { text: batch.map(({ c }) => c.text.slice(0, 480)) }),
+      ]);
+      for (let j = 0; j < batch.length; j++) {
+        const a = src?.data?.[j];
+        const b = trn?.data?.[j];
+        if (!a || !b) continue;
+        let dot = 0, na = 0, nb = 0;
+        for (let k = 0; k < a.length; k++) {
+          dot += a[k] * b[k]; na += a[k] * a[k]; nb += b[k] * b[k];
+        }
+        if (dot / Math.sqrt(na * nb) < 0.6) flagged.add(batch[j].i);
+      }
+    }
+  } catch {} // screen is best-effort; mechanical flags still stand
+  // context: the neighbor on each side of every flagged cue
+  const withNeighbors = new Set<number>();
+  for (const i of flagged) {
+    for (const n of [i - 1, i, i + 1]) {
+      if (n >= 0 && n < cues.length && !(cues[n] as any).q) withNeighbors.add(n);
+    }
+  }
+  return withNeighbors;
+}
+
 export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): Promise<{ cues: Cue[]; fixes: number }> {
   const BATCH = 40;
   let fixes = 0;
   const out = [...cues];
+  const review = [...(await suspiciousCues(env, out))].sort((a, b) => a - b);
   const jobs: Promise<void>[] = [];
   const runBatch = async (offset: number) => {
-    const batch = out.slice(offset, offset + BATCH);
-    const lines = batch.map((c, i) => {
-      if ((c as any).q) return null; // canonical verse cue — locked
+    const batch = review.slice(offset, offset + BATCH);
+    const lines = batch.map((idx) => {
+      const c = out[idx];
       const dur = Math.max(0.3, c.end - c.start);
       const cps = Math.round(c.text.length / dur);
       const flag = cps > 20 ? ` [CPS ${cps} TOO FAST — condense]` : '';
-      return `${offset + i}\nSRC: ${c.source}\nTRN: ${c.text}${flag}`;
-    }).filter(Boolean).join('\n\n');
+      return `${idx}\nSRC: ${c.source}\nTRN: ${c.text}${flag}`;
+    }).join('\n\n');
     if (!lines) return;
     try {
       const raw = await llmChat(env, [
@@ -439,9 +489,9 @@ Rules: max ~84 chars, keep honorifics (Allah ﷻ, Prophet ﷺ, RA/AS/RH), keep t
       }
     } catch {}
   };
-  for (let i = 0; i < out.length; i += BATCH * 8) {
+  for (let i = 0; i < review.length; i += BATCH * 8) {
     const group = [];
-    for (let j = i; j < Math.min(i + BATCH * 8, out.length); j += BATCH) group.push(runBatch(j));
+    for (let j = i; j < Math.min(i + BATCH * 8, review.length); j += BATCH) group.push(runBatch(j));
     await Promise.all(group);
   }
   return { cues: out, fixes };
