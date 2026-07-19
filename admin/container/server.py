@@ -687,7 +687,9 @@ class Handler(BaseHTTPRequestHandler):
                     # Geometry never trusts the model; expressions need no dims.
                     # Clean cutout only: chroma key + fringe erosion. No fades,
                     # no padding — the card edge crops naturally (user decision).
-                    chain = (f"colorkey=0x{rgb.hex().upper()}:0.25:0.12,format=rgba,"
+                    # 0.25 similarity keyed holes into pink-ish ghutra weave; the bg is
+                    # flat pure magenta so a tight key clears it fully
+                    chain = (f"colorkey=0x{rgb.hex().upper()}:0.10:0.08,format=rgba,"
                              "split[c][a];[a]alphaextract,erosion,erosion,erosion[sh];[c][sh]alphamerge")
             if not chain:
                 chain = (
