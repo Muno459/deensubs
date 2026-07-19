@@ -43,14 +43,14 @@ document.onmousemove=function(ev){if(seeking)pg.style.width=seekTo(ev.clientX)*1
 document.onmouseup=function(ev){if(seeking){seeking=false;vid.currentTime=seekTo(ev.clientX)*vid.duration}};
 sk.onclick=function(ev){vid.currentTime=seekTo(ev.clientX)*vid.duration};
 // Touch support for mobile seekbar
-sk.addEventListener('touchstart',function(ev){seeking=true;pg.style.width=seekTo(ev.touches[0].clientX)*100+'%';ev.preventDefault()},{passive:false});
+sk.addEventListener('touchstart',function(ev){seeking=true;vp.classList.add('vp-scrub');pg.style.width=seekTo(ev.touches[0].clientX)*100+'%';ev.preventDefault()},{passive:false});
 sk.addEventListener('touchmove',function(ev){if(seeking){pg.style.width=seekTo(ev.touches[0].clientX)*100+'%';ev.preventDefault()}},{passive:false});
-sk.addEventListener('touchend',function(ev){if(seeking){seeking=false;var ch=ev.changedTouches[0];vid.currentTime=seekTo(ch.clientX)*vid.duration}});
+sk.addEventListener('touchend',function(ev){if(seeking){seeking=false;var ch=ev.changedTouches[0];vid.currentTime=seekTo(ch.clientX)*vid.duration}vp.classList.remove('vp-scrub')});
 // Seekbar time tooltip
 var skTip=document.getElementById('sk-tip');
-sk.addEventListener('mouseenter',function(){if(skTip)skTip.classList.add('sk-tip-show')});
+sk.addEventListener('mouseenter',function(){if(skTip)skTip.classList.add('sk-tip-show');vp.classList.add('vp-scrub')});
 sk.addEventListener('mousemove',function(ev){if(!vid.duration||!skTip)return;var pct=seekTo(ev.clientX);skTip.textContent=ftt(pct*vid.duration);skTip.style.left=pct*100+'%'});
-sk.addEventListener('mouseleave',function(){if(skTip)skTip.classList.remove('sk-tip-show')});
+sk.addEventListener('mouseleave',function(){if(skTip)skTip.classList.remove('sk-tip-show');vp.classList.remove('vp-scrub')});
 
 // Custom subtitle renderer
 var subEl=document.getElementById('vp-sub'),subCues=[],ccOn=true;
