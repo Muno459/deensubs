@@ -250,6 +250,16 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
     setChosenKey(null);
     // AI drafts the rest: category/scholar picks + Arabic title + slug (silent best-effort)
     let live = true;
+    // A custom thumb already staged for this job (uploaded earlier or via
+    // bulk import) is picked up and preselected; extracted frames stay as
+    // alternatives.
+    api(`/api/r2?prefix=${encodeURIComponent(`scribe/${job.id}/`)}`)
+      .then((r) => {
+        if (!live) return;
+        const ct = (r.objects || []).find((o: any) => o.key.includes('custom-thumb'));
+        if (ct) { setCustomThumb(ct.key); setChosenKey(ct.key); }
+      })
+      .catch(() => {});
     api('/api/ai/fill', { method: 'POST', body: JSON.stringify({ kind: 'publish', jobId: job.id }) })
       .then((r) => {
         if (!live) return;
