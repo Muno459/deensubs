@@ -215,14 +215,18 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           // Quality report: mechanical metrics + cross-lingual semantic audit
           const qKey = `scribe/${jobId}/quality.json`;
           if (!tr.cached || !(await env.MEDIA_BUCKET.head(qKey))) {
-            await step.do('quality', { retries: { limit: 1, delay: '30 seconds' }, timeout: '15 minutes' }, async () => {
-              try {
-                const r = await assessQuality(env as any, jobId, cuesKey);
-                return { grade: r.grade, score: r.score, flagged: r.flags.length };
-              } catch (e: any) {
-                return { error: String(e?.message || e).slice(0, 200) };
-              }
-            });
+            // Diagnostics must never kill a job: the step timeout throws past
+            // the inner catch, so the whole step is best-effort too.
+            try {
+              await step.do('quality', { retries: { limit: 1, delay: '30 seconds' }, timeout: '30 minutes' }, async () => {
+                try {
+                  const r = await assessQuality(env as any, jobId, cuesKey);
+                  return { grade: r.grade, score: r.score, flagged: r.flags.length };
+                } catch (e: any) {
+                  return { error: String(e?.message || e).slice(0, 200) };
+                }
+              });
+            } catch {}
           }
         }
       }

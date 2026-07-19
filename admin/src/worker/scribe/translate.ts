@@ -11,9 +11,9 @@ import { findQuranQuotes, citeQuote, type QuranQuote } from './quran';
 
 export type CleanWord = { i: number; text: string; start: number; end: number; speaker: string };
 
-const WINDOW_SIZE = 100; // words per LLM call
+const WINDOW_SIZE = 180; // words per LLM call — bigger windows = fewer calls; hole-filling catches drops
 const WINDOW_LOOKAHEAD = 30; // stretch to a natural boundary
-const CONCURRENCY = 6;
+const CONCURRENCY = 16; // gemini flash sustains this fine; 6 made a 2.5h lecture translate in ~40 min
 
 export function cleanWords(words: Word[]): CleanWord[] {
   const out: CleanWord[] = [];
@@ -171,6 +171,7 @@ function parseCues(raw: string, win: CleanWord[]): { w: [number, number]; t: str
 
 // Escalation + QA model: bulk runs on cheap gemini, sonnet handles the hard parts
 const STRONG_MODEL = 'ag/claude-sonnet-4-6';
+const QA_MODEL = 'ag/claude-opus-4-6-thinking'; // touch-ups deserve the best; plain opus-4-6 404s on the router
 
 /** Uncovered index ranges within [lo,hi] given parsed cues. */
 function computeHoles(cues: { w: [number, number] }[], lo: number, hi: number): [number, number][] {
@@ -220,7 +221,7 @@ async function translateWindow(
   let cues: { w: [number, number]; t: string }[] = [];
   for (const model of [undefined, undefined, STRONG_MODEL]) {
     try {
-      cues = parseCues(await llmChat(env, messages, 4000, model), win);
+      cues = parseCues(await llmChat(env, messages, 8000, model), win);
       if (cues.length) break;
     } catch {}
   }
@@ -424,7 +425,7 @@ export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): P
 {"i": cueNumber, "t": "corrected translation"}
 Rules: max ~84 chars, keep honorifics (Allah ﷻ, Prophet ﷺ, RA/AS/RH), keep transliterations (fiqh, Sharia...), Quran quotes in established translation wording. If a cue is fine, output nothing for it. No commentary.` },
         { role: 'user', content: lines },
-      ], 3500, STRONG_MODEL);
+      ], 8000, QA_MODEL);
       for (const line of raw.split('\n')) {
         const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
         if (!t.startsWith('{')) continue;
@@ -438,9 +439,9 @@ Rules: max ~84 chars, keep honorifics (Allah ﷻ, Prophet ﷺ, RA/AS/RH), keep t
       }
     } catch {}
   };
-  for (let i = 0; i < out.length; i += BATCH * 4) {
+  for (let i = 0; i < out.length; i += BATCH * 8) {
     const group = [];
-    for (let j = i; j < Math.min(i + BATCH * 4, out.length); j += BATCH) group.push(runBatch(j));
+    for (let j = i; j < Math.min(i + BATCH * 8, out.length); j += BATCH) group.push(runBatch(j));
     await Promise.all(group);
   }
   return { cues: out, fixes };
