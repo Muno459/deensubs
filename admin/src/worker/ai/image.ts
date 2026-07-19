@@ -141,13 +141,16 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
       const canvas = new Uint8Array(await cres.arrayBuffer());
       const [ox, oy, ow, oh] = ['X-Ox', 'X-Oy', 'X-Ow', 'X-Oh'].map((h) => Number(cres.headers.get(h)));
       if (!ow || !oh) throw new Error('canvas placement headers missing (container still rolling out?)');
-      // 2. Outpaint the scene. Never feed the model a transparent cutout and
+      // 2. Outpaint the scene with gpt-image-2 — measured 29dB original-region
+      //    fidelity on the transparent canvas vs 11dB for gpt-image-1, so the
+      //    composite-back boundary is cleaner. Never feed the model a
+      //    transparent CUTOUT (only a transparent-padded natural photo) and
       //    never ask it to pose limbs — both are proven ghost/extra-hands
       //    failure modes; scene continuation of a natural photo is what works.
       const outp = await openaiImage(
         env,
         "Extend this photograph seamlessly into the transparent areas: continue the scene, background and the person's shoulders and clothing naturally with realistic slim proportions, reaching the bottom edge so the body is grounded. Do NOT add hands, arms or objects that are not already visible. Keep everything already visible EXACTLY unchanged.",
-        canvas, 'image/png', '1536x1024', undefined, 'gpt-image-1'
+        canvas, 'image/png', '1536x1024', undefined, 'gpt-image-2'
       );
       // 3. Composite the original pixels back at the exact placement
       const tmpKey = `scribe/tmp/${base}-outp-${Date.now().toString(36)}.png`;
