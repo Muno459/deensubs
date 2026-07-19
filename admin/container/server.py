@@ -362,10 +362,14 @@ def run_thumbs(job_id: str, url: str, timestamps: list, variants: bool = False) 
 
     def grab(i: int, ts: float) -> None:
         out = os.path.join(DIR, f"{job_id}-t{i}.jpg")
-        p = subprocess.run(
-            ["ffmpeg", "-y", "-ss", str(ts), "-i", url, "-frames:v", "1",
-             "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", out],
-            capture_output=True, text=True, timeout=120)
+        # ts=0 means a still-image source; -ss 0 yields zero frames for
+        # some image demuxers (jpg), so seek only when entering a video
+        cmd = ["ffmpeg", "-y"]
+        if ts > 0:
+            cmd += ["-ss", str(ts)]
+        cmd += ["-i", url, "-frames:v", "1",
+                "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", out]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if p.returncode != 0 or not os.path.exists(out):
             with lock:
                 errors.append(f"t{i}: {(p.stderr or '')[-200:]}")
