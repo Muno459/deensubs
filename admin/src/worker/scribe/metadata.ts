@@ -98,28 +98,43 @@ export type Chapter = { t: number; title: string };
 /** Segment the lecture into chapters with timestamps (for player markers). */
 export async function generateChapters(env: ScribeEnv, cues: Cue[]): Promise<Chapter[]> {
   if (cues.length < 20) return []; // too short to chapter
-  const lines = cues.map((c) => `${Math.round(c.start)}s: ${c.text}`).join('\n');
+  // Fit the prompt budget by sampling cues evenly across the WHOLE talk.
+  // (A head truncation here once meant long lectures only got chapters in
+  // the first ~20 minutes; everything after was left as a single block.)
+  const BUDGET = 60000;
+  const line = (c: Cue) => `${Math.round(c.start)}s: ${c.text.length > 200 ? c.text.slice(0, 197) + '...' : c.text}`;
+  let sampled = cues;
+  let lines = sampled.map(line).join('\n');
+  if (lines.length > BUDGET) {
+    const step = Math.ceil(lines.length / BUDGET);
+    sampled = cues.filter((_, i) => i % step === 0);
+    lines = sampled.map(line).join('\n');
+  }
+  const last = cues[cues.length - 1];
+  const endS = Math.round(last.end || last.start);
+  const mins = Math.max(1, Math.round(endS / 60));
+  const target = Math.min(20, Math.max(4, Math.round(mins / 8)));
   const raw = await llmChat(
     env,
     [
       {
         role: 'system',
-        content: `Segment this lecture transcript into 3-10 chapters. Answer with ONLY a JSON array, no markdown:
+        content: `Segment this lecture transcript into chapters. Answer with ONLY a JSON array, no markdown:
 [{"t": startSeconds, "title": "Short chapter title"}]
-Rules: first chapter at t=0; titles 3-8 words, specific to what is discussed; chapters at real topic shifts, minimum 60 seconds apart.`,
+Rules: first chapter at t=0; titles 3-8 words, specific to what is discussed; chapters at real topic shifts, minimum 60 seconds apart; cover the ENTIRE talk from start to finish — the final portion must be chaptered like the rest, never left as one long block; around ${target} chapters (3-20).`,
       },
-      { role: 'user', content: lines.slice(0, 24000) },
+      { role: 'user', content: `Total length: ${mins} minutes (${endS}s).\nTranscript${sampled.length < cues.length ? ' (sampled evenly across the full talk)' : ''}:\n${lines}` },
     ],
-    1500
+    2500
   );
   try {
     const start = raw.indexOf('[');
     const end = raw.lastIndexOf(']');
     const arr = JSON.parse(raw.slice(start, end + 1));
     return (Array.isArray(arr) ? arr : [])
-      .filter((c: any) => typeof c.t === 'number' && c.title)
+      .filter((c: any) => typeof c.t === 'number' && c.title && c.t < endS)
       .map((c: any) => ({ t: Math.max(0, Math.round(c.t)), title: String(c.title).slice(0, 80) }))
-      .slice(0, 12);
+      .slice(0, 24);
   } catch {
     return [];
   }
