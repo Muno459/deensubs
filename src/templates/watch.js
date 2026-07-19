@@ -6,6 +6,8 @@ import { scard } from '../components/video-card.js';
 
 export function renderWatch({ video, related, cues, base }) {
   const th=thu(video);
+  // youtube_id holds either a bare video ID or a full URL (keeps t= timestamps)
+  const yt=video.youtube_id?(video.youtube_id.startsWith('http')?video.youtube_id:'https://www.youtube.com/watch?v='+video.youtube_id):'';
   base = base || 'https://deensubs.com';
   const jsonLd = JSON.stringify({
     '@context':'https://schema.org','@type':'VideoObject',
@@ -20,6 +22,7 @@ export function renderWatch({ video, related, cues, base }) {
       {'@type':'InteractionCounter',interactionType:{'@type':'LikeAction'},userInteractionCount:video.likes||0},
     ],
     ...(video.source||video.scholar_name?{author:{'@type':'Person',name:video.source||video.scholar_name}}:{}),
+    ...(yt?{isBasedOn:yt}:{}),
     publisher:{'@type':'Organization',name:'DeenSubs',url:'https://deensubs.com',logo:{'@type':'ImageObject',url:'https://deensubs.com/web-app-manifest-512x512.png'}},
     inLanguage:'ar',
     subtitleLanguage:'en',
@@ -99,6 +102,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
           <div class="wi-sch-info"><span class="wi-sch-name">${e(video.source||video.scholar_name)}</span>${video.scholar_title?`<span class="wi-sch-title">${e(video.scholar_title)}</span>`:''}</div>
         </a>`:video.source?`<div class="wi-sch"><div class="wi-sch-av">${e((video.source||'').split(' ').pop().charAt(0))}</div><div class="wi-sch-info"><span class="wi-sch-name">${e(video.source)}</span></div></div>`:''}
         ${video.description?`<p class="wi-desc">${e(video.description)}</p>`:''}
+        ${yt?`<a class="wi-credit" href="${e(yt)}" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.5 3.55 12 3.55 12 3.55s-7.5 0-9.38.5A3.02 3.02 0 00.5 6.19C0 8.07 0 12 0 12s0 3.93.5 5.81a3.02 3.02 0 002.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 002.12-2.14C24 15.93 24 12 24 12s0-3.93-.5-5.81zM9.55 15.57V8.43L15.82 12l-6.27 3.57z"/></svg><span>Credits: Original video on YouTube</span></a>`:''}
       </div>
     </div>
     ${cues&&cues.length?`

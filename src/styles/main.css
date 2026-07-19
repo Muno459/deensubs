@@ -220,6 +220,8 @@ img{display:block}button{font:inherit}input,textarea,select{font:inherit}
 .wi-sch-name{font-size:.85rem;font-weight:500}
 .wi-sch-title{font-size:.66rem;color:var(--t3)}
 .wi-desc{font-size:.8rem;color:var(--t2);line-height:1.7;font-weight:300}
+.wi-credit{display:inline-flex;align-items:center;gap:.45rem;margin-top:.65rem;font-size:.72rem;color:var(--t3);text-decoration:none;transition:color .15s}
+.wi-credit:hover{color:var(--accent)}
 
 /* ── Transcript ── */
 .tr{border:1px solid var(--bd);border-radius:10px;background:var(--s1);margin:.85rem 0;overflow:hidden;content-visibility:auto;contain-intrinsic-size:auto 400px}
