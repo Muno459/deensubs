@@ -29,6 +29,7 @@ type Env = {
   SCRIBE_LLM_MODEL?: string;
   YTDLP_TOKEN?: string;
   YTDLP_PROXIES?: string;
+  UPLOAD_TOKEN?: string;
 };
 
 type User = { id: number; name: string; email: string; avatar: string; role: string; created_at: string };
@@ -1269,6 +1270,49 @@ app.post('/api/ai', async (c) => {
 app.post('/api/tools/backfill-chapters', async (c) => {
   const report = await chaptersBackfillSweep(c.env, 10);
   return c.json(report);
+});
+
+// ---- Large media upload (chunked R2 multipart) ----
+// Wrangler caps `r2 object put` at 300MiB and Workers cap request bodies, so
+// big local files (full lectures) are uploaded in parts: start → N x part →
+// complete. Authenticated by UPLOAD_TOKEN (separate from the admin session).
+
+const mediaUploadKey = (name: string) => name.replace(/[^\w./-]/g, '').replace(/\.\.+/g, '.');
+
+app.use('/media-upload/*', async (c, next) => {
+  const tok = (c.req.header('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!c.env.UPLOAD_TOKEN || tok !== c.env.UPLOAD_TOKEN) return c.json({ error: 'Unauthorized' }, 401);
+  return next();
+});
+
+app.post('/media-upload/start', async (c) => {
+  const name = mediaUploadKey(c.req.query('name') || '');
+  if (!name) return c.json({ error: 'name required' }, 400);
+  const upload = await c.env.MEDIA_BUCKET.createMultipartUpload(name, {
+    httpMetadata: { contentType: c.req.query('ct') || 'application/octet-stream' },
+  });
+  return c.json({ key: name, uploadId: upload.uploadId });
+});
+
+app.put('/media-upload/part', async (c) => {
+  const name = mediaUploadKey(c.req.query('name') || '');
+  const uploadId = c.req.query('uploadId') || '';
+  const part = parseInt(c.req.query('part') || '0');
+  if (!name || !uploadId || !part) return c.json({ error: 'name, uploadId, part required' }, 400);
+  const upload = c.env.MEDIA_BUCKET.resumeMultipartUpload(name, uploadId);
+  const bytes = await c.req.arrayBuffer();
+  if (!bytes.byteLength) return c.json({ error: 'empty part' }, 400);
+  const res = await upload.uploadPart(part, bytes);
+  return c.json({ partNumber: res.partNumber, etag: res.etag });
+});
+
+app.post('/media-upload/complete', async (c) => {
+  const { name, uploadId, parts } = await c.req.json();
+  const key = mediaUploadKey(String(name || ''));
+  if (!key || !uploadId || !Array.isArray(parts) || !parts.length) return c.json({ error: 'name, uploadId, parts required' }, 400);
+  const upload = c.env.MEDIA_BUCKET.resumeMultipartUpload(key, uploadId);
+  const obj = await upload.complete(parts.map((p: any) => ({ partNumber: p.partNumber, etag: p.etag })));
+  return c.json({ key, size: obj.size });
 });
 
 // ---- Fallback: serve SPA (assets binding handles static; this covers deep links when run_worker_first matches) ----
