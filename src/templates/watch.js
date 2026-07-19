@@ -6,6 +6,17 @@ import { scard } from '../components/video-card.js';
 
 export function renderWatch({ video, related, cues, base, playlist }) {
   const th=thu(video);
+  const dur=video.duration||0;
+  // Chapters: [{t: seconds, title}] generated from the transcript at import time
+  let chapters=[];
+  try{
+    chapters=(JSON.parse(video.chapters||'[]')||[])
+      .filter(ch=>ch&&typeof ch.t==='number'&&ch.title&&(!dur||ch.t<dur-5))
+      .sort((a,b)=>a.t-b.t);
+  }catch(err){chapters=[];}
+  if(chapters.length<2)chapters=[];
+  const chEnd=i=>i+1<chapters.length?chapters[i+1].t:dur;
+  const chJson=JSON.stringify(chapters.map(ch=>({t:ch.t,title:ch.title}))).replace(/</g,'\\u003c');
   const plIdx = playlist ? playlist.items.findIndex(p => p.slug === video.slug) : -1;
   const plNext = plIdx >= 0 && plIdx < playlist.items.length - 1 ? playlist.items[plIdx + 1] : null;
   // youtube_id holds either a bare video ID or a full URL (keeps t= timestamps)
@@ -23,6 +34,7 @@ export function renderWatch({ video, related, cues, base, playlist }) {
       {'@type':'InteractionCounter',interactionType:{'@type':'WatchAction'},userInteractionCount:video.views||0},
       {'@type':'InteractionCounter',interactionType:{'@type':'LikeAction'},userInteractionCount:video.likes||0},
     ],
+    ...(chapters.length?{hasPart:chapters.map((ch,i)=>({'@type':'Clip',name:ch.title,startOffset:ch.t,endOffset:chEnd(i),url:base+'/watch/'+video.slug+'?t='+ch.t}))}:{}),
     ...(video.source||video.scholar_name?{author:{'@type':'Person',name:video.source||video.scholar_name}}:{}),
     ...(yt?{isBasedOn:yt}:{}),
     publisher:{'@type':'Organization',name:'DeenSubs',url:'https://deensubs.com',logo:{'@type':'ImageObject',url:'https://deensubs.com/web-app-manifest-512x512.png'}},
@@ -36,8 +48,8 @@ export function renderWatch({ video, related, cues, base, playlist }) {
   ]});
   return `
 ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
-<script type="application/ld+json">${jsonLd}</script>
-<script type="application/ld+json">${breadcrumb}</script>
+<script type="application/ld+json">${jsonLd.replace(/</g,'\\u003c')}</script>
+<script type="application/ld+json">${breadcrumb.replace(/</g,'\\u003c')}</script>
 <div class="wl">
   <div class="wm">
     <div class="vp" id="vp">
@@ -60,8 +72,11 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
       </div>
       <div class="vp-bar" id="vp-bar">
         <button class="vb" id="vpp" title="Play (k)"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path id="ppi" d="M8 5v14l11-7z"/></svg></button>
-        <div class="vp-sk" id="vsk"><div class="vp-bf" id="vbf"></div><div class="vp-pg" id="vpg"><div class="vp-dot"></div></div><div class="sk-tip" id="sk-tip"></div></div>
+        <div class="vp-sk" id="vsk"><div class="vp-bf" id="vbf"></div><div class="vp-pg" id="vpg"><div class="vp-dot"></div></div>${chapters.length&&dur?chapters.map((ch,i)=>`<div class="vp-chseg" style="left:${(ch.t/dur*100).toFixed(3)}%;width:${((chEnd(i)-ch.t)/dur*100).toFixed(3)}%"></div>`).join('')+chapters.slice(1).map(ch=>`<div class="vp-chtick" style="left:${(ch.t/dur*100).toFixed(3)}%"></div>`).join(''):''}<div class="sk-tip" id="sk-tip"></div></div>
         <span class="vp-tm" id="vtm">0:00 / 0:00</span>
+        ${chapters.length?`<div class="vp-chw" id="vp-chw"><button class="vb vp-chn" id="vp-chn" title="Chapters" aria-haspopup="menu"><span class="vp-chn-t" id="vp-chn-t">Chapters</span><svg class="vp-chn-ar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10"><path d="M18 15l-6-6-6 6"/></svg></button>
+          <div class="vp-ch-menu" id="vp-ch-menu" role="menu"><div class="vp-ch-menu-hd">Chapters</div>${chapters.map((ch,i)=>`<button class="vp-ch-item" role="menuitem" data-t="${ch.t}"><span class="vp-ch-item-tm">${ft(ch.t)}</span><span class="vp-ch-item-t">${e(ch.title)}</span></button>`).join('')}</div>
+        </div>`:''}
         <button class="vb" id="vvol" title="Mute (m)"><svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path id="voli" d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
         <input type="range" class="vb-vr" id="vvr" min="0" max="1" step=".05" value="1" title="Volume">
         <div class="vb-lang-wrap"><button class="vb" id="vcc" title="Subtitles (c)">CC</button>
@@ -107,6 +122,13 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
         ${yt?`<a class="wi-credit" href="${e(yt)}" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.5 3.55 12 3.55 12 3.55s-7.5 0-9.38.5A3.02 3.02 0 00.5 6.19C0 8.07 0 12 0 12s0 3.93.5 5.81a3.02 3.02 0 002.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 002.12-2.14C24 15.93 24 12 24 12s0-3.93-.5-5.81zM9.55 15.57V8.43L15.82 12l-6.27 3.57z"/></svg><span>Credits: Original video on YouTube</span></a>`:''}
       </div>
     </div>
+    ${chapters.length?`
+    <div class="chr">
+      <div class="chr-hd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M4 6h16M4 12h10M4 18h7"/></svg><span>Chapters</span><span class="chr-ct">${chapters.length}</span></div>
+      <div class="chr-ls" id="chr-ls">
+        ${chapters.map((ch,i)=>`<button class="chr-c" data-t="${ch.t}" title="${e(ch.title)}"><span class="chr-tm">${ft(ch.t)}</span><span class="chr-t">${e(ch.title)}</span><span class="chr-p"></span></button>`).join('')}
+      </div>
+    </div>`:''}
     ${cues&&cues.length?`
     <div class="tr">
       <div class="tr-top"><span class="tr-hd">Transcript</span><span class="tr-ct">${cues.length} lines</span><button type="button" class="tr-copy" id="tr-copy" title="Copy transcript">Copy</button></div>
@@ -161,5 +183,5 @@ ${video.srt_key?`<a href="${cdn(video.srt_key)}" download class="dl-item"><div c
 ${video.srt_ar_key?`<a href="${cdn(video.srt_ar_key)}" download class="dl-item"><div class="dl-icon dl-icon-ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div><div><div class="dl-label">Arabic Subtitles</div><div class="dl-sub">SRT · العربية</div></div></a>`:''}
 <button class="dl-item" id="dl-embed" type="button"><div class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div><div><div class="dl-label">Embed Code</div><div class="dl-sub">Copy HTML to embed on your site</div></div></button>
 </div></div></div>
-<script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__SRT_AR__',video.srt_ar_key?e(video.srt_ar_key):'').replace('__TITLE__',jsStr(video.title)).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',jsStr(video.source||''))}</script>`;
+<script>${WATCH_JS.replace('__SLUG__',e(video.slug)).replace('__SRT__',video.srt_key?e(video.srt_key):'').replace('__SRT_AR__',video.srt_ar_key?e(video.srt_ar_key):'').replace('__TITLE__',jsStr(video.title)).replace('__THUMB__',thu(video)?e(thu(video)):'').replace('__SOURCE__',jsStr(video.source||'')).replace('__CHAPTERS__',()=>chJson)}</script>`;
 }

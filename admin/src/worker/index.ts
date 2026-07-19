@@ -1263,6 +1263,12 @@ app.post('/api/ai', async (c) => {
   return c.json({ response: answer, model, tools_used: tools });
 });
 
+// Backfill chapters for published videos that lack them (see chaptersBackfillSweep).
+app.post('/api/tools/backfill-chapters', async (c) => {
+  const report = await chaptersBackfillSweep(c.env, 10);
+  return c.json(report);
+});
+
 // ---- Fallback: serve SPA (assets binding handles static; this covers deep links when run_worker_first matches) ----
 
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
@@ -1304,6 +1310,52 @@ async function autoResumeSweep(env: Env) {
   }
 }
 
+/** Published videos should always carry chapters for the player. Older
+ * publishes (and any job whose chapter generation failed) are healed here:
+ * cues come from re-parsing the canonical SRT, chapters from the same LLM
+ * segmentation the pipeline uses. Runs on the cron, bounded per tick. */
+async function chaptersBackfillSweep(env: Env, limit = 2) {
+  const rows = (await env.DB.prepare(
+    "SELECT id, slug, srt_key FROM videos WHERE (chapters IS NULL OR chapters = '' OR chapters = '[]') AND srt_key IS NOT NULL LIMIT ?"
+  ).bind(limit).all()).results as any[];
+  const done: any[] = [], failed: any[] = [];
+  for (const v of rows) {
+    try {
+      const obj = await env.MEDIA_BUCKET.get(v.srt_key);
+      if (!obj) throw new Error('SRT missing: ' + v.srt_key);
+      const cues = parseSrtCues(await obj.text());
+      const { generateChapters } = await import('./scribe/metadata');
+      const chapters = await generateChapters(env as any, cues);
+      if (!chapters.length) throw new Error(`no chapters from ${cues.length} cues`);
+      await env.DB.prepare('UPDATE videos SET chapters = ? WHERE id = ?').bind(JSON.stringify(chapters), v.id).run();
+      await env.CACHE.delete('video:' + v.slug).catch(() => {});
+      await env.DB.prepare('INSERT INTO admin_logs (admin_id, action, target, details) VALUES (0, ?, ?, ?)')
+        .bind('chapters_backfill', v.slug, `${chapters.length} chapters`).run().catch(() => {});
+      done.push({ slug: v.slug, chapters: chapters.length });
+    } catch (e: any) {
+      failed.push({ slug: v.slug, error: String(e?.message || e).slice(0, 200) });
+    }
+  }
+  return { scanned: rows.length, done, failed };
+}
+
+function parseSrtCues(text: string): { start: number; end: number; text: string; source: string }[] {
+  const cues: { start: number; end: number; text: string; source: string }[] = [];
+  for (const block of text.replace(/\r/g, '').trim().split(/\n\n+/)) {
+    const lines = block.split('\n');
+    if (lines.length < 3) continue;
+    const m = lines[1].match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
+    if (!m) continue;
+    cues.push({
+      start: +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000,
+      end: +m[5] * 3600 + +m[6] * 60 + +m[7] + +m[8] / 1000,
+      text: lines.slice(2).join(' '),
+      source: '',
+    });
+  }
+  return cues;
+}
+
 // Daily retention: drop scribe artifacts for jobs older than 30 days.
 // Published copies live under canonical keys, so this only clears staging.
 async function retentionSweep(env: Env) {
@@ -1325,6 +1377,7 @@ export default {
   fetch: app.fetch,
   scheduled: (event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(autoResumeSweep(env));
+    ctx.waitUntil(chaptersBackfillSweep(env).catch(() => {}));
     // Retention only on the daily 03:30 tick
     const d = new Date(event.scheduledTime);
     if (d.getUTCHours() === 3 && d.getUTCMinutes() >= 30 && d.getUTCMinutes() < 35) {

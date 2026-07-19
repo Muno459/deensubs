@@ -239,7 +239,20 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           if (cur?.title && cur?.description) {
             let chapters: any[] = [];
             try { chapters = JSON.parse(cur.chapters || '[]'); } catch {}
-            return { title: cur.title, title_ar: cur.title_ar, description: cur.description, chapters, tokens: 0 };
+            // Batch imports pre-store title/description before the transcript
+            // exists — chapters still have to be generated from the cues here.
+            if (!chapters.length) {
+              const obj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
+              if (obj) {
+                chapters = await generateChapters(env, await obj.json<Cue[]>()).catch(() => []);
+                if (chapters.length) {
+                  await env.MEDIA_BUCKET.put(`scribe/${jobId}/chapters.json`, JSON.stringify(chapters), {
+                    httpMetadata: { contentType: 'application/json' },
+                  });
+                }
+              }
+            }
+            return { title: cur.title, title_ar: cur.title_ar, description: cur.description, chapters, tokens: takeUsage() };
           }
           await stampTime(env, jobId, 'metadata');
           const obj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);

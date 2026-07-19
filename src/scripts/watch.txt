@@ -468,6 +468,58 @@ setInterval(function(){if(!vid.paused&&vid.currentTime>0)trackEvent('progress')}
 })();
 
 
+// ── Chapters: seekbar segments, hover tooltip, control-bar label + menu, rail ──
+var chapters=__CHAPTERS__;
+(function(){
+  if(!chapters||chapters.length<2)return;
+  var chnT=document.getElementById('vp-chn-t'),chw=document.getElementById('vp-chw'),chn=document.getElementById('vp-chn'),chMenu=document.getElementById('vp-ch-menu');
+  var rail=document.getElementById('chr-ls');
+  var segs=document.querySelectorAll('.vp-chseg');
+  function esc(s){return String(s).replace(/</g,'&lt;')}
+  function idxAt(t){var x=0;for(var i=0;i<chapters.length;i++){if(t>=chapters[i].t)x=i;else break}return x}
+  function endOf(i){return i+1<chapters.length?chapters[i+1].t:(vid.duration||chapters[i].t+1)}
+  // Live state: control-bar label crossfades on chapter change, rail card
+  // highlights and fills its progress underline as the chapter plays out
+  var cur=-1;
+  vid.addEventListener('timeupdate',function(){
+    if(!vid.duration)return;
+    var i=idxAt(vid.currentTime);
+    if(i!==cur){
+      cur=i;
+      if(chnT){chnT.classList.remove('vp-chn-swap');void chnT.offsetWidth;chnT.textContent=chapters[i].title;chnT.classList.add('vp-chn-swap')}
+      if(chMenu){var items=chMenu.querySelectorAll('.vp-ch-item');for(var b=0;b<items.length;b++)items[b].classList.toggle('vp-ch-item-on',b===i)}
+      if(rail){var cards=rail.querySelectorAll('.chr-c');
+        for(var ci=0;ci<cards.length;ci++){cards[ci].classList.toggle('chr-on',ci===i);if(ci!==i){var op=cards[ci].querySelector('.chr-p');if(op)op.style.width=ci<i?'100%':'0'}}
+        var on=cards[i];if(on)rail.scrollTo({left:Math.max(0,on.offsetLeft-rail.offsetLeft-24),behavior:'smooth'})}
+    }
+    if(rail){var card=rail.querySelectorAll('.chr-c')[cur];
+      if(card){var p=card.querySelector('.chr-p'),s=chapters[cur].t,en=endOf(cur);
+        if(p)p.style.width=Math.min(100,Math.max(0,(vid.currentTime-s)/(en-s)*100))+'%'}}
+  });
+  // Seekbar hover: chapter title in the tooltip + lift the hovered segment
+  var skEl=document.getElementById('vsk'),tip=document.getElementById('sk-tip'),hov=-1;
+  if(skEl&&tip){
+    skEl.addEventListener('mousemove',function(ev){
+      if(!vid.duration)return;
+      var r=skEl.getBoundingClientRect(),pct=Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width)),t=pct*vid.duration,i=idxAt(t);
+      tip.innerHTML='<span class="sk-tip-ch">'+esc(chapters[i].title)+'</span><span class="sk-tip-t">'+ftt(t)+'</span>';
+      if(i!==hov){hov=i;for(var si=0;si<segs.length;si++)segs[si].classList.toggle('vp-chseg-on',si===i)}
+    });
+    skEl.addEventListener('mouseleave',function(){hov=-1;for(var si=0;si<segs.length;si++)segs[si].classList.remove('vp-chseg-on')});
+  }
+  // Control-bar chapter menu
+  if(chn&&chMenu){
+    chn.onclick=function(ev){ev.stopPropagation();chw.classList.toggle('vp-chw-open');
+      var onIt=chMenu.querySelector('.vp-ch-item-on');if(onIt)chMenu.scrollTop=Math.max(0,onIt.offsetTop-60)};
+    document.addEventListener('click',function(){chw.classList.remove('vp-chw-open')});
+    chMenu.querySelectorAll('.vp-ch-item').forEach(function(b){b.onclick=function(ev){ev.stopPropagation();vid.currentTime=+b.dataset.t;vid.play();chw.classList.remove('vp-chw-open')}});
+  }
+  // Chapter rail cards seek (and bring the player back into view)
+  if(rail)rail.querySelectorAll('.chr-c').forEach(function(c){c.onclick=function(){
+    vid.currentTime=+c.dataset.t;vid.play();
+    if(vp.getBoundingClientRect().top<-40)window.scrollTo({top:0,behavior:'smooth'})}});
+})();
+
 // ── Transcript search ──
 (function(){
   var trQ=document.getElementById('tr-q'),trM=document.getElementById('tr-match');
