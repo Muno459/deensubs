@@ -49,6 +49,8 @@ export type DownloadResult = {
   description?: string;
   channelId?: string;
   ytId?: string;
+  /** Source has formats above 1080p — upgradable by the local 4K encoder queue. */
+  fourK?: boolean;
 };
 
 /** Update a scribe_jobs row. */

@@ -760,6 +760,105 @@ app.post('/api/upload', async (c) => {
 });
 
 // Sweep observability: when did the auto-resume cron last fire?
+// ---- 4K upgrade queue ----------------------------------------------------
+// Local encoder machines (any number, any OS) coordinate through these:
+// claim atomically hands out one job at a time, stale claims (4h) recycle,
+// complete verifies the upload then repoints the job + published video to
+// the new file and deletes the 1080p original.
+
+app.post('/api/scribe/4k/claim', async (c) => {
+  const body: any = await c.req.json().catch(() => ({}));
+  const job: any = await c.env.DB.prepare(
+    `UPDATE scribe_jobs SET k4_status='claimed', k4_claimed_by=?, k4_claimed_at=unixepoch()
+     WHERE id = (SELECT id FROM scribe_jobs
+       WHERE full_video = 1
+         AND (k4_status = 'capable' OR (k4_status = 'claimed' AND k4_claimed_at < unixepoch() - 14400))
+       ORDER BY created_at LIMIT 1)
+     RETURNING id, url, title, source_key`
+  ).bind(String(body.worker || 'anon').slice(0, 60)).first();
+  return c.json({ job: job || null });
+});
+
+app.post('/api/scribe/4k/complete', async (c) => {
+  const { job_id, key } = await c.req.json();
+  if (!job_id || !key || key !== `scribe/${job_id}/source-4k.mp4`) {
+    return c.json({ error: 'job_id and key scribe/<job_id>/source-4k.mp4 required' }, 400);
+  }
+  const head = await c.env.MEDIA_BUCKET.head(key);
+  if (!head || head.size < 10_000_000) return c.json({ error: '4K file missing or suspiciously small in R2 — upload first' }, 400);
+  const job: any = await c.env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(job_id).first();
+  if (!job) return c.json({ error: 'job not found' }, 404);
+  const old = job.source_key;
+  await c.env.DB.prepare("UPDATE scribe_jobs SET source_key = ?, k4_status = 'done' WHERE id = ?").bind(key, job_id).run();
+  if (old && old !== key) {
+    await c.env.DB.prepare('UPDATE videos SET video_key = ? WHERE video_key = ?').bind(key, old).run();
+    await c.env.MEDIA_BUCKET.delete(old).catch(() => {});
+  }
+  return c.json({ ok: true, replaced: old || null });
+});
+
+app.post('/api/scribe/4k/release', async (c) => {
+  // demote:true = the claim was wrong (no >1080p stream actually available)
+  const { job_id, demote } = await c.req.json();
+  await c.env.DB.prepare(
+    "UPDATE scribe_jobs SET k4_status = ?, k4_claimed_by = NULL, k4_claimed_at = NULL WHERE id = ? AND k4_status = 'claimed'"
+  ).bind(demote ? 'none' : 'capable', job_id).run();
+  return c.json({ ok: true });
+});
+
+// Chunked upload for the 4K encoder app — multi-GB files stream through the
+// Worker into R2 multipart, so local machines need no R2 credentials at all.
+app.post('/api/scribe/4k/upload/start', async (c) => {
+  const { job_id } = await c.req.json();
+  if (!job_id) return c.json({ error: 'job_id required' }, 400);
+  const key = `scribe/${job_id}/source-4k.mp4`;
+  const mpu = await c.env.MEDIA_BUCKET.createMultipartUpload(key, {
+    httpMetadata: { contentType: 'video/mp4' },
+  });
+  return c.json({ key, uploadId: mpu.uploadId });
+});
+
+app.put('/api/scribe/4k/upload/part', async (c) => {
+  const key = c.req.query('objkey') || '';
+  const uploadId = c.req.query('uploadId') || '';
+  const part = parseInt(c.req.query('part') || '0');
+  if (!key.startsWith('scribe/') || !uploadId || !part) return c.json({ error: 'objkey, uploadId, part required' }, 400);
+  const body = await c.req.arrayBuffer();
+  if (!body.byteLength) return c.json({ error: 'empty part' }, 400);
+  const mpu = c.env.MEDIA_BUCKET.resumeMultipartUpload(key, uploadId);
+  const uploaded = await mpu.uploadPart(part, body);
+  return c.json({ partNumber: uploaded.partNumber, etag: uploaded.etag });
+});
+
+app.post('/api/scribe/4k/upload/finish', async (c) => {
+  const { objkey, uploadId, parts, abort } = await c.req.json();
+  if (!objkey?.startsWith('scribe/') || !uploadId) return c.json({ error: 'objkey and uploadId required' }, 400);
+  const mpu = c.env.MEDIA_BUCKET.resumeMultipartUpload(objkey, uploadId);
+  if (abort) {
+    await mpu.abort().catch(() => {});
+    return c.json({ ok: true, aborted: true });
+  }
+  if (!Array.isArray(parts) || !parts.length) return c.json({ error: 'parts required' }, 400);
+  const obj = await mpu.complete(parts);
+  return c.json({ ok: true, size: obj.size });
+});
+
+app.get('/api/scribe/4k/pending-scan', async (c) => {
+  // Backfill: video jobs from before capability flagging existed
+  const rows = await c.env.DB.prepare(
+    "SELECT id, url FROM scribe_jobs WHERE full_video = 1 AND (k4_status IS NULL OR k4_status = '') AND url LIKE '%youtu%' ORDER BY created_at DESC LIMIT 200"
+  ).all();
+  return c.json({ jobs: rows.results });
+});
+
+app.post('/api/scribe/4k/flag', async (c) => {
+  const { job_id, capable } = await c.req.json();
+  await c.env.DB.prepare(
+    "UPDATE scribe_jobs SET k4_status = ? WHERE id = ? AND (k4_status IS NULL OR k4_status = '')"
+  ).bind(capable ? 'capable' : 'none', job_id).run();
+  return c.json({ ok: true });
+});
+
 app.get('/api/scribe/sweep-status', async (c) => {
   const hb = await c.env.CACHE.get('sweep:heartbeat');
   const recent = await c.env.DB.prepare("SELECT target, details, created_at FROM admin_logs WHERE action = 'auto_resume' ORDER BY id DESC LIMIT 5").all().catch(() => ({ results: [] }));

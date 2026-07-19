@@ -89,6 +89,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         duration: dl.durationSec || 0,
         yt_id: ytId,
         orig_description: row?.orig_description || (dl as any).description || null,
+        ...((dl as any).fourK && fullVideo ? { k4_status: 'capable' } : {}),
       });
       // Channel avatar → R2 (shared per channel, fetched once), best-effort
       if ((dl as any).channelId && !row?.channel_image_key) {

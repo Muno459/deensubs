@@ -519,6 +519,15 @@ function JobDetail({ job }: { job: any }) {
           </div>
         )}
         <div className="flex flex-wrap gap-1.5 pt-1">
+          {job.k4_status && job.k4_status !== 'none' && (
+            <span className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
+              job.k4_status === 'done' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+              : job.k4_status === 'claimed' ? 'border-gold/40 bg-gold/10 text-gold-bright'
+              : 'border-sky-500/30 bg-sky-500/10 text-sky-300'}`}
+              title="Source has >1080p formats — run tools/encode-4k.py --queue on any machine to upgrade">
+              {job.k4_status === 'done' ? '4K ✓' : job.k4_status === 'claimed' ? `4K encoding — ${job.k4_claimed_by || '…'}` : '4K available'}
+            </span>
+          )}
           {job.status === 'done' && (
             <button
               onClick={() => (window as any).__openEditor?.(job)}

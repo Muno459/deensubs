@@ -160,6 +160,9 @@ def run_download(job_id: str, url: str, cookies: str | None = None, video: bool 
                         pct=100.0,
                         file=produced,
                         ext=produced.rsplit(".", 1)[-1],
+                        # any format above 1080p -> the source can be upgraded
+                        # to 4K later by the local encoder queue
+                        four_k=any((f.get("height") or 0) > 1080 for f in (info.get("formats") or [])),
                         title=info.get("title", ""),
                         channel=info.get("uploader", "") or info.get("channel", ""),
                         thumbnail=info.get("thumbnail", ""),

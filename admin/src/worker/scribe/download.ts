@@ -204,6 +204,7 @@ async function ytdlpDownload(env: ScribeEnv, jobId: string, url: string, fullVid
     description: info.description || '',
     channelId: info.channel_id || '',
     ytId: info.vid || '',
+    fourK: !!info.four_k,
   };
 }
 
