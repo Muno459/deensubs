@@ -210,6 +210,7 @@ feeds.get('/sitemap.xml', async (c) => {
   ];
   data.categories.forEach(c => urls.push(`<url><loc>${base}/category/${c.slug}</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>`));
   (data.scholars || []).forEach(s => urls.push(`<url><loc>${base}/scholar/${s.slug}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`));
+  (data.playlists || []).forEach(p => urls.push(`<url><loc>${base}/playlist/${p.slug}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`));
   data.videos.forEach(v => {
     // Video sitemap extension: requires title + thumbnail; only emit when both exist
     const vid = v.title && v.thumb_key ? `<video:video>

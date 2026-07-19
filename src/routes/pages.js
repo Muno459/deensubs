@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { VIDEO_COLS, VIDEO_JOIN, VIDEO_WITH_SCHOLAR, VIDEO_SCHOLAR_JOIN, readDB } from '../lib/db.js';
-import { getCategories, getScholars, getHomeVideos, getPopularVideos, getHomeBundle, getVideo, getPlatformStats, getCategoryVideos, getCategory, getScholarVideos, getScholar, getRelatedVideos, kvGetMulti } from '../lib/kv-cache.js';
+import { getCategories, getScholars, getHomeVideos, getPopularVideos, getHomeBundle, getVideo, getPlatformStats, getCategoryVideos, getCategory, getScholarVideos, getScholar, getRelatedVideos, getCategoryPlaylists, getScholarPlaylists, getPlaylist, getVideoPlaylist, kvGetMulti } from '../lib/kv-cache.js';
 import { parseSRT } from '../lib/srt.js';
 import { renderPage } from '../templates/layout.js';
 import { renderHome } from '../templates/home.js';
@@ -8,6 +8,7 @@ import { renderWatch } from '../templates/watch.js';
 import { renderCategory } from '../templates/category.js';
 import { renderSearch } from '../templates/search.js';
 import { renderScholars, renderScholar } from '../templates/scholar.js';
+import { renderPlaylist } from '../templates/playlist.js';
 import { renderAbout } from '../templates/about.js';
 import { renderPrivacy } from '../templates/privacy.js';
 import { renderBookmarks } from '../templates/bookmarks.js';
@@ -73,10 +74,11 @@ pages.get('/watch/:slug', async (c) => {
     { key: 'categories', fetcher: async () => (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results, stale: 86400 },
   ]);
   if (!video) return c.html(rp(c,'Not Found', render404(), cats), 404);
-  // Then fetch related + transcript in parallel (both depend on video data)
-  const [related, cues] = await Promise.all([
+  // Then fetch related + transcript + playlist context in parallel (all depend on video data)
+  const [related, cues, playlist] = await Promise.all([
     getRelatedVideos(c.env, video.id, video.category_id),
     video.srt_key ? parseSRT(c.env, video.srt_key) : [],
+    getVideoPlaylist(c.env, video.id),
   ]);
   // Increment views via queue (reliable, batched)
   c.executionCtx.waitUntil(c.env.TASKS.send({ type: 'view', slug }));
@@ -88,7 +90,7 @@ pages.get('/watch/:slug', async (c) => {
     image: video.thumb_key ? base + '/api/media/' + video.thumb_key : null,
     video: video.video_key ? cdn(video.video_key) : null,
   };
-  const resp = c.html(rp(c,video.title, renderWatch({ video, related, cues, base }), cats, video.category_slug, meta));
+  const resp = c.html(rp(c,video.title, renderWatch({ video, related, cues, base, playlist }), cats, video.category_slug, meta));
   // Preload poster image via Link header (Early Hints)
   if (video.thumb_key) {
     const tb = video.thumb_key.replace(/\.(jpg|jpeg|png)$/i, '');
@@ -100,14 +102,17 @@ pages.get('/watch/:slug', async (c) => {
 pages.get('/category/:slug', async (c) => {
   const slug = c.req.param('slug');
   const sort = c.req.query('sort') || 'newest';
-  const [category, videos, cats] = await kvGetMulti(c.env, [
-    { key: 'cat-info:' + slug, fetcher: async () => await readDB(c.env).prepare('SELECT * FROM categories WHERE slug = ?').bind(slug).first(), stale: 86400 },
-    { key: `cat:${slug}:${sort || 'newest'}`, fetcher: async () => { const ob = sort === 'popular' ? 'v.views DESC' : 'v.created_at DESC'; return (await readDB(c.env).prepare(`SELECT ${VC} ${VJ} AND c.slug = ? ORDER BY ${ob}`).bind(slug).all()).results; }, stale: 300 },
-    { key: 'categories', fetcher: async () => (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results, stale: 86400 },
-  ]);
+  const [category, videos, cats, playlists] = await Promise.all([
+    kvGetMulti(c.env, [
+      { key: 'cat-info:' + slug, fetcher: async () => await readDB(c.env).prepare('SELECT * FROM categories WHERE slug = ?').bind(slug).first(), stale: 86400 },
+      { key: `cat:${slug}:${sort || 'newest'}`, fetcher: async () => { const ob = sort === 'popular' ? 'v.views DESC' : 'v.created_at DESC'; return (await readDB(c.env).prepare(`SELECT ${VC} ${VJ} AND c.slug = ? ORDER BY ${ob}`).bind(slug).all()).results; }, stale: 300 },
+      { key: 'categories', fetcher: async () => (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results, stale: 86400 },
+    ]),
+    getCategoryPlaylists(c.env, slug),
+  ]).then(([bulk, pls]) => [...bulk, pls]);
   if (!category) return c.html(rp(c,'Not Found', render404(), cats), 404);
   const catMeta = { description: `Browse ${videos.length} ${category.name.toLowerCase()} videos with English subtitles, translated from Arabic by AI.`, pattern: true };
-  return c.html(rp(c,category.name, renderCategory({ category, videos, sort }), cats, slug, catMeta));
+  return c.html(rp(c,category.name, renderCategory({ category, videos, sort, playlists: playlists || [] }), cats, slug, catMeta));
 });
 
 pages.get('/search', async (c) => {
@@ -140,11 +145,28 @@ pages.get('/scholar/:slug', async (c) => {
   const slug = c.req.param('slug');
   const [scholar, cats] = await Promise.all([getScholar(c.env, slug), getCategories(c.env)]);
   if (!scholar) return c.html(rp(c,'Not Found', render404(), cats), 404);
-  const videos = await getScholarVideos(c.env, scholar.id);
+  const [videos, playlists] = await Promise.all([
+    getScholarVideos(c.env, scholar.id),
+    getScholarPlaylists(c.env, scholar.id),
+  ]);
   const schMeta = {
     description: `Watch ${videos.length} videos by ${scholar.name} with English subtitles.${scholar.title ? ' ' + scholar.title + '.' : ''}`,
   };
-  return c.html(rp(c,scholar.name, renderScholar({ scholar, videos }), cats, 'scholars', schMeta));
+  return c.html(rp(c,scholar.name, renderScholar({ scholar, videos, playlists: playlists || [] }), cats, 'scholars', schMeta));
+});
+
+pages.get('/playlist/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  const [data, cats] = await Promise.all([getPlaylist(c.env, slug), getCategories(c.env)]);
+  if (!data) return c.html(rp(c,'Not Found', render404(), cats), 404);
+  const { playlist, videos } = data;
+  const base = new URL(c.req.url).origin;
+  const first = videos.find(v => v.thumb_key);
+  const plMeta = {
+    description: playlist.description || `Watch the ${videos.length}-part series "${playlist.title}" with English subtitles on DeenSubs.`,
+    image: playlist.cover_key ? cdn(playlist.cover_key) : first ? base + '/api/media/' + first.thumb_key : null,
+  };
+  return c.html(rp(c,playlist.title, renderPlaylist({ playlist, videos, base }), cats, videos.find(v => v.category_slug)?.category_slug || null, plMeta));
 });
 
 pages.get('/history', async (c) => {

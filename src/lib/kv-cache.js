@@ -161,14 +161,15 @@ export async function getRSSVideos(env) {
 
 // ── Sitemap data (1 hour cache) ──
 export async function getSitemapData(env) {
-  return kvGet(env, 'sitemap:v3', async () => {
+  return kvGet(env, 'sitemap:v4', async () => {
     const db = readDB(env);
-    const [videos, cats, scholars] = await Promise.all([
+    const [videos, cats, scholars, playlists] = await Promise.all([
       db.prepare('SELECT slug, created_at, title, description, thumb_key, video_key, duration FROM videos WHERE enabled = 1 ORDER BY created_at DESC').all(),
       db.prepare('SELECT slug FROM categories ORDER BY name').all(),
       db.prepare('SELECT slug FROM scholars ORDER BY name').all(),
+      db.prepare('SELECT p.slug FROM playlists p WHERE EXISTS (SELECT 1 FROM playlist_videos pv JOIN videos v ON v.id = pv.video_id AND v.enabled = 1 WHERE pv.playlist_id = p.id) ORDER BY p.created_at DESC').all(),
     ]);
-    return { videos: videos.results, categories: cats.results, scholars: scholars.results };
+    return { videos: videos.results, categories: cats.results, scholars: scholars.results, playlists: playlists.results };
   }, STALE_LONG);
 }
 
@@ -212,6 +213,80 @@ export async function getRelatedVideos(env, videoId, categoryId) {
       `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} AND v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 12`
     ).bind(videoId, categoryId).all()).results;
   }, STALE_MEDIUM);
+}
+
+// Shared SELECT for playlist cards: card fields + first video's thumbnail
+const PLAYLIST_CARD_COLS = `p.id, p.title, p.title_ar, p.slug, p.description, p.cover_key, p.created_at,
+  COUNT(v.id) as video_count, SUM(v.duration) as total_duration,
+  (SELECT v2.thumb_key FROM playlist_videos pv2 JOIN videos v2 ON v2.id = pv2.video_id AND v2.enabled = 1
+    WHERE pv2.playlist_id = p.id AND v2.thumb_key IS NOT NULL ORDER BY pv2.position ASC LIMIT 1) as first_thumb`;
+const PLAYLIST_CARD_JOIN = `FROM playlists p
+  JOIN playlist_videos pv ON pv.playlist_id = p.id
+  JOIN videos v ON v.id = pv.video_id AND v.enabled = 1`;
+
+// ── Playlists shown inside a category page (5 min cache) ──
+// A playlist appears in a category when any of its videos belong to it;
+// those member videos collapse out of the category's video grid.
+export async function getCategoryPlaylists(env, slug) {
+  return kvGet(env, 'cat-playlists:' + slug, async () => {
+    return (await readDB(env).prepare(
+      `SELECT ${PLAYLIST_CARD_COLS},
+        GROUP_CONCAT(CASE WHEN v.category_id = (SELECT id FROM categories WHERE slug = ?1) THEN v.id END) as member_ids
+       ${PLAYLIST_CARD_JOIN}
+       GROUP BY p.id
+       HAVING member_ids IS NOT NULL
+       ORDER BY p.created_at DESC`
+    ).bind(slug).all()).results;
+  }, STALE_SHORT);
+}
+
+// ── Playlists shown on a scholar page (5 min cache) ──
+// Shown when the scholar is assigned the majority of the playlist's videos.
+export async function getScholarPlaylists(env, scholarId) {
+  return kvGet(env, 'scholar-playlists:' + scholarId, async () => {
+    return (await readDB(env).prepare(
+      `SELECT ${PLAYLIST_CARD_COLS},
+        SUM(CASE WHEN v.scholar_id = ?1 THEN 1 ELSE 0 END) as scholar_count,
+        GROUP_CONCAT(CASE WHEN v.scholar_id = ?1 THEN v.id END) as member_ids
+       ${PLAYLIST_CARD_JOIN}
+       GROUP BY p.id
+       HAVING scholar_count > 0 AND scholar_count * 2 >= COUNT(v.id)
+       ORDER BY p.created_at DESC`
+    ).bind(scholarId).all()).results;
+  }, STALE_SHORT);
+}
+
+// ── Single playlist + its videos in order (5 min cache) ──
+export async function getPlaylist(env, slug) {
+  return kvGet(env, 'playlist:' + slug, async () => {
+    const db = readDB(env);
+    const playlist = await db.prepare('SELECT * FROM playlists WHERE slug = ?').bind(slug).first();
+    if (!playlist) return null;
+    const videos = (await db.prepare(
+      `SELECT v.*, c.name as category_name, c.slug as category_slug, c.color as category_color, pv.position
+       FROM playlist_videos pv JOIN videos v ON v.id = pv.video_id
+       LEFT JOIN categories c ON v.category_id = c.id
+       WHERE pv.playlist_id = ? AND v.enabled = 1 ORDER BY pv.position ASC`
+    ).bind(playlist.id).all()).results;
+    return { playlist, videos };
+  }, STALE_SHORT);
+}
+
+// ── Playlist context for a video: the watch-page queue (5 min cache) ──
+export async function getVideoPlaylist(env, videoId) {
+  return kvGet(env, 'video-playlist:' + videoId, async () => {
+    const db = readDB(env);
+    const p = await db.prepare(
+      'SELECT p.id, p.title, p.title_ar, p.slug FROM playlists p JOIN playlist_videos pv ON pv.playlist_id = p.id WHERE pv.video_id = ? ORDER BY p.id LIMIT 1'
+    ).bind(videoId).first();
+    if (!p) return null;
+    const items = (await db.prepare(
+      `SELECT v.id, v.title, v.slug, v.duration, v.thumb_key, v.views, v.source, pv.position
+       FROM playlist_videos pv JOIN videos v ON v.id = pv.video_id
+       WHERE pv.playlist_id = ? AND v.enabled = 1 ORDER BY pv.position ASC`
+    ).bind(p.id).all()).results;
+    return { ...p, items };
+  }, STALE_SHORT);
 }
 
 // ── Platform stats (5 min cache) ──

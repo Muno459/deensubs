@@ -1,5 +1,6 @@
 import { e, fv, ft, cdn, schImg } from '../lib/helpers.js';
 import { vcard } from '../components/video-card.js';
+import { pcard } from './playlist.js';
 import CATALOG_JS from '../scripts/catalog.min.txt';
 
 export function renderScholars({ scholars }) {
@@ -28,7 +29,11 @@ export function renderScholars({ scholars }) {
 </div>`;
 }
 
-export function renderScholar({ scholar, videos }) {
+export function renderScholar({ scholar, videos, playlists }) {
+  playlists = playlists || [];
+  // Videos in a playlist shown here collapse into its card
+  const memberIds = new Set(playlists.flatMap(p => String(p.member_ids || '').split(',').filter(Boolean).map(Number)));
+  const loose = memberIds.size ? videos.filter(v => !memberIds.has(v.id)) : videos;
   const hasHero = !!scholar.photo_hero;
   const hasPhoto = !!scholar.photo;
   const totalViews = videos.reduce((a, v) => a + (v.views || 0), 0);
@@ -63,7 +68,9 @@ export function renderScholar({ scholar, videos }) {
     </div>
   </div>
 
-  ${videos.length ? `
+  ${playlists.length ? `<section class="sec"><div class="sec-hd"><h2>Playlists</h2></div><div class="plc-grid">${playlists.map(pcard).join('')}</div></section>` : ''}
+
+  ${loose.length ? `
   <div class="toolbar">
     <div class="tb-row">
       <div class="tb-chips" id="sp-sort">
@@ -78,13 +85,13 @@ export function renderScholar({ scholar, videos }) {
         <button class="tb-chip" data-dur="l">Over 30 min</button>
       </div>
       <label class="tb-toggle"><input type="checkbox" id="tb-subs"><span>Subtitled only</span></label>
-      <span class="tb-count" id="tb-count">${videos.length} video${videos.length !== 1 ? 's' : ''}</span>
+      <span class="tb-count" id="tb-count">${loose.length} video${loose.length !== 1 ? 's' : ''}</span>
     </div>
   </div>
-  <div class="grid" id="sch-grid">${videos.map(v => vcard(v, { anim: true, data: true })).join('')}</div>
+  <div class="grid" id="sch-grid">${loose.map(v => vcard(v, { anim: true, data: true })).join('')}</div>
   <p class="emp" id="sch-empty" style="display:none">No videos match the selected filters.</p>
   <script>${CATALOG_JS}</script>
   <script>initCatalog({grid:'sch-grid',count:'tb-count',empty:'sch-empty',sort:'sp-sort',dur:'tb-dur',subs:'tb-subs'});</script>
-  ` : '<p class="emp">No videos yet.</p>'}
+  ` : playlists.length ? '' : '<p class="emp">No videos yet.</p>'}
 </div>`;
 }

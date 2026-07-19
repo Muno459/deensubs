@@ -1,5 +1,6 @@
 import { e, fv, ft, thu } from '../lib/helpers.js';
 import { vcard } from '../components/video-card.js';
+import { pcard } from './playlist.js';
 import { tsvg } from '../components/thumbnail.js';
 import CATALOG_JS from '../scripts/catalog.min.txt';
 
@@ -40,7 +41,11 @@ function featCard(v, kicker, note) {
 </a>`;
 }
 
-export function renderCategory({ category, videos, sort }) {
+export function renderCategory({ category, videos, sort, playlists }) {
+  playlists = playlists || [];
+  // Videos that belong to a playlist shown here collapse into its card
+  const memberIds = new Set(playlists.flatMap(p => String(p.member_ids || '').split(',').filter(Boolean).map(Number)));
+  const loose = memberIds.size ? videos.filter(v => !memberIds.has(v.id)) : videos;
   const meta = CATEGORY_META[category.slug] || {};
   const desc = meta.desc || '';
   const pc = category.color || '#0e6b63';
@@ -48,24 +53,24 @@ export function renderCategory({ category, videos, sort }) {
   const subtitled = videos.filter(v => v.srt_key).length;
   const hrs = totalMin >= 60 ? `${Math.floor(totalMin / 60)}h ${totalMin % 60}m` : `${totalMin} min`;
   const scholarCounts = {};
-  videos.forEach(v => { const s = v.source || 'Other'; scholarCounts[s] = (scholarCounts[s] || 0) + 1; });
+  loose.forEach(v => { const s = v.source || 'Other'; scholarCounts[s] = (scholarCounts[s] || 0) + 1; });
   const scholarList = Object.entries(scholarCounts).sort((a, b) => b[1] - a[1]);
 
   // Lead module per mode
   let lead = '';
-  if (videos.length >= 3 && meta.mode === 'study') {
-    const pick = [...videos].filter(v => v.srt_key).sort((a, b) => (b.views || 0) - (a.views || 0))[0]
-      || [...videos].sort((a, b) => (b.views || 0) - (a.views || 0))[0];
+  if (loose.length >= 3 && meta.mode === 'study') {
+    const pick = [...loose].filter(v => v.srt_key).sort((a, b) => (b.views || 0) - (a.views || 0))[0]
+      || [...loose].sort((a, b) => (b.views || 0) - (a.views || 0))[0];
     lead = featCard(pick, 'Start here', meta.start);
-  } else if (videos.length >= 3 && meta.mode === 'timely') {
-    const latest = [...videos].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+  } else if (loose.length >= 3 && meta.mode === 'timely') {
+    const latest = [...loose].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
     lead = featCard(latest, 'Latest khutbah', meta.start);
   } else if (meta.mode === 'short') {
-    const quick = videos.filter(v => v.duration && v.duration <= 600).slice(0, 8);
+    const quick = loose.filter(v => v.duration && v.duration <= 600).slice(0, 8);
     if (quick.length >= 2) lead = `<section class="sec"><div class="sec-hd"><h2>Quick picks &middot; under 10 minutes</h2></div><div class="hscroll">${quick.map(v => vcard(v, { anim: true })).join('')}</div></section>`;
   }
 
-  const popular = videos.length >= 5 ? [...videos].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 6) : [];
+  const popular = loose.length >= 5 ? [...loose].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 6) : [];
   const breadcrumb = JSON.stringify({'@context':'https://schema.org','@type':'BreadcrumbList',itemListElement:[
     {'@type':'ListItem',position:1,name:'Home',item:'https://deensubs.com/'},
     {'@type':'ListItem',position:2,name:category.name},
@@ -84,9 +89,11 @@ export function renderCategory({ category, videos, sort }) {
 
   ${lead}
 
+  ${playlists.length ? `<section class="sec"><div class="sec-hd"><h2>Playlists</h2></div><div class="plc-grid">${playlists.map(pcard).join('')}</div></section>` : ''}
+
   ${popular.length ? `<section class="sec"><div class="sec-hd"><h2>Popular in ${e(category.name)}</h2></div><div class="hscroll">${popular.map(v => vcard(v, { anim: true })).join('')}</div></section>` : ''}
 
-  ${videos.length ? `
+  ${loose.length ? `
   <div class="toolbar">
     <div class="tb-row">
       ${scholarList.length > 1 ? `<div class="tb-chips" id="tb-scholars"><button class="tb-chip tb-chip-on" data-scholar="">All scholars</button>${scholarList.map(([s, n]) => `<button class="tb-chip" data-scholar="${e(s)}">${e(s)}<span class="tb-n">${n}</span></button>`).join('')}</div>` : ''}
@@ -103,13 +110,13 @@ export function renderCategory({ category, videos, sort }) {
         <button class="tb-chip" data-dur="l">Over 30 min</button>
       </div>
       <label class="tb-toggle"><input type="checkbox" id="tb-subs"><span>Subtitled only</span></label>
-      <span class="tb-count" id="tb-count">${videos.length} video${videos.length !== 1 ? 's' : ''}</span>
+      <span class="tb-count" id="tb-count">${loose.length} video${loose.length !== 1 ? 's' : ''}</span>
     </div>
   </div>
-  <div class="grid" id="cat-grid">${videos.map(v => vcard(v, { anim: true, data: true })).join('')}</div>
+  <div class="grid" id="cat-grid">${loose.map(v => vcard(v, { anim: true, data: true })).join('')}</div>
   <p class="emp" id="cat-empty" style="display:none">No videos match the selected filters.</p>
   <script>${CATALOG_JS}</script>
   <script>initCatalog({grid:'cat-grid',count:'tb-count',empty:'cat-empty',scholars:'tb-scholars',dur:'tb-dur',subs:'tb-subs'});</script>
-  ` : '<p class="emp">No videos in this category yet.</p>'}
+  ` : playlists.length ? '' : '<p class="emp">No videos in this category yet.</p>'}
 </section>`;
 }

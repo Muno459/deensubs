@@ -4,8 +4,10 @@ import WATCH_JS from '../scripts/watch.min.txt';
 
 import { scard } from '../components/video-card.js';
 
-export function renderWatch({ video, related, cues, base }) {
+export function renderWatch({ video, related, cues, base, playlist }) {
   const th=thu(video);
+  const plIdx = playlist ? playlist.items.findIndex(p => p.slug === video.slug) : -1;
+  const plNext = plIdx >= 0 && plIdx < playlist.items.length - 1 ? playlist.items[plIdx + 1] : null;
   // youtube_id holds either a bare video ID or a full URL (keeps t= timestamps)
   const yt=video.youtube_id?(video.youtube_id.startsWith('http')?video.youtube_id:'https://www.youtube.com/watch?v='+video.youtube_id):'';
   base = base || 'https://deensubs.com';
@@ -126,7 +128,25 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
     </div>
   </div>
   <aside class="ws">
-    ${related && related.length ? `<div class="ws-next"><span class="ws-next-label">Up Next</span><a href="/watch/${e(related[0].slug)}" class="ws-next-title">${e(related[0].title)}</a></div>` : ''}
+    ${plNext ? `<div class="ws-next"><span class="ws-next-label">Up next in ${e(playlist.title)}</span><a href="/watch/${e(plNext.slug)}" class="ws-next-title">${e(plNext.title)}</a></div>`
+      : related && related.length ? `<div class="ws-next"><span class="ws-next-label">Up Next</span><a href="/watch/${e(related[0].slug)}" class="ws-next-title">${e(related[0].title)}</a></div>` : ''}
+    ${playlist && plIdx >= 0 ? `
+    <div class="plq">
+      <div class="plq-hd">
+        <a href="/playlist/${e(playlist.slug)}" class="plq-t">${e(playlist.title)}</a>
+        <span class="plq-k">${plIdx + 1} / ${playlist.items.length}</span>
+      </div>
+      <div class="plq-ls" id="plq-ls">
+        ${playlist.items.map((it, i) => {
+          const itTh = thu(it);
+          return `<a href="/watch/${e(it.slug)}" class="plq-r${i === plIdx ? ' plq-on' : ''}"${i === plIdx ? ' aria-current="true"' : ''}>
+          <span class="plq-n">${i === plIdx ? '<svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10"><path d="M8 5v14l11-7z"/></svg>' : i + 1}</span>
+          <div class="plq-th">${itTh ? `<img src="${e(itTh)}" alt="" loading="lazy" decoding="async">` : tsvg(it.title, '#0e6b63', 100, 56)}${it.duration ? `<span class="dur dur-s">${ft(it.duration)}</span>` : ''}</div>
+          <h4>${e(it.title)}</h4>
+        </a>`;}).join('')}
+      </div>
+    </div>
+    <script>(function(){var q=document.getElementById('plq-ls');if(!q)return;var on=q.querySelector('.plq-on');if(on)q.scrollTop=Math.max(0,on.offsetTop-q.offsetTop-56)})()</script>` : ''}
     <h3>Related</h3>
     ${related && related.length ? related.map(scard).join('') : '<p class="emp-s">More content soon.</p>'}
   </aside>
