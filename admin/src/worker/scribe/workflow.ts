@@ -24,13 +24,15 @@ export type ScribeParams = {
  * race between concurrent instances. Keep-first unless force: real work restamps
  * its own start/end; cache-hit replays leave prior timings untouched. */
 async function stampTime(env: ScribeEnv, jobId: string, key: string, force = true) {
+  // Best-effort telemetry: a transient D1 overload here must never fail the
+  // surrounding step (it once re-ran a completed 3GB download).
   await env.DB.prepare(
     `UPDATE scribe_jobs SET stage_times = CASE
        WHEN ?1 = 1 OR json_extract(COALESCE(stage_times, '{}'), ?2) IS NULL
        THEN json_patch(COALESCE(stage_times, '{}'), ?3)
        ELSE stage_times END
      WHERE id = ?4`
-  ).bind(force ? 1 : 0, '$.' + key, JSON.stringify({ [key]: new Date().toISOString() }), jobId).run();
+  ).bind(force ? 1 : 0, '$.' + key, JSON.stringify({ [key]: new Date().toISOString() }), jobId).run().catch(() => {});
 }
 
 async function markStage(env: ScribeEnv, jobId: string, stage: string, extra: Record<string, any> = {}) {
