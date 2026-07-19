@@ -733,7 +733,7 @@ export default function Scribe() {
   const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
   const [cookiesOpen, setCookiesOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'done' | 'error'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'done' | 'published' | 'error'>('all');
   const [q, setQ] = useState('');
   const toast = useToast();
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -753,7 +753,9 @@ export default function Scribe() {
   };
   const shownJobs = jobs.filter((j: any) => {
     if (statusFilter === 'running' && !(j.status === 'running' || j.status === 'queued')) return false;
-    if (statusFilter === 'done' && j.status !== 'done') return false;
+    // "done" means finished but not yet published; published jobs get their own filter
+    if (statusFilter === 'done' && !(j.status === 'done' && !j.published_slug)) return false;
+    if (statusFilter === 'published' && !(j.status === 'done' && j.published_slug)) return false;
     if (statusFilter === 'error' && j.status !== 'error') return false;
     if (q.trim() && !`${j.title || ''} ${j.url}`.toLowerCase().includes(q.toLowerCase())) return false;
     return true;
@@ -959,7 +961,7 @@ export default function Scribe() {
           <span className="text-[12px] text-muted"><b className="text-cream">{stats.minutes}</b> min transcribed</span>
           <span className="text-[12px] text-muted">≈<b className="text-gold-bright">${stats.cost.toFixed(2)}</b> spent</span>
           <div className="ml-auto flex items-center gap-1.5">
-            {(['all', 'running', 'done', 'error'] as const).map((f) => (
+            {(['all', 'running', 'done', 'published', 'error'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 className={`rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
                   statusFilter === f ? 'border-gold/40 bg-gold/10 text-gold-bright' : 'border-hairline text-faint hover:text-muted'
