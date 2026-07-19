@@ -81,13 +81,14 @@ export async function aiFill(env: any, kind: string, payload: any): Promise<any>
       return out;
     }
     case 'playlist': {
-      const rows = payload.playlistId
-        ? await env.DB.prepare('SELECT v.title FROM playlist_videos pv JOIN videos v ON v.id = pv.video_id WHERE pv.playlist_id = ? ORDER BY pv.position LIMIT 30').bind(payload.playlistId).all()
-        : { results: [] };
-      const titles = (rows.results as any[]).map((r) => r.title);
+      let titles: string[] = Array.isArray(payload.videoTitles) ? payload.videoTitles.slice(0, 30) : [];
+      if (!titles.length && payload.playlistId) {
+        const rows = await env.DB.prepare('SELECT v.title FROM playlist_videos pv JOIN videos v ON v.id = pv.video_id WHERE pv.playlist_id = ? ORDER BY pv.position LIMIT 30').bind(payload.playlistId).all();
+        titles = (rows.results as any[]).map((r) => r.title);
+      }
       return ask(env,
-        'You name a playlist (series) for an Islamic content platform. Return a concise series title, natural Arabic title, and a 1-2 sentence description.',
-        `Topic hint from user: ${payload.title || ''}\nVideos in the playlist:\n${titles.join('\n') || '(none yet — use the topic hint)'}\n\nReturn {"title","title_ar","description"}.`);
+        'You name a playlist (series) for an Islamic content platform whose audience reads English. Return: title (concise series title in ENGLISH — translate naturally if the hint is Arabic, never transliterate), title_ar (natural Arabic title), and description (1-2 English sentences saying what the series covers and, if the speaker is evident from the channel or titles, who it is by).',
+        `Topic hint from user: ${payload.title || ''}\nChannel: ${payload.channel || ''}\nVideos in the playlist:\n${titles.join('\n') || '(none yet — use the topic hint)'}\n\nReturn {"title","title_ar","description"}.`);
     }
     case 'clip_hook': {
       return ask(env,

@@ -1148,7 +1148,13 @@ export default function Scribe() {
                   urls,
                   target_langs: [lang, ...extraLangs],
                   full_video: fullVideo,
-                  playlist: batch.makePlaylist && batch.plTitle.trim() ? { title: batch.plTitle.trim(), yt_id: batch.ytId } : undefined,
+                  playlist: batch.makePlaylist && batch.plTitle.trim() ? {
+                    title: batch.plTitle.trim(),
+                    yt_id: batch.ytId,
+                    // Context for the AI naming of a brand-new playlist (English title + description)
+                    video_titles: batch.entries.filter((en: any) => batch.picked.has(en.url)).map((en: any) => en.title).filter(Boolean),
+                    channel: batch.entries.find((en: any) => en.uploader)?.uploader || undefined,
+                  } : undefined,
                 }),
               });
               toast.push(`Queued ${r.created} jobs${r.playlist_id ? ' — playlist ready, videos join it on publish' : ''}`);

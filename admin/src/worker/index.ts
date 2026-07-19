@@ -580,20 +580,31 @@ app.post('/api/scribe/enumerate', async (c) => {
 });
 
 /** Site playlist for a scribe batch: reuse by YouTube playlist id, else create. */
-async function playlistForBatch(env: Env, title: string, ytId: string | null): Promise<number> {
+async function playlistForBatch(env: Env, title: string, ytId: string | null, videoTitles?: string[], channel?: string): Promise<number> {
   let row: any = ytId
     ? await env.DB.prepare('SELECT id FROM playlists WHERE yt_playlist_id = ?').bind(ytId).first()
     : null;
-  if (!row) row = await env.DB.prepare('SELECT id FROM playlists WHERE title = ?').bind(title).first();
+  if (!row) row = await env.DB.prepare('SELECT id FROM playlists WHERE title = ?1 OR title_ar = ?1').bind(title).first();
   if (row) {
     if (ytId) await env.DB.prepare('UPDATE playlists SET yt_playlist_id = COALESCE(yt_playlist_id, ?) WHERE id = ?').bind(ytId, row.id).run();
     return row.id;
   }
-  const base = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'playlist';
+  // The site is English-first: an Arabic source title moves to title_ar and the AI
+  // supplies the English title (which drives the slug) plus a description. A batch
+  // still queues if the AI call fails; the admin's AI-fill can finish the job later.
+  const isArabic = /[؀-ۿ]/.test(title);
+  let en = title, ar: string | null = isArabic ? title : null, desc: string | null = null;
+  try {
+    const out: any = await aiFill(env, 'playlist', { title, videoTitles, channel });
+    if (isArabic && out?.title && !/[؀-ۿ]/.test(out.title)) en = String(out.title).trim();
+    if (!ar && out?.title_ar) ar = String(out.title_ar).trim();
+    if (out?.description) desc = String(out.description).trim();
+  } catch {}
+  const base = en.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'playlist';
   let slug = base;
   for (let n = 2; await env.DB.prepare('SELECT 1 FROM playlists WHERE slug = ?').bind(slug).first(); n++) slug = `${base}-${n}`;
-  const ins: any = await env.DB.prepare('INSERT INTO playlists (title, slug, yt_playlist_id) VALUES (?,?,?) RETURNING id')
-    .bind(title, slug, ytId).first();
+  const ins: any = await env.DB.prepare('INSERT INTO playlists (title, title_ar, slug, description, yt_playlist_id) VALUES (?,?,?,?,?) RETURNING id')
+    .bind(en, ar, slug, desc, ytId).first();
   return ins.id;
 }
 
@@ -608,7 +619,9 @@ app.post('/api/scribe/batch', async (c) => {
   let playlistId: number | null = null;
   let basePos = 0;
   if (playlist?.title) {
-    playlistId = await playlistForBatch(c.env, String(playlist.title).trim(), playlist.yt_id || null);
+    playlistId = await playlistForBatch(c.env, String(playlist.title).trim(), playlist.yt_id || null,
+      Array.isArray(playlist.video_titles) ? playlist.video_titles.filter((t: any) => typeof t === 'string') : undefined,
+      playlist.channel || undefined);
     // Append after existing videos AND already-queued (unpublished) jobs
     const [pub, queued] = await Promise.all([
       c.env.DB.prepare('SELECT COALESCE(MAX(position), -1) as p FROM playlist_videos WHERE playlist_id = ?').bind(playlistId).first() as Promise<any>,

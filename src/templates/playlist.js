@@ -34,9 +34,16 @@ export function renderPlaylist({ playlist, videos, base }) {
   const total = fmtTotal(videos.reduce((a, v) => a + (v.duration || 0), 0));
   const views = videos.reduce((a, v) => a + (v.views || 0), 0);
   const first = videos[0];
+  // Attribute the series to the scholar holding the majority (≥ half) of its videos
+  const byScholar = {};
+  for (const v of videos) if (v.scholar_slug) byScholar[v.scholar_slug] = (byScholar[v.scholar_slug] || 0) + 1;
+  const topSlug = Object.keys(byScholar).sort((a, b) => byScholar[b] - byScholar[a])[0];
+  const scholar = topSlug && byScholar[topSlug] * 2 >= videos.length
+    ? videos.find(v => v.scholar_slug === topSlug) : null;
   const jsonLd = JSON.stringify({
     '@context': 'https://schema.org', '@type': 'ItemList',
     name: playlist.title, description: playlist.description || '',
+    ...(scholar ? { author: { '@type': 'Person', name: scholar.scholar_name, url: base + '/scholar/' + scholar.scholar_slug } } : {}),
     numberOfItems: videos.length,
     itemListElement: videos.map((v, i) => ({
       '@type': 'ListItem', position: i + 1, name: v.title, url: base + '/watch/' + v.slug,
@@ -60,6 +67,7 @@ export function renderPlaylist({ playlist, videos, base }) {
       <span class="pl-kicker">Playlist</span>
       <h1 class="page-title">${e(playlist.title)}</h1>
       ${playlist.title_ar ? `<p class="pl-hero-ar" dir="rtl">${e(playlist.title_ar)}</p>` : ''}
+      ${scholar ? `<a href="/scholar/${e(scholar.scholar_slug)}" class="pl-scholar">${e(scholar.scholar_name)}</a>` : ''}
       ${playlist.description ? `<p class="page-desc">${e(playlist.description)}</p>` : ''}
       <p class="cat-hero-meta">${videos.length} video${videos.length !== 1 ? 's' : ''}${total ? ` <i></i> ${total}` : ''}${views ? ` <i></i> ${fv(views)}` : ''}</p>
       ${first ? `<a href="/watch/${e(first.slug)}" class="pl-play"><svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M8 5v14l11-7z"/></svg>Play all</a>` : ''}

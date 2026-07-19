@@ -225,16 +225,18 @@ const PLAYLIST_CARD_JOIN = `FROM playlists p
   JOIN videos v ON v.id = pv.video_id AND v.enabled = 1`;
 
 // ── Playlists shown inside a category page (5 min cache) ──
-// A playlist appears in a category when any of its videos belong to it;
-// those member videos collapse out of the category's video grid.
+// Shown only where the category holds the majority (≥ half) of the playlist's
+// videos, mirroring the scholar-page rule; those member videos collapse out of
+// the grid. Minority-category videos stay as loose videos on their own pages.
 export async function getCategoryPlaylists(env, slug) {
   return kvGet(env, 'cat-playlists:' + slug, async () => {
     return (await readDB(env).prepare(
       `SELECT ${PLAYLIST_CARD_COLS},
+        SUM(CASE WHEN v.category_id = (SELECT id FROM categories WHERE slug = ?1) THEN 1 ELSE 0 END) as cat_count,
         GROUP_CONCAT(CASE WHEN v.category_id = (SELECT id FROM categories WHERE slug = ?1) THEN v.id END) as member_ids
        ${PLAYLIST_CARD_JOIN}
        GROUP BY p.id
-       HAVING member_ids IS NOT NULL
+       HAVING cat_count > 0 AND cat_count * 2 >= COUNT(v.id)
        ORDER BY p.created_at DESC`
     ).bind(slug).all()).results;
   }, STALE_SHORT);
@@ -263,9 +265,11 @@ export async function getPlaylist(env, slug) {
     const playlist = await db.prepare('SELECT * FROM playlists WHERE slug = ?').bind(slug).first();
     if (!playlist) return null;
     const videos = (await db.prepare(
-      `SELECT v.*, c.name as category_name, c.slug as category_slug, c.color as category_color, pv.position
+      `SELECT v.*, c.name as category_name, c.slug as category_slug, c.color as category_color,
+        s.name as scholar_name, s.slug as scholar_slug, pv.position
        FROM playlist_videos pv JOIN videos v ON v.id = pv.video_id
        LEFT JOIN categories c ON v.category_id = c.id
+       LEFT JOIN scholars s ON v.scholar_id = s.id
        WHERE pv.playlist_id = ? AND v.enabled = 1 ORDER BY pv.position ASC`
     ).bind(playlist.id).all()).results;
     return { playlist, videos };
