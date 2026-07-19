@@ -26,12 +26,31 @@ export function sttResultKey(requestId: string): string {
   return `scribe/stt-results/${requestId}.json`;
 }
 
-async function sttCall(env: ScribeEnv, sourceUrl: string, attempts = 5): Promise<any> {
+async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, attempts = 5): Promise<any> {
   // Async mode when the webhook secret is configured: the request returns
-  // immediately with a request_id, ElevenLabs POSTs the transcript to
-  // /hooks/elevenlabs when ready, and we pick it up from R2. No sync
-  // processing window, no 524s, works for any segment length.
+  // immediately with a transcription_id, and the result arrives EITHER via
+  // the /hooks/elevenlabs webhook OR by polling their GET transcript
+  // endpoint. The transcription_id persists to R2 the moment it exists
+  // (pendingKey), so a crash, retry or resume picks up the SAME in-flight
+  // transcription instead of paying for a new one.
   const useWebhook = !!(env as any).ELEVENLABS_WEBHOOK_SECRET;
+
+  if (useWebhook && pendingKey) {
+    const pending = await env.MEDIA_BUCKET.get(pendingKey);
+    if (pending) {
+      const { transcription_id } = (await pending.json()) as any;
+      if (transcription_id) {
+        const result = await awaitResult(env, transcription_id);
+        if (result) {
+          env.MEDIA_BUCKET.delete(pendingKey).catch(() => {});
+          return result;
+        }
+        // in-flight id went nowhere (expired/failed upstream) — resubmit
+        await env.MEDIA_BUCKET.delete(pendingKey).catch(() => {});
+      }
+    }
+  }
+
   let lastErr = '';
   for (let i = 0; i < attempts; i++) {
     const form = new FormData();
@@ -48,11 +67,19 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, attempts = 5): Promise
     if (res.ok) {
       const data: any = await res.json();
       if (!useWebhook) return data;
-      const requestId = data.request_id || data.transcription_id || data.id;
-      if (!requestId) return data; // API answered synchronously anyway
-      const result = await awaitWebhookResult(env, requestId);
-      if (result) return result;
-      lastErr = `webhook result for ${requestId} never arrived`;
+      const transcriptionId = data.request_id || data.transcription_id || data.id;
+      if (!transcriptionId) return data; // API answered synchronously anyway
+      if (pendingKey) {
+        await env.MEDIA_BUCKET.put(pendingKey, JSON.stringify({ transcription_id: transcriptionId }), {
+          httpMetadata: { contentType: 'application/json' },
+        });
+      }
+      const result = await awaitResult(env, transcriptionId);
+      if (result) {
+        if (pendingKey) env.MEDIA_BUCKET.delete(pendingKey).catch(() => {});
+        return result;
+      }
+      lastErr = `result for ${transcriptionId} never arrived`;
       continue; // one more submission attempt
     }
     const body = await res.text().catch(() => '');
@@ -64,16 +91,27 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, attempts = 5): Promise
   throw new Error(lastErr);
 }
 
-/** Poll R2 for the webhook-delivered result (up to 40 minutes). */
-async function awaitWebhookResult(env: ScribeEnv, requestId: string): Promise<any | null> {
+/** Wait for an async transcription: the webhook drop in R2 is the fast path,
+ * and their GET transcript endpoint is polled as the reliable path (works
+ * even if webhook delivery is broken). Up to 40 minutes. */
+async function awaitResult(env: ScribeEnv, transcriptionId: string): Promise<any | null> {
   for (let i = 0; i < 240; i++) {
     await new Promise((r) => setTimeout(r, 10_000));
-    const obj = await env.MEDIA_BUCKET.get(sttResultKey(requestId));
+    const obj = await env.MEDIA_BUCKET.get(sttResultKey(transcriptionId));
     if (obj) {
       const payload: any = await obj.json();
-      env.MEDIA_BUCKET.delete(sttResultKey(requestId)).catch(() => {});
-      // webhook envelope vs bare transcription — accept both
+      env.MEDIA_BUCKET.delete(sttResultKey(transcriptionId)).catch(() => {});
       return payload.words ? payload : payload.transcription || payload.data?.transcription || payload;
+    }
+    if (i % 3 === 2) { // every ~30s, ask ElevenLabs directly
+      const res = await fetch(`${STT_URL}/transcripts/${transcriptionId}`, {
+        headers: { 'xi-api-key': env.ELEVENLABS_API_KEY! },
+      }).catch(() => null);
+      if (res?.ok) {
+        const data: any = await res.json();
+        const t = data.words ? data : data.transcription || data;
+        if (t?.words?.length) return t;
+      }
     }
   }
   return null;
@@ -142,7 +180,7 @@ async function chunkedAsr(env: ScribeEnv, jobId: string, sourceKey: string): Pro
     if (!file.ok || !file.body) throw new Error(`segment fetch failed: ${name}`);
     const chunkKey = `scribe/${jobId}/${name}`;
     await streamToR2(env.MEDIA_BUCKET, chunkKey, file.body, 'audio/mp4');
-    const data = await sttCall(env, `${CDN_BASE}/${chunkKey}`);
+    const data = await sttCall(env, `${CDN_BASE}/${chunkKey}`, `scribe/${jobId}/stt-req-${n}.json`);
     await env.MEDIA_BUCKET.put(segKey, JSON.stringify(data), {
       httpMetadata: { contentType: 'application/json' },
     });
@@ -181,11 +219,14 @@ export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, d
   // Without it, long files fall back to the chunked sync path.
   const existingKey = `scribe/${jobId}/asr.json`;
   const existing = await env.MEDIA_BUCKET.get(existingKey);
-  const webhookMode = !!(env as any).ELEVENLABS_WEBHOOK_SECRET;
+  // A job that already has paid-for segment results finishes in chunked mode
+  // even if webhook mode switched on mid-flight — those caches are money.
+  const partial = (await env.MEDIA_BUCKET.list({ prefix: `scribe/${jobId}/asr-seg-`, limit: 1 })).objects.length > 0;
+  const webhookMode = !!(env as any).ELEVENLABS_WEBHOOK_SECRET && !partial;
   const data: any = existing
     ? await existing.json()
     : webhookMode || durationSec <= CHUNK_THRESHOLD_SEC
-      ? await sttCall(env, `${CDN_BASE}/${sourceKey}`)
+      ? await sttCall(env, `${CDN_BASE}/${sourceKey}`, `scribe/${jobId}/stt-req-full.json`)
       : await chunkedAsr(env, jobId, sourceKey);
 
   const words: Word[] = data.words || [];

@@ -897,6 +897,53 @@ app.post('/api/scribe/4k/flag', async (c) => {
   return c.json({ ok: true });
 });
 
+// ElevenLabs stores every Scribe transcription — these endpoints recover
+// transcripts that were paid for but lost to transport errors (e.g. 524s),
+// so a job never has to be transcribed twice.
+app.get('/api/scribe/stt-transcripts', async (c) => {
+  const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text/transcripts?page_size=30', {
+    headers: { 'xi-api-key': c.env.ELEVENLABS_API_KEY! },
+  });
+  return c.json(await res.json() as any, res.status as any);
+});
+
+app.post('/api/scribe/:id/import-asr', async (c) => {
+  // body: { transcript_ids: [...] } in chronological segment order; each
+  // segment's words are offset by the accumulated duration and merged into
+  // the exact asr.json shape the pipeline writes itself.
+  const jobId = c.req.param('id');
+  const { transcript_ids } = await c.req.json();
+  if (!Array.isArray(transcript_ids) || !transcript_ids.length) return c.json({ error: 'transcript_ids required' }, 400);
+  const allWords: any[] = [];
+  let text = '';
+  let languageCode = '';
+  let acc = 0;
+  for (const tid of transcript_ids) {
+    const res = await fetch(`https://api.elevenlabs.io/v1/speech-to-text/transcripts/${tid}`, {
+      headers: { 'xi-api-key': c.env.ELEVENLABS_API_KEY! },
+    });
+    if (!res.ok) return c.json({ error: `transcript ${tid}: HTTP ${res.status} ${(await res.text()).slice(0, 150)}` }, 502);
+    const seg: any = await res.json();
+    const data = seg.transcription || seg;
+    if (!languageCode) languageCode = data.language_code || '';
+    text += (text ? ' ' : '') + (data.text || '');
+    const words = data.words || [];
+    let segEnd = 0;
+    for (const w of words) {
+      allWords.push({ ...w, start: w.start + acc, end: w.end + acc });
+      segEnd = Math.max(segEnd, w.end || 0);
+    }
+    acc += data.audio_duration_secs || segEnd;
+  }
+  if (!allWords.length) return c.json({ error: 'no words in the given transcripts' }, 400);
+  const asrKey = `scribe/${jobId}/asr.json`;
+  await c.env.MEDIA_BUCKET.put(asrKey, JSON.stringify({
+    language_code: languageCode, text, words: allWords, audio_duration_secs: acc,
+  }), { httpMetadata: { contentType: 'application/json' } });
+  await c.env.DB.prepare('UPDATE scribe_jobs SET asr_key = ? WHERE id = ?').bind(asrKey, jobId).run();
+  return c.json({ ok: true, asrKey, words: allWords.length, durationSec: Math.round(acc) });
+});
+
 app.get('/api/scribe/sweep-status', async (c) => {
   const hb = await c.env.CACHE.get('sweep:heartbeat');
   const recent = await c.env.DB.prepare("SELECT target, details, created_at FROM admin_logs WHERE action = 'auto_resume' ORDER BY id DESC LIMIT 5").all().catch(() => ({ results: [] }));
