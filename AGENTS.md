@@ -171,3 +171,17 @@ echo "y" | npx wrangler kv key delete "home" --namespace-id=c025d769b8584d02aedc
 - Lighthouse: 99 mobile / 100 desktop
 - Compressed page size: ~22KB (Brotli)
 - Image serving: ~5ms from edge cache
+
+## 4K upgrades (ds4k)
+
+The 4K pipeline lives in the private repo **Muno459/deensubs-4k** (local: `~/deensubs-4k`).
+Lectures with >1080p source formats are flagged automatically at yt-dlp ingest
+(`scribe_jobs.k4_status`, "4K available" badge in Scribe). Admins run the **ds4k**
+app (Tauri desktop "DeenSubs 4K Studio", `ds4k -gui` web dashboard, or plain CLI)
+on their own machines: it claims jobs via `/api/scribe/4k/claim` (atomic, multi-
+machine safe, 4h stale-claim recycling), downloads the 4K source locally with
+browser cookies, hardware-encodes ONE HEVC mp4 (hvc1 + faststart), uploads
+direct to R2, and `/api/scribe/4k/complete` swaps `source_key`/`video_key` and
+deletes the 1080p original. `ds4k -doctor` self-checks a machine; `-scan`
+backfills capability flags for old jobs. Binaries with keys baked in are on the
+repo's GitHub releases (CI builds mac + windows installers on tags).
