@@ -613,7 +613,9 @@ async function playlistForBatch(env: Env, title: string, ytId: string | null, vi
 app.post('/api/scribe/batch', async (c) => {
   const { urls, target_langs, full_video, playlist } = await c.req.json();
   if (!Array.isArray(urls) || !urls.length) return c.json({ error: 'urls array required' }, 400);
-  if (urls.length > 30) return c.json({ error: 'max 30 per batch' }, 400);
+  // ~3 subrequests per job (2 D1 writes + workflow create) against the 1000
+  // subrequest budget of a single request — 250 keeps comfortable headroom
+  if (urls.length > 250) return c.json({ error: 'max 250 per batch' }, 400);
   const langs = Array.isArray(target_langs) && target_langs.length ? target_langs : ['en'];
 
   let playlistId: number | null = null;

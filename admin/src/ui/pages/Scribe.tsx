@@ -1101,13 +1101,13 @@ export default function Scribe() {
         <Modal open onClose={() => setBatch(null)} title={`${batch.title} — ${batch.entries.length} videos`} wide>
           <div className="mb-3 flex items-center gap-2">
             <Button variant="ghost" className="px-3 py-1.5 text-[12px]"
-              onClick={() => setBatch({ ...batch, picked: new Set(batch.entries.slice(0, 30).map((e: any) => e.url)) })}>
-              Select first 30
+              onClick={() => setBatch({ ...batch, picked: new Set(batch.entries.map((e: any) => e.url)) })}>
+              Select all
             </Button>
             <Button variant="ghost" className="px-3 py-1.5 text-[12px]" onClick={() => setBatch({ ...batch, picked: new Set() })}>
               Clear
             </Button>
-            <span className="ml-auto text-[12px] text-muted">{batch.picked.size} selected (max 30)</span>
+            <span className="ml-auto text-[12px] text-muted">{batch.picked.size} selected</span>
           </div>
           <div className="max-h-96 space-y-0.5 overflow-y-auto">
             {batch.entries.map((e: any) => (
@@ -1116,7 +1116,7 @@ export default function Scribe() {
                   checked={batch.picked.has(e.url)}
                   onChange={() => {
                     const picked = new Set(batch.picked);
-                    picked.has(e.url) ? picked.delete(e.url) : picked.size < 30 && picked.add(e.url);
+                    picked.has(e.url) ? picked.delete(e.url) : picked.add(e.url);
                     setBatch({ ...batch, picked });
                   }} />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-cream/85">{e.title}</span>
