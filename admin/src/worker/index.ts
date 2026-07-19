@@ -1315,8 +1315,10 @@ async function autoResumeSweep(env: Env) {
  * cues come from re-parsing the canonical SRT, chapters from the same LLM
  * segmentation the pipeline uses. Runs on the cron, bounded per tick. */
 async function chaptersBackfillSweep(env: Env, limit = 2) {
+  // Random order so one persistently-failing video can't sit at the front of
+  // the scan and starve the rest of the queue tick after tick
   const rows = (await env.DB.prepare(
-    "SELECT id, slug, srt_key FROM videos WHERE (chapters IS NULL OR chapters = '' OR chapters = '[]') AND srt_key IS NOT NULL LIMIT ?"
+    "SELECT id, slug, srt_key FROM videos WHERE (chapters IS NULL OR chapters = '') AND srt_key IS NOT NULL ORDER BY RANDOM() LIMIT ?"
   ).bind(limit).all()).results as any[];
   const done: any[] = [], failed: any[] = [];
   for (const v of rows) {
@@ -1324,6 +1326,13 @@ async function chaptersBackfillSweep(env: Env, limit = 2) {
       const obj = await env.MEDIA_BUCKET.get(v.srt_key);
       if (!obj) throw new Error('SRT missing: ' + v.srt_key);
       const cues = parseSrtCues(await obj.text());
+      if (cues.length < 20) {
+        // Too short to chapter — '[]' is the terminal "checked, none" marker
+        // (excluded from the missing-filter above) so this stops being retried
+        await env.DB.prepare("UPDATE videos SET chapters = '[]' WHERE id = ?").bind(v.id).run();
+        done.push({ slug: v.slug, chapters: 0 });
+        continue;
+      }
       const { generateChapters } = await import('./scribe/metadata');
       const chapters = await generateChapters(env as any, cues);
       if (!chapters.length) throw new Error(`no chapters from ${cues.length} cues`);
@@ -1333,7 +1342,11 @@ async function chaptersBackfillSweep(env: Env, limit = 2) {
         .bind('chapters_backfill', v.slug, `${chapters.length} chapters`).run().catch(() => {});
       done.push({ slug: v.slug, chapters: chapters.length });
     } catch (e: any) {
-      failed.push({ slug: v.slug, error: String(e?.message || e).slice(0, 200) });
+      const error = String(e?.message || e).slice(0, 300);
+      console.log('chapters backfill failed:', v.slug, error);
+      await env.DB.prepare('INSERT INTO admin_logs (admin_id, action, target, details) VALUES (0, ?, ?, ?)')
+        .bind('chapters_backfill_fail', v.slug, error).run().catch(() => {});
+      failed.push({ slug: v.slug, error });
     }
   }
   return { scanned: rows.length, done, failed };
