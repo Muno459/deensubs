@@ -1160,6 +1160,18 @@ app.post('/api/scribe/4k/flag', async (c) => {
 // so a job never has to be transcribed twice.
 // Temporary diagnostics: what does ElevenLabs actually return for
 // additional_formats (create-sync) and for a stored transcript (get)?
+// Controlled LLM experiments through the production router (diagnostics)
+app.post('/api/scribe/llm-test', async (c) => {
+  const { messages, max_tokens, model } = await c.req.json();
+  const { llmChat } = await import('./scribe/translate');
+  try {
+    const raw = await llmChat(c.env as any, messages, max_tokens || 4000, model);
+    return c.json({ ok: true, raw });
+  } catch (e: any) {
+    return c.json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 app.post('/api/scribe/stt-format-test', async (c) => {
   const { url, formats, model, webhook } = await c.req.json();
   const form = new FormData();

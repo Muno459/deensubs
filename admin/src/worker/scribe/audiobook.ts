@@ -24,9 +24,10 @@ const QA_MODEL = 'ag/claude-opus-4-6-thinking';
 const SYSTEM_PROMPT = (targetLang: string) => `You are an expert translator producing a READING transcript of an Islamic audio lecture for a karaoke-style player. You receive numbered words from speech recognition and answer with translation units.
 
 OUTPUT FORMAT — one JSON object per line, nothing else:
-{"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"t":"translation of those words"}
+{"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"a":"FIRST_ARABIC_WORD","z":"LAST_ARABIC_WORD","t":"translation of those words"}
 
 RULES:
+- "a" and "z" must EXACTLY copy the Arabic word at FIRST_WORD_INDEX and LAST_WORD_INDEX — they verify your numbers.
 - Cover EVERY word index exactly once, in order, with no gaps and no overlaps.
 - Each unit is a natural prose phrase or clause of roughly 4-16 source words — segment at sentence and clause boundaries, pauses (marked [GAP]) and speaker changes (marked [SPEAKER]). The reader follows these units as they light up with the audio.
 - Write flowing, book-quality ${targetLang} prose with full punctuation. Units read as continuous text when concatenated.
@@ -73,6 +74,23 @@ function parseUnits(raw: string, win: CleanWord[]): { w: [number, number]; t: st
       if (isNaN(a) || isNaN(b)) continue;
       a = Math.max(lo, Math.min(a, hi));
       b = Math.max(a, Math.min(b, hi));
+      // Echo verification: the model copies the Arabic word at each boundary
+      // ("a"/"z"). If the copy doesn't match the claimed index but DOES match
+      // a word within ±4, the number was off — snap to where the word is.
+      // (Measured: echo output had 0/31 misattributed spans vs 3.2% without.)
+      const at = (j: number) => win[j - lo]?.text;
+      const echoFix = (idx: number, echo: any): number => {
+        if (typeof echo !== 'string' || !echo.trim()) return idx;
+        const e = echo.trim();
+        if (at(idx) === e) return idx;
+        for (let off = 1; off <= 4; off++) {
+          if (at(idx - off) === e) return idx - off;
+          if (at(idx + off) === e) return idx + off;
+        }
+        return idx;
+      };
+      a = echoFix(a, obj.a);
+      b = Math.max(a, echoFix(b, obj.z));
       const t = obj.t.trim();
       if (t) out.push({ w: [a, b], t });
     } catch {}
@@ -386,6 +404,46 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
   const unitArr: [string, number, number][] = [];
   let paragraphs: [number, number][] = [];
   const ordered = [...cues].sort((a, b) => a.w[0] - b.w[0]);
+
+  // Anchor snap: transliterated names exist in BOTH texts, so they can
+  // verify unit boundaries. When a unit's opening name sits 1–3 Arabic
+  // words BEFORE its span (LLM off-by-a-few attribution — measured on a
+  // real book at ~11% of verifiable names), pull the boundary back and
+  // shrink the neighbour. Conservative: max 3 words, never emptying a unit.
+  const AR_MAP: Record<string, string> = Object.fromEntries(
+    [...'اأإآبتثجحخدذرزسشصضطظعغفقكلمنهويىةءئؤ'].map((ch, i) =>
+      [ch, ['a','a','a','a','b','t','t','j','h','k','d','d','r','z','s','s','s','d','t','z','','g','f','q','k','l','m','n','h','w','y','a','h','','',''][i]])
+  );
+  const skel = (t: string) => {
+    let x = (t || '').toLowerCase().replace(/[\u064b-\u0652\u0670\u0640]/g, '');
+    x = x.replace(/^\u0627\u0644/, '').replace(/^al[-'\u2019]?/, '');
+    let o = '';
+    for (const ch of x) o += AR_MAP[ch] !== undefined ? AR_MAP[ch] : ch;
+    return o.replace(/[^a-z]/g, '').replace(/[aeiouwhy]/g, '');
+  };
+  const wsk = words.map((w) => skel(w.text));
+  const skMatch = (es: string, k: number) => {
+    const a = wsk[k];
+    return a.length >= 2 && (a === es || (es.length > 2 && a.length > 2 && (a.includes(es) || es.includes(a))));
+  };
+  for (let ui = 0; ui < ordered.length; ui++) {
+    const u = ordered[ui];
+    const firstTok = (u.text || '').split(/\s+/).map(skel).find((x) => x.length >= 3);
+    if (!firstTok) continue;
+    if (skMatch(firstTok, u.w[0])) continue; // already right where it should be
+    for (let off = 1; off <= 3; off++) {
+      const k = u.w[0] - off;
+      if (k < 0 || !skMatch(firstTok, k)) continue;
+      const prev = ordered[ui - 1];
+      if (prev) {
+        if (k - 1 < prev.w[0]) break; // would empty the neighbour
+        if (prev.w[1] >= k) prev.w[1] = k - 1;
+      }
+      u.w[0] = k;
+      break;
+    }
+  }
+
   for (const c of ordered) unitArr.push([dedupeQuotes(c.text), c.w[0], c.w[1]]);
 
   // ---- Diarized speaker turns (computed FIRST: speaker changes are hard
