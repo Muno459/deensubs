@@ -23,8 +23,8 @@ ${featured ? `
         <div class="hero-pb"></div>
         <div class="hero-meta-ov">
           ${featured.source ? `<span class="hero-badge">${e(featured.source)}</span>` : ''}
-          ${featured.duration ? `<span class="dur hero-dur">${ft(featured.duration)}</span>` : ''}
         </div>
+        ${featured.duration ? `<span class="dur hero-dur">${ft(featured.duration)}</span>` : ''}
       </div>
     </div>
     <div class="hero-info">
