@@ -5,9 +5,13 @@ var chapters=__CHAPTERS__;
 var au=document.getElementById('ab-audio');
 var $=function(id){return document.getElementById(id)};
 var playBtn=$('ab-play'),back=$('ab-back'),fwd=$('ab-fwd'),seek=$('ab-seek'),cur=$('ab-cur'),tot=$('ab-tot'),
-    speedBtn=$('ab-speed'),tr=$('ab-tr'),arBtn=$('ab-arbtn'),chLabel=$('ab-chlabel'),followBtn=$('ab-follow'),
+    speedBtn=$('ab-speed'),tr=$('ab-tr'),arBtn=$('ab-arbtn'),followBtn=$('ab-follow'),
     trwrap=$('ab-trwrap'),stage=$('abv'),fsBtn=$('ab-fs'),bg=$('abv-bg'),shareBtn=$('ab-share'),
-    chrRail=$('chr-ls');
+    chrRail=$('chr-ls'),pctEl=$('ab-pct'),progEl=$('ab-prog'),chlsBtn=$('ab-chlist'),chls=$('ab-chls'),
+    /* the chapter title/number render in several places at once (bar, phone
+       sheet header, classic label) — all driven off these class hooks */
+    chlT=[].slice.call(document.querySelectorAll('.ab-chl-t')),
+    chlN=[].slice.call(document.querySelectorAll('.ab-chl-n'));
 if(!au)return;
 
 function fmt(s){s=Math.max(0,Math.floor(s));var h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
@@ -166,6 +170,11 @@ function tick(){
   }
   if(!seek.dragging)seek.value=t;
   cur.textContent=fmt(t);
+  if(pctEl&&DUR){
+    var pc=Math.max(0,Math.min(100,t/DUR*100));
+    pctEl.textContent=Math.round(pc)+'%';
+    if(progEl)progEl.style.width=pc+'%';
+  }
   updChapter(t);
   if(!au.paused)requestAnimationFrame(tick);
 }
@@ -264,16 +273,33 @@ document.addEventListener('keydown',function(ev){
 
 /* chapters */
 var chrCards=chrRail?chrRail.querySelectorAll('.chr-c'):null;
+var chiEls=chls?chls.querySelectorAll('.abv-chi'):null;
 if(chrRail)chrRail.addEventListener('click',function(ev){
   var c=ev.target.closest('.chr-c');if(!c)return;
   au.currentTime=+c.dataset.t;au.play();
 });
+/* phone: the sheet header's list button drops the chapters over the transcript */
+if(chlsBtn&&chls){
+  chlsBtn.addEventListener('click',function(){
+    chls.hidden=!chls.hidden;
+    chlsBtn.classList.toggle('on',!chls.hidden);
+    if(!chls.hidden){var on=chls.querySelector('.chi-on');if(on)chls.scrollTop=Math.max(0,on.offsetTop-64)}
+  });
+  chls.addEventListener('click',function(ev){
+    var c=ev.target.closest('.abv-chi');if(!c)return;
+    au.currentTime=+c.dataset.t;au.play();
+    chls.hidden=true;chlsBtn.classList.remove('on');
+  });
+}
 function updChapter(t){
-  if(!chapters.length||!chLabel)return;
-  var ci=-1;
-  for(var i=0;i<chapters.length;i++)if(chapters[i].t<=t)ci=i;
-  chLabel.textContent=ci>=0?chapters[ci].title:'';
-  if(chrCards)for(var k=0;k<chrCards.length;k++)chrCards[k].classList.toggle('chr-on',k===ci);
+  if(!chapters.length)return;
+  var ci=-1,i;
+  for(i=0;i<chapters.length;i++)if(chapters[i].t<=t)ci=i;
+  var di=ci<0?0:ci; // before the first mark the reader is still in chapter 1
+  for(i=0;i<chlT.length;i++)chlT[i].textContent=chapters[di].title;
+  for(i=0;i<chlN.length;i++)chlN[i].textContent='Chapter '+(di+1);
+  if(chrCards)for(i=0;i<chrCards.length;i++)chrCards[i].classList.toggle('chr-on',i===ci);
+  if(chiEls)for(i=0;i<chiEls.length;i++)chiEls[i].classList.toggle('chi-on',i===ci);
 }
 function renderTicks(){
   var ticks=$('ab-ticks');

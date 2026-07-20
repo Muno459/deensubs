@@ -52,6 +52,24 @@ export function renderAudiobook({ video, related, base, playlist }) {
 
 /* ── video-format stage ─────────────────────────────────────────────── */
 
+/* Phone-only header of the transcript sheet: scholar portrait beside the
+   chapter the playhead is in (falls back to the scholar's own name when the
+   talk has no chapters). The button opens the chapter list over the sheet. */
+function abChRow(video, chapters) {
+  const nm = video.scholar_name || '';
+  const av = video.scholar_photo
+    ? `<img src="${e(schImgSm(video.scholar_photo))}" alt="" width="40" height="40">`
+    : e(nm.split(' ').pop().charAt(0));
+  return `<div class="abv-chrow">
+    <span class="abv-chav">${av}</span>
+    <span class="abv-chtx">
+      <b class="abv-chn${chapters.length ? ' ab-chl-n' : ''}">${chapters.length ? 'Chapter 1' : e(nm)}</b>
+      <span class="abv-cht${chapters.length ? ' ab-chl-t' : ''}">${e(chapters.length ? chapters[0].title : video.scholar_title || 'Audiobook')}</span>
+    </span>
+    ${chapters.length ? `<button class="abv-chbtn" id="ab-chlist" aria-label="Chapters" title="Chapters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="17" height="17"><path d="M4 6h16M4 12h10M4 18h7"/></svg></button>` : ''}
+  </div>`;
+}
+
 function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd, audioTag, scriptTag }) {
   const plIdx = playlist ? playlist.items.findIndex((p) => p.slug === video.slug) : -1;
   const plNext = plIdx >= 0 && plIdx < playlist.items.length - 1 ? playlist.items[plIdx + 1] : null;
@@ -63,28 +81,45 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
     <div class="abv" id="abv">
       <div class="abv-frame">
         <img class="abv-bg" id="abv-bg" src="${e(card.src)}" srcset="${e(card.srcset)}" sizes="(max-width:960px) 100vw, 66vw" alt="${e(video.scholar_name || video.title)}">
-        <div class="abv-txt" id="ab-trwrap">
-          <div class="abv-ttl">
-            <span class="abv-kind">Audiobook</span>${video.speech_enhanced ? '<span class="abv-kind ab-se">Speech Enhanced</span>' : ''}
-            <h2>${e(video.title)}</h2>
-            ${video.title_ar ? `<p class="abv-ttl-ar" dir="rtl">${e(video.title_ar)}</p>` : ''}
-          </div>
-          <div class="ab-tr" id="ab-tr"><p class="ab-p ab-dim">Loading transcript…</p></div>
+        <div class="abv-head">
+          <div class="abv-head-k"><span class="abv-kind">Audiobook</span>${video.speech_enhanced ? '<span class="abv-kind ab-se">Speech Enhanced</span>' : ''}</div>
+          <h2>${e(video.title)}</h2>
+          ${video.title_ar ? `<p class="abv-head-ar" dir="rtl">${e(video.title_ar)}</p>` : ''}
+          <div class="abv-prog"><i id="ab-prog"></i></div>
+          <p class="abv-pct"><b id="ab-pct">0%</b> completed</p>
         </div>
-        <button class="ab-followbtn" id="ab-follow" hidden>Resume following</button>
-        <div class="abv-bar" id="abv-bar">
-          <button class="vb" id="ab-play" aria-label="Play/Pause">
-            <svg class="ab-ic-play" viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M8 5v14l11-7z"/></svg>
-            <svg class="ab-ic-pause" viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
-          </button>
-          <button class="vb" id="ab-back" title="Back 15 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="19" height="19"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg></button>
-          <button class="vb" id="ab-fwd" title="Forward 15 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="19" height="19"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg></button>
-          <div class="abv-sk"><div class="ab-ticks" id="ab-ticks"></div><input type="range" id="ab-seek" min="0" max="${dur || 100}" value="0" step="1" aria-label="Seek"></div>
-          <span class="abv-tm"><span id="ab-cur">0:00</span> / <span id="ab-tot">0:00</span></span>
-          <span class="abv-chl" id="ab-chlabel"></span>
-          <button class="vb" id="ab-arbtn" title="Show Arabic">ع</button>
-          <button class="vb vb-spd" id="ab-speed" title="Playback speed">1×</button>
-          <button class="vb" id="ab-fs" title="Fullscreen (f)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg></button>
+        <div class="abv-sheet">
+          ${abChRow(video, chapters)}
+          <div class="abv-txt" id="ab-trwrap">
+            <div class="abv-ttl">
+              <span class="abv-kind">Audiobook</span>${video.speech_enhanced ? '<span class="abv-kind ab-se">Speech Enhanced</span>' : ''}
+              <h2>${e(video.title)}</h2>
+              ${video.title_ar ? `<p class="abv-ttl-ar" dir="rtl">${e(video.title_ar)}</p>` : ''}
+            </div>
+            <div class="ab-tr" id="ab-tr"><p class="ab-p ab-dim">Loading transcript…</p></div>
+          </div>
+          <button class="ab-followbtn" id="ab-follow" hidden>Resume following</button>
+          ${chapters.length ? `<div class="abv-chls" id="ab-chls" hidden>
+            ${chapters.map((ch, i) => `<button class="abv-chi" data-t="${ch.t}"><span class="abv-chi-n">${i + 1}</span><span class="abv-chi-t">${e(ch.title)}</span><span class="abv-chi-m">${ft(ch.t)}</span></button>`).join('')}
+          </div>` : ''}
+          <div class="abv-bar" id="abv-bar">
+            <div class="abv-btns">
+              <button class="vb" id="ab-back" title="Back 15 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="19" height="19"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg></button>
+              <button class="vb" id="ab-play" aria-label="Play/Pause">
+                <svg class="ab-ic-play" viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M8 5v14l11-7z"/></svg>
+                <svg class="ab-ic-pause" viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+              </button>
+              <button class="vb" id="ab-fwd" title="Forward 15 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="19" height="19"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg></button>
+            </div>
+            <div class="abv-sk"><div class="ab-ticks" id="ab-ticks"></div><input type="range" id="ab-seek" min="0" max="${dur || 100}" value="0" step="1" aria-label="Seek"></div>
+            <span class="abv-tm"><span id="ab-cur">0:00</span> / <span id="ab-tot">0:00</span></span>
+            <div class="abv-rt">
+              <span class="abv-chl ab-chl-t" id="ab-chlabel"></span>
+              <button class="vb" id="ab-arbtn" title="Show Arabic">ع</button>
+              <button class="vb vb-spd" id="ab-speed" title="Playback speed">1×</button>
+              <button class="vb" id="ab-fs" title="Fullscreen (f)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg></button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -185,7 +220,7 @@ function renderClassic({ video, related, th, dur, chapters, jsonLd, audioTag, sc
       <button class="ab-skip" id="ab-fwd" title="Forward 15 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="26" height="26"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg></button>
       <button class="ab-side" id="ab-arbtn" title="Show Arabic">ع</button>
     </div>
-    ${chapters.length ? `<div class="ab-chlabel" id="ab-chlabel"></div>` : '<div id="ab-chlabel" hidden></div>'}
+    ${chapters.length ? `<div class="ab-chlabel ab-chl-t" id="ab-chlabel"></div>` : '<div id="ab-chlabel" hidden></div>'}
   </div>
 
   <div class="ab-trwrap" id="ab-trwrap">
