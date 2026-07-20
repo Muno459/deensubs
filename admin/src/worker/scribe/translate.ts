@@ -85,8 +85,47 @@ function windowPrompt(win: CleanWord[], prevTail: string): string {
   return lines.join('\n');
 }
 
-// Token usage accumulator (per workflow step; read+reset via takeUsage)
+// Real per-model pricing (USD per 1M tokens), cache-aware. First match wins,
+// so specific patterns sit above generic ones. Gemini 3.1 Pro is tiered by
+// per-request prompt size; Sonnet 5 is at its introductory price through
+// 2026-08-31 ($3/$15 after — bump then). Cache storage-per-hour cannot be
+// metered from usage objects and is excluded.
+const PRICES: {
+  match: RegExp; in: number; out: number; cacheRead: number; cacheWrite: number;
+  over200k?: { in: number; out: number; cacheRead: number };
+}[] = [
+  { match: /gemini.*flash/i, in: 1.5, out: 9, cacheRead: 0.15, cacheWrite: 1.5 },
+  { match: /gemini.*pro/i, in: 2, out: 12, cacheRead: 0.2, cacheWrite: 2, over200k: { in: 4, out: 18, cacheRead: 0.4 } },
+  { match: /fable|mythos/i, in: 10, out: 50, cacheRead: 1, cacheWrite: 12.5 },
+  { match: /opus-4[.-]?1\b|opus-4\b/i, in: 15, out: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  { match: /opus/i, in: 5, out: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  { match: /sonnet-?5/i, in: 2, out: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  { match: /sonnet/i, in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  { match: /haiku-?3/i, in: 0.8, out: 4, cacheRead: 0.08, cacheWrite: 1 },
+  { match: /haiku/i, in: 1, out: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+];
+
+/** Price one usage object (OpenAI- or Anthropic-shaped, both read defensively). */
+function priceUsage(model: string, u: any): number {
+  const p = PRICES.find((r) => r.match.test(model));
+  if (!p || !u) return 0;
+  const prompt = u.prompt_tokens ?? u.input_tokens ?? 0;
+  const out = u.completion_tokens ?? u.output_tokens ?? 0;
+  const cached = u.prompt_tokens_details?.cached_tokens ?? u.cache_read_input_tokens ?? 0;
+  const cacheW = u.cache_creation_input_tokens ?? 0;
+  const tier = p.over200k && prompt > 200_000 ? p.over200k : p;
+  const fresh = Math.max(0, prompt - cached - cacheW);
+  return (fresh * tier.in + cached * tier.cacheRead + cacheW * p.cacheWrite + out * tier.out) / 1e6;
+}
+
+// Token + cost accumulators (per workflow step; read+reset via takeUsage/takeCost)
 let usageTokens = 0;
+let usageCost = 0;
+export function takeCost(): number {
+  const c = usageCost;
+  usageCost = 0;
+  return Math.round(c * 1e6) / 1e6;
+}
 export function takeUsage(): number {
   const t = usageTokens;
   usageTokens = 0;
@@ -94,7 +133,7 @@ export function takeUsage(): number {
 }
 
 /** Parse an SSE chat stream ("data: {...}" lines) into the full content. */
-function parseSse(text: string): string {
+function parseSse(text: string, model: string): string {
   let out = '';
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
@@ -104,7 +143,10 @@ function parseSse(text: string): string {
     try {
       const obj = JSON.parse(payload);
       out += obj.choices?.[0]?.delta?.content ?? obj.choices?.[0]?.message?.content ?? '';
-      if (obj.usage?.total_tokens) usageTokens += obj.usage.total_tokens;
+      if (obj.usage?.total_tokens) {
+        usageTokens += obj.usage.total_tokens;
+        usageCost += priceUsage(model, obj.usage);
+      }
     } catch {}
   }
   return out;
@@ -160,14 +202,18 @@ export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000,
   const text = await res.text();
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${text.slice(0, 200)}`);
 
+  const effModel = model || env.SCRIBE_LLM_MODEL || 'ag/gemini-3.5-flash-low';
   let content = '';
   if (text.trimStart().startsWith('data:')) {
-    content = parseSse(text);
+    content = parseSse(text, effModel);
   } else {
     try {
       const data: any = JSON.parse(text);
       content = data.choices?.[0]?.message?.content || '';
-      if (data.usage?.total_tokens) usageTokens += data.usage.total_tokens;
+      if (data.usage?.total_tokens) {
+        usageTokens += data.usage.total_tokens;
+        usageCost += priceUsage(effModel, data.usage);
+      }
     } catch {
       throw new Error('LLM returned unparseable response: ' + text.slice(0, 200));
     }

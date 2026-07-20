@@ -948,7 +948,7 @@ export default function Scribe() {
     running: jobs.filter((j: any) => j.status === 'running' || j.status === 'queued').length,
     week: jobs.filter((j: any) => new Date((j.created_at || '').replace(' ', 'T') + 'Z').getTime() > weekAgo).length,
     minutes: Math.round(jobs.reduce((a: number, j: any) => a + (j.asr_seconds || 0), 0) / 60),
-    cost: jobs.reduce((a: number, j: any) => a + (j.asr_seconds / 3600) * 0.4 + (j.llm_tokens / 1e6) * 0.4, 0),
+    cost: jobs.reduce((a: number, j: any) => a + (j.asr_seconds / 3600) * 0.4 + (j.llm_cost || (j.llm_tokens / 1e6) * 0.4), 0),
   };
   const shownJobs = jobs.filter((j: any) => {
     if (statusFilter === 'running' && !(j.status === 'running' || j.status === 'queued')) return false;
@@ -1353,7 +1353,7 @@ export default function Scribe() {
                       {j.cue_count > 0 && <span>{j.cue_count} cues</span>}
                       {j.asr_seconds > 0 && (
                         <span className="tabular-nums" title="Estimated cost: ElevenLabs ASR + LLM tokens">
-                          ~${((j.asr_seconds / 3600) * 0.4 + (j.llm_tokens / 1e6) * 0.4).toFixed(2)}
+                          ~${((j.asr_seconds / 3600) * 0.4 + (j.llm_cost || (j.llm_tokens / 1e6) * 0.4)).toFixed(2)}
                         </span>
                       )}
                       <span>{fmtAgo(j.created_at)}</span>

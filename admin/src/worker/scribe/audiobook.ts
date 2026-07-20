@@ -354,8 +354,14 @@ export function elevenFormats(asr: any): { txt?: string; segments?: { start: num
       try {
         const j = JSON.parse(content);
         const raw = Array.isArray(j) ? j : j.segments || j.transcription_segments || [];
+        // Segment times live in the per-segment word list, not at segment level
         const segs = raw
-          .map((s: any) => ({ start: Number(s.start ?? s.start_time ?? s.start_s), end: Number(s.end ?? s.end_time ?? s.end_s) }))
+          .map((s: any) => {
+            const ws = (s.words || []).filter((w: any) => isFinite(w?.start) && isFinite(w?.end));
+            const start = Number(s.start ?? s.start_time ?? ws[0]?.start);
+            const end = Number(s.end ?? s.end_time ?? ws[ws.length - 1]?.end);
+            return { start, end };
+          })
           .filter((s: any) => isFinite(s.start) && isFinite(s.end) && s.end > s.start);
         if (segs.length) out.segments = segs;
       } catch {}
@@ -382,6 +388,9 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
   const ordered = [...cues].sort((a, b) => a.w[0] - b.w[0]);
   for (const c of ordered) unitArr.push([dedupeQuotes(c.text), c.w[0], c.w[1]]);
 
+  // A degenerate export (one giant segment on defaults-era jobs) must not
+  // collapse the whole book into a single block — fall back to the heuristic.
+  if (nativeSegments && nativeSegments.length < 3 && ordered.length > 8) nativeSegments = null;
   if (nativeSegments?.length) {
     // ElevenLabs' own segmentation: a unit belongs to the segment its first
     // word starts in; consecutive units in the same segment form a paragraph.

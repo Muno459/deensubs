@@ -62,9 +62,13 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, a
       // ElevenLabs' own exports ride along with the transcript: their native
       // (source-language, silence-based) segmentation is the structural truth
       // for audiobooks — we store it verbatim instead of re-deriving.
+      // Segmentation knobs matter: with the defaults a single-voice lecture
+      // comes back as ONE segment (turn-based only). These settings make
+      // their engine cut readable paragraph-sized segments on real pauses.
+      const seg = { segment_on_silence_longer_than_s: 1.1, max_segment_duration_s: 45, max_segment_chars: 500 };
       form.append('additional_formats', JSON.stringify([
-        { format: 'txt', include_speakers: true, include_timestamps: true },
-        { format: 'segmented_json' },
+        { format: 'txt', include_speakers: true, include_timestamps: true, ...seg },
+        { format: 'segmented_json', ...seg },
       ]));
     }
     if (useWebhook) form.append('webhook', 'true');

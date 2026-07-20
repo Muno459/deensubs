@@ -4,7 +4,7 @@
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
 import { download, needsYtdlp, acquireDownloadSlot, releaseDownloadSlot } from './download';
 import { runAsr, loadAsr } from './asr';
-import { translateWords, qaPass, takeUsage } from './translate';
+import { translateWords, qaPass, takeUsage, takeCost } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
 import { generateMetadata, generateChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
@@ -40,9 +40,9 @@ async function markStage(env: ScribeEnv, jobId: string, stage: string, extra: Re
   await updateJob(env.DB, jobId, { step: stage, error: null, ...extra });
 }
 
-async function addTokens(env: ScribeEnv, jobId: string, tokens: number) {
+async function addTokens(env: ScribeEnv, jobId: string, tokens: number, cost = 0) {
   if (tokens > 0) {
-    await env.DB.prepare('UPDATE scribe_jobs SET llm_tokens = llm_tokens + ? WHERE id = ?').bind(tokens, jobId).run();
+    await env.DB.prepare('UPDATE scribe_jobs SET llm_tokens = llm_tokens + ?, llm_cost = COALESCE(llm_cost, 0) + ? WHERE id = ?').bind(tokens, cost, jobId).run();
   }
 }
 
@@ -268,10 +268,10 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(cues), {
               httpMetadata: { contentType: 'application/json' },
             });
-            return { cuesKey, cueCount: cues.length, tokens: takeUsage(), cached: false };
+            return { cuesKey, cueCount: cues.length, tokens: takeUsage(), cost: takeCost(), cached: false };
           }
         );
-        await addTokens(env, jobId, tr.tokens);
+        await addTokens(env, jobId, tr.tokens, (tr as any).cost || 0);
         if (!tr.cached) anyFresh = true;
 
         // QA repair pass (skipped when cues came from a finished run)
@@ -289,10 +289,10 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(repaired.cues), {
                 httpMetadata: { contentType: 'application/json' },
               });
-              return { fixes: repaired.fixes, tokens: takeUsage() };
+              return { fixes: repaired.fixes, tokens: takeUsage(), cost: takeCost() };
             }
           );
-          await addTokens(env, jobId, qa.tokens);
+          await addTokens(env, jobId, qa.tokens, (qa as any).cost || 0);
         }
 
         // Karaoke transcript document (audiobook, primary language): one
@@ -403,7 +403,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
                 }
               }
             }
-            return { title: cur.title, title_ar: cur.title_ar, description: cur.description, chapters, tokens: takeUsage() };
+            return { title: cur.title, title_ar: cur.title_ar, description: cur.description, chapters, tokens: takeUsage(), cost: takeCost() };
           }
           await stampTime(env, jobId, 'metadata');
           const obj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
@@ -417,10 +417,10 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             });
           }
           await stampTime(env, jobId, 'metadata_end');
-          return { ...m, chapters, tokens: takeUsage() };
+          return { ...m, chapters, tokens: takeUsage(), cost: takeCost() };
         }
       );
-      await addTokens(env, jobId, meta.tokens);
+      await addTokens(env, jobId, meta.tokens, (meta as any).cost || 0);
 
       // Pre-generate thumbnail candidates so the publish wizard opens instantly
       if (/\.(mp4|webm|mkv|mov)$/i.test(dl.key)) {
