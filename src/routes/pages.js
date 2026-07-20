@@ -4,6 +4,7 @@ import { getCategories, getScholars, getHomeVideos, getPopularVideos, getHomeBun
 import { parseSRT } from '../lib/srt.js';
 import { renderPage } from '../templates/layout.js';
 import { renderHome } from '../templates/home.js';
+import { renderAudiobook } from '../templates/audiobook.js';
 import { renderWatch } from '../templates/watch.js';
 import { renderCategory } from '../templates/category.js';
 import { renderSearch } from '../templates/search.js';
@@ -74,6 +75,22 @@ pages.get('/watch/:slug', async (c) => {
     { key: 'categories', fetcher: async () => (await readDB(c.env).prepare('SELECT * FROM categories ORDER BY name').all()).results, stale: 86400 },
   ]);
   if (!video) return c.html(rp(c,'Not Found', render404(), cats), 404);
+  // Audiobooks (media='audio') get the karaoke player page, not the video page
+  if (video.media === 'audio') {
+    const [relatedA, playlistA] = await Promise.all([
+      getRelatedVideos(c.env, video.id, video.category_id),
+      getVideoPlaylist(c.env, video.id),
+    ]);
+    c.executionCtx.waitUntil(c.env.TASKS.send({ type: 'view', slug }));
+    video._user = c.get('user');
+    const baseA = new URL(c.req.url).origin;
+    const metaA = {
+      description: video.description || `Listen to ${video.title} with a synced English transcript on DeenSubs.`,
+      type: 'music.song',
+      image: video.thumb_key ? baseA + '/api/media/' + video.thumb_key : null,
+    };
+    return c.html(rp(c, video.title, renderAudiobook({ video, related: relatedA, base: baseA, playlist: playlistA }), cats, video.category_slug, metaA));
+  }
   // Then fetch related + transcript + playlist context in parallel (all depend on video data)
   const [related, cues, playlist] = await Promise.all([
     getRelatedVideos(c.env, video.id, video.category_id),

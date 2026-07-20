@@ -5,6 +5,7 @@ import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:work
 import { download, needsYtdlp, acquireDownloadSlot, releaseDownloadSlot } from './download';
 import { runAsr, loadAsr } from './asr';
 import { translateWords, qaPass, takeUsage } from './translate';
+import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
 import { generateMetadata, generateChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
 import { assessQuality } from './quality';
@@ -164,7 +165,11 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         target_langs: JSON.stringify(langs),
       });
 
-      // 3. Translate — one pass per target language (primary first)
+      // 3. Translate — one pass per target language (primary first).
+      // Audio-only jobs take the AUDIOBOOK pipeline (prose units for the
+      // karaoke player, word spans kept, no display constraints); video jobs
+      // take the proven subtitle pipeline, untouched.
+      const isAudiobook = !fullVideo;
       let primaryCueCount = 0;
       let anyFresh = false;
       for (const lang of langs) {
@@ -180,7 +185,9 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             }
             if (lang === primary) await stampTime(env, jobId, 'translate');
             const data = await loadAsr(env, asr.asrKey);
-            const cues = await translateWords(env, data.words, lang);
+            const cues = isAudiobook
+              ? await translateWordsAudiobook(env, data.words, lang)
+              : await translateWords(env, data.words, lang);
             await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(cues), {
               httpMetadata: { contentType: 'application/json' },
             });
@@ -190,7 +197,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         await addTokens(env, jobId, tr.tokens);
         if (!tr.cached) anyFresh = true;
 
-        // Netflix QA repair pass (skipped when cues came from a finished run)
+        // QA repair pass (skipped when cues came from a finished run)
         if (!tr.cached) {
           const qa = await step.do(
             `qa-${lang}`,
@@ -199,7 +206,9 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               const obj = await env.MEDIA_BUCKET.get(cuesKey);
               if (!obj) throw new Error('cues missing for QA');
               const cues = await obj.json<Cue[]>();
-              const repaired = await qaPass(env, cues, lang);
+              const repaired = isAudiobook
+                ? await qaPassAudiobook(env, cues as any, lang)
+                : await qaPass(env, cues, lang);
               await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(repaired.cues), {
                 httpMetadata: { contentType: 'application/json' },
               });
@@ -209,12 +218,31 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           await addTokens(env, jobId, qa.tokens);
         }
 
+        // Karaoke transcript document (audiobook, primary language): one
+        // shared timed word array + English units as index spans into it.
+        if (isAudiobook && lang === primary && !tr.cached) {
+          await step.do('transcript', { retries: { limit: 2, delay: '30 seconds' }, timeout: '10 minutes' }, async () => {
+            const [cuesObj, data] = await Promise.all([
+              env.MEDIA_BUCKET.get(cuesKey),
+              loadAsr(env, asr.asrKey),
+            ]);
+            if (!cuesObj) throw new Error('cues missing for transcript');
+            const cues: any[] = await cuesObj.json();
+            const doc = buildTranscript(data.words, cues as any, (await env.DB.prepare('SELECT chapters FROM scribe_jobs WHERE id = ?').bind(jobId).first<any>())?.chapters);
+            await env.MEDIA_BUCKET.put(`scribe/${jobId}/transcript.json`, JSON.stringify(doc), {
+              httpMetadata: { contentType: 'application/json' },
+            });
+            return { units: doc.units.length, words: doc.words.length };
+          });
+        }
+
         if (lang === primary) {
           primaryCueCount = tr.cueCount;
           await updateJob(env.DB, jobId, { cue_count: tr.cueCount });
-          // Quality report: mechanical metrics + cross-lingual semantic audit
+          // Quality report: mechanical metrics + cross-lingual semantic audit.
+          // Audiobooks skip it — its CPS/display grading is a subtitle concept.
           const qKey = `scribe/${jobId}/quality.json`;
-          if (!tr.cached || !(await env.MEDIA_BUCKET.head(qKey))) {
+          if (!isAudiobook && (!tr.cached || !(await env.MEDIA_BUCKET.head(qKey)))) {
             // Diagnostics must never kill a job: the step timeout throws past
             // the inner catch, so the whole step is best-effort too.
             try {

@@ -131,9 +131,11 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(jobId).first();
   if (!job) throw new Error('Job not found');
   if (job.status !== 'done') throw new Error(`Job status is ${job.status}, must be done`);
+  // Audio-only jobs publish as AUDIOBOOKS: same catalog row, media='audio',
+  // karaoke transcript instead of a video track.
+  const isAudiobook = !job.full_video;
   const extMatch = (job.source_key || '').match(/\.(mp4|webm|mkv|mov)$/i);
-  if (!extMatch) throw new Error(`Source is ${job.source_key} — audio-only jobs cannot be published as videos`);
-  const ext = extMatch[1].toLowerCase();
+  if (!isAudiobook && !extMatch) throw new Error(`Source is ${job.source_key} — run fetch-video first or publish as audiobook`);
 
   const title = opts.title || job.title || jobId;
   const slug = (opts.slug || title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
@@ -156,11 +158,22 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     await copyObject(env, `scribe/${jobId}/${lang}.srt`, `subs/${slug}.${lang}.srt`).catch(() => {});
   }
 
+  // 1b. Audiobook: the karaoke transcript gets a canonical slug-stable copy
+  if (isAudiobook) {
+    await copyObject(env, `scribe/${jobId}/transcript.json`, `transcripts/${slug}.json`);
+  }
+
   // 2. Thumbnail + responsive WebP variants, generated upfront. Source is
   // either a chosen video frame (thumb_ts) or a ready image (thumb_key —
-  // the AI-translated original or a custom upload).
-  const fromImage = !!opts.thumb_key;
-  const thumbSrc = fromImage ? `${CDN_BASE}/${opts.thumb_key}` : `${CDN_BASE}/${job.source_key}`;
+  // the AI-translated original or a custom upload). Audiobooks cannot frame-
+  // grab: artwork comes from the chosen image or the channel's cover art.
+  const fromImage = !!opts.thumb_key || isAudiobook;
+  const thumbSrc = opts.thumb_key
+    ? `${CDN_BASE}/${opts.thumb_key}`
+    : isAudiobook
+      ? (job.thumb_url as string)
+      : `${CDN_BASE}/${job.source_key}`;
+  if (isAudiobook && !thumbSrc) throw new Error('audiobook needs artwork: set a thumbnail image first');
   const ts = fromImage ? 0 : opts.thumb_ts ?? Math.max(1, Math.round((job.duration || 60) * 0.3));
   const start = await containerCall(env, jobId, '/thumbs', {
     method: 'POST',
@@ -195,9 +208,10 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   }
   containerCall(env, jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
 
-  // 3. Insert the video row (with chapters + language list)
+  // 3. Insert the video row (with chapters + language list); media='audio'
+  // marks audiobooks so the site renders the karaoke player
   await env.DB.prepare(
-    'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, duration, video_key, srt_key, srt_ar_key, thumb_key, chapters, srt_langs) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, duration, video_key, srt_key, srt_ar_key, thumb_key, chapters, srt_langs, media) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
   ).bind(
     title,
     opts.title_ar ?? job.title_ar ?? null,
@@ -211,7 +225,8 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     srtArKey,
     thumbKey,
     job.chapters || null,
-    langs.length ? JSON.stringify(langs) : null
+    langs.length ? JSON.stringify(langs) : null,
+    isAudiobook ? 'audio' : null
   ).run();
 
   // 3a. Attach to the site playlist this job was queued from (playlist imports).

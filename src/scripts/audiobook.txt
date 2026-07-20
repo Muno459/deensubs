@@ -1,0 +1,159 @@
+(function(){
+'use strict';
+var SLUG='__SLUG__',TITLE='__TITLE__',ART='__ART__',SCHOLAR='__SCHOLAR__',DUR=+'__DUR__'||0;
+var chapters=__CHAPTERS__;
+var au=document.getElementById('ab-audio');
+var $=function(id){return document.getElementById(id)};
+var playBtn=$('ab-play'),back=$('ab-back'),fwd=$('ab-fwd'),seek=$('ab-seek'),cur=$('ab-cur'),tot=$('ab-tot'),
+    speedBtn=$('ab-speed'),tr=$('ab-tr'),arBtn=$('ab-arbtn'),chLabel=$('ab-chlabel'),followBtn=$('ab-follow');
+if(!au)return;
+
+function fmt(s){s=Math.max(0,Math.floor(s));var h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
+return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0')}
+tot.textContent=fmt(DUR);
+
+/* ---- transcript ---- */
+var words=[],units=[],unitEls=[],active=-1,follow=true,followTimer=0,arOn=false;
+fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json')
+.then(function(r){if(!r.ok)throw 0;return r.json()})
+.then(function(doc){
+  words=doc.words||[];
+  units=(doc.units||[]).map(function(u){
+    var w0=u[1],w1=u[2];
+    return {t:u[0],w0:w0,w1:w1,a:words[w0]?words[w0][1]:0,b:words[w1]?words[w1][2]:0};
+  });
+  var html='';
+  (doc.paragraphs&&doc.paragraphs.length?doc.paragraphs:[[0,units.length-1]]).forEach(function(p){
+    html+='<p class="ab-p">';
+    for(var i=p[0];i<=p[1]&&i<units.length;i++){
+      html+='<span class="ab-u" data-i="'+i+'">'+esc(units[i].t)+'</span> ';
+    }
+    html+='</p>';
+  });
+  tr.innerHTML=html;
+  unitEls=tr.querySelectorAll('.ab-u');
+  tr.addEventListener('click',function(ev){
+    var el=ev.target.closest('.ab-u');if(!el)return;
+    var u=units[+el.dataset.i];
+    au.currentTime=u.a+0.01;au.play();
+  });
+})
+.catch(function(){tr.innerHTML='<p class="ab-p ab-dim">Transcript unavailable.</p>'});
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+
+/* Arabic toggle: built lazily from the shared word array */
+if(arBtn)arBtn.addEventListener('click',function(){
+  arOn=!arOn;arBtn.classList.toggle('on',arOn);
+  if(arOn&&!tr.querySelector('.ab-ar')){
+    unitEls.forEach(function(el){
+      var u=units[+el.dataset.i],ar=[];
+      for(var k=u.w0;k<=u.w1&&k<words.length;k++)ar.push(words[k][0]);
+      var sp=document.createElement('span');sp.className='ab-ar';sp.dir='rtl';sp.textContent=ar.join(' ');
+      el.appendChild(sp);
+    });
+  }
+  tr.classList.toggle('ab-showar',arOn);
+});
+
+/* ---- karaoke sync ---- */
+function findUnit(t){
+  var lo=0,hi=units.length-1,ans=-1;
+  while(lo<=hi){var mid=(lo+hi)>>1;
+    if(units[mid].a<=t){ans=mid;lo=mid+1}else hi=mid-1}
+  if(ans>=0&&t>units[ans].b+2&&ans<units.length-1)return -1; // silence gap
+  return ans;
+}
+var wordPtr=0;
+function sweep(u,t){
+  // word-anchored progress within the active unit
+  var el=unitEls[active];if(!el)return;
+  var span=u.w1-u.w0+1,k=Math.max(u.w0,Math.min(wordPtr,u.w1));
+  while(k<u.w1&&words[k+1]&&words[k+1][1]<=t)k++;
+  while(k>u.w0&&words[k]&&words[k][1]>t)k--;
+  wordPtr=k;
+  var w=words[k],frac=w?Math.max(0,Math.min(1,(t-w[1])/Math.max(0.05,w[2]-w[1]))):0;
+  var p=Math.max(0,Math.min(1,(k-u.w0+frac)/span));
+  el.style.setProperty('--p',(p*100).toFixed(1)+'%');
+}
+function tick(){
+  var t=au.currentTime;
+  if(units.length){
+    var i=findUnit(t);
+    if(i!==active){
+      if(active>=0&&unitEls[active]){unitEls[active].classList.remove('on');unitEls[active].style.removeProperty('--p')}
+      active=i;
+      if(i>=0&&unitEls[i]){
+        unitEls[i].classList.add('on');wordPtr=units[i].w0;
+        if(follow)unitEls[i].scrollIntoView({block:'center',behavior:'smooth'});
+      }
+    }
+    if(active>=0)sweep(units[active],t);
+  }
+  if(!seek.dragging)seek.value=t;
+  cur.textContent=fmt(t);
+  updChapter(t);
+  if(!au.paused)requestAnimationFrame(tick);
+}
+au.addEventListener('play',function(){playBtn.classList.add('playing');requestAnimationFrame(tick)});
+au.addEventListener('pause',function(){playBtn.classList.remove('playing')});
+au.addEventListener('timeupdate',function(){if(au.paused)tick()});
+
+/* follow mode: manual scrolling pauses auto-follow */
+var scrollWrap=$('ab-trwrap');
+['wheel','touchmove'].forEach(function(evt){
+  scrollWrap.addEventListener(evt,function(){
+    follow=false;followBtn.hidden=false;
+    clearTimeout(followTimer);
+  },{passive:true});
+});
+followBtn.addEventListener('click',function(){
+  follow=true;followBtn.hidden=true;
+  if(active>=0&&unitEls[active])unitEls[active].scrollIntoView({block:'center',behavior:'smooth'});
+});
+
+/* ---- controls ---- */
+playBtn.addEventListener('click',function(){au.paused?au.play():au.pause()});
+back.addEventListener('click',function(){au.currentTime=Math.max(0,au.currentTime-15)});
+fwd.addEventListener('click',function(){au.currentTime=Math.min(DUR,au.currentTime+15)});
+seek.max=DUR||100;
+seek.addEventListener('input',function(){seek.dragging=true;cur.textContent=fmt(+seek.value)});
+seek.addEventListener('change',function(){au.currentTime=+seek.value;seek.dragging=false});
+var speeds=[1,1.25,1.5,1.75,2],si=0;
+speedBtn.addEventListener('click',function(){
+  si=(si+1)%speeds.length;au.playbackRate=speeds[si];
+  speedBtn.textContent=speeds[si]+'×';
+});
+document.addEventListener('keydown',function(ev){
+  if(/INPUT|TEXTAREA/.test(document.activeElement.tagName))return;
+  if(ev.code==='Space'){ev.preventDefault();playBtn.click()}
+  else if(ev.key==='ArrowLeft')back.click();
+  else if(ev.key==='ArrowRight')fwd.click();
+});
+
+/* chapters */
+function updChapter(t){
+  if(!chapters.length||!chLabel)return;
+  var c=null;
+  for(var i=0;i<chapters.length;i++)if(chapters[i].t<=t)c=chapters[i];
+  chLabel.textContent=c?c.title:'';
+}
+if(chapters.length&&DUR){
+  var ticks=$('ab-ticks');
+  if(ticks)chapters.forEach(function(c){
+    if(!c.t)return;
+    var el=document.createElement('i');el.style.left=(c.t/DUR*100)+'%';ticks.appendChild(el);
+  });
+}
+
+/* lock-screen metadata (Apple-Podcasts feel) */
+if('mediaSession' in navigator){
+  navigator.mediaSession.metadata=new MediaMetadata({
+    title:TITLE,artist:SCHOLAR||'DeenSubs',album:'DeenSubs',
+    artwork:ART?[{src:ART,sizes:'640x640',type:'image/webp'}]:[]
+  });
+  navigator.mediaSession.setActionHandler('seekbackward',function(){back.click()});
+  navigator.mediaSession.setActionHandler('seekforward',function(){fwd.click()});
+  navigator.mediaSession.setActionHandler('play',function(){au.play()});
+  navigator.mediaSession.setActionHandler('pause',function(){au.pause()});
+}
+})();
