@@ -1064,6 +1064,11 @@ cursor:pointer;border-radius:5px;padding:.1em .3em;transition:color .15s}
 .ab-em .ab-en{font-style:italic}
 .ab-strong .ab-en{font-weight:650}
 .ab-en b{font-weight:650}.ab-en i{font-style:italic}
+.ab-resumed{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:60;
+background:var(--s2,#173230);color:var(--tx,#eceadf);border:1px solid var(--s3,#2a4844);border-radius:99px;
+padding:.55em 1.1em;font-size:.85rem;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.35);
+opacity:1;transition:opacity .4s}
+.ab-resumed.out{opacity:0}
 /* stage (fullscreen video-format) variants */
 .abv .ab-spk{color:rgba(236,234,223,.85)}
 .abv .ab-tt{color:rgba(232,230,220,.4)}

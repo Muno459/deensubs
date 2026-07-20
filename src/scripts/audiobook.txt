@@ -203,6 +203,34 @@ followBtn.addEventListener('click',function(){
   if(active>=0&&unitEls[active])centerActive();
 });
 
+/* ---- position memory: a long book reopens where you left it ---- */
+var POSKEY='ab-pos-'+SLUG,posSaved=0,resumed=false;
+try{
+  var savedT=parseInt(localStorage.getItem(POSKEY)||'0',10);
+  if(savedT>30){
+    var doResume=function(){
+      if(resumed)return;resumed=true;
+      if(DUR&&savedT>DUR-20)return;
+      au.currentTime=savedT;
+      if(!seek.dragging)seek.value=savedT;
+      cur.textContent=fmt(savedT);
+      var p=document.createElement('div');p.className='ab-resumed';p.textContent='Resumed at '+fmt(savedT);
+      document.body.appendChild(p);
+      setTimeout(function(){p.classList.add('out');setTimeout(function(){p.remove()},450)},2600);
+    };
+    if(au.readyState>=1)doResume();else au.addEventListener('loadedmetadata',doResume);
+  }
+}catch(e){}
+au.addEventListener('timeupdate',function(){
+  var t=au.currentTime;
+  if(Math.abs(t-posSaved)<5)return;
+  posSaved=t;
+  try{
+    if(DUR&&t>DUR-15)localStorage.removeItem(POSKEY);
+    else localStorage.setItem(POSKEY,String(Math.floor(t)));
+  }catch(e){}
+});
+
 /* ---- controls ---- */
 playBtn.addEventListener('click',function(){au.paused?au.play():au.pause()});
 back.addEventListener('click',function(){au.currentTime=Math.max(0,au.currentTime-15)});
