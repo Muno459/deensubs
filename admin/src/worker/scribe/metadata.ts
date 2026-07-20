@@ -110,9 +110,11 @@ export async function generateMetaAndChapters(
   env: ScribeEnv,
   jobId: string,
   cues: Cue[],
-  languageCode: string
+  languageCode: string,
+  src?: { title?: string | null; channel?: string | null; description?: string | null }
 ): Promise<VideoMetadata & { chapters: Chapter[] }> {
-  const BUDGET = 60000;
+  // Entire transcript for anything under ~7 hours; beyond that, sampled evenly
+  const BUDGET = 400000;
   const line = (c: Cue) => `${Math.round(c.start)}s: ${c.text.length > 200 ? c.text.slice(0, 197) + '...' : c.text}`;
   let sampled = cues;
   let lines = sampled.map(line).join('\n');
@@ -136,7 +138,12 @@ Rules:
 - slug: lowercase-hyphenated from the English title, max 60 chars, a-z0-9- only.
 - Keep Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ.${wantChapters ? `
 - chapters: first at t=0; titles 3-8 words, specific to what is discussed; at real topic shifts, minimum 60 seconds apart; cover the ENTIRE talk to the very end, never leaving the final portion as one long block; around ${target} chapters (3-20).` : ''}`;
-  const user = `Source language: ${languageCode}\nTotal length: ${mins} minutes (${endS}s).\nTranscript${sampled.length < cues.length ? ' (sampled evenly across the full talk)' : ''}:\n${lines}`;
+  const srcCtx = [
+    src?.title ? `Original upload title: ${src.title}` : '',
+    src?.channel ? `Channel: ${src.channel}` : '',
+    src?.description ? `Original upload description (source-platform text — context only, may be generic or promotional):\n${String(src.description).slice(0, 1500)}` : '',
+  ].filter(Boolean).join('\n');
+  const user = `Source language: ${languageCode}\nTotal length: ${mins} minutes (${endS}s).${srcCtx ? `\n\n${srcCtx}` : ''}\n\nTranscript${sampled.length < cues.length ? ' (sampled evenly across the full talk)' : ''}:\n${lines}`;
   let out: (VideoMetadata & { chapters: Chapter[] }) | null = null;
   let raw = '';
   for (let attempt = 0; attempt < 3 && !out; attempt++) {
