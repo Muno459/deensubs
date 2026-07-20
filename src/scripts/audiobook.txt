@@ -26,7 +26,7 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json')
   (doc.paragraphs&&doc.paragraphs.length?doc.paragraphs:[[0,units.length-1]]).forEach(function(p){
     html+='<p class="ab-p">';
     for(var i=p[0];i<=p[1]&&i<units.length;i++){
-      html+='<span class="ab-u" data-i="'+i+'">'+esc(units[i].t)+'</span> ';
+      html+='<span class="ab-u" data-i="'+i+'"><span class="ab-en">'+esc(units[i].t)+'</span></span> ';
     }
     html+='</p>';
   });
@@ -63,27 +63,48 @@ function findUnit(t){
   if(ans>=0&&t>units[ans].b+2&&ans<units.length-1)return -1; // silence gap
   return ans;
 }
-var wordPtr=0;
+var wordPtr=0,enWords=null,litCount=0;
+function splitEn(el){
+  // lazily split the active unit's English into word spans (kept afterwards)
+  var en=el.querySelector('.ab-en');
+  if(!en)return null;
+  if(!en.dataset.split){
+    var parts=en.textContent.split(/\s+/).filter(Boolean);
+    en.innerHTML=parts.map(function(w){return '<i class="ab-w">'+esc(w)+'</i>'}).join(' ');
+    en.dataset.split='1';
+  }
+  return en.querySelectorAll('.ab-w');
+}
 function sweep(u,t){
-  // word-anchored progress within the active unit
-  var el=unitEls[active];if(!el)return;
+  // Arabic-word-anchored progress, quantized to ENGLISH word boundaries —
+  // a continuous gradient stopped mid-glyph, whole words never do
+  if(!enWords)return;
   var span=u.w1-u.w0+1,k=Math.max(u.w0,Math.min(wordPtr,u.w1));
   while(k<u.w1&&words[k+1]&&words[k+1][1]<=t)k++;
   while(k>u.w0&&words[k]&&words[k][1]>t)k--;
   wordPtr=k;
   var w=words[k],frac=w?Math.max(0,Math.min(1,(t-w[1])/Math.max(0.05,w[2]-w[1]))):0;
   var p=Math.max(0,Math.min(1,(k-u.w0+frac)/span));
-  el.style.setProperty('--p',(p*100).toFixed(1)+'%');
+  var lit=Math.round(p*enWords.length);
+  if(lit===litCount)return;
+  for(var i=Math.min(lit,litCount);i<Math.max(lit,litCount);i++){
+    if(enWords[i])enWords[i].classList.toggle('on',i<lit);
+  }
+  litCount=lit;
 }
 function tick(){
   var t=au.currentTime;
   if(units.length){
     var i=findUnit(t);
     if(i!==active){
-      if(active>=0&&unitEls[active]){unitEls[active].classList.remove('on');unitEls[active].style.removeProperty('--p')}
-      active=i;
+      if(active>=0&&unitEls[active]){
+        unitEls[active].classList.remove('on');
+        if(enWords)enWords.forEach(function(w){w.classList.remove('on')});
+      }
+      active=i;enWords=null;litCount=0;
       if(i>=0&&unitEls[i]){
         unitEls[i].classList.add('on');wordPtr=units[i].w0;
+        enWords=splitEn(unitEls[i]);
         if(follow)unitEls[i].scrollIntoView({block:'center',behavior:'smooth'});
       }
     }
