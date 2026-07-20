@@ -645,6 +645,7 @@ export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> 
     '- "m" lists EVERY Arabic word of the unit, in order, each copied EXACTLY.\n' +
     '- Attach to each Arabic word the English words a reader should finish as that word is spoken. Concatenating all English fields MUST reproduce the English text exactly — same words, same order, nothing added or dropped. Use "" for an Arabic word that adds no new English words (e.g. merged honorifics).\n' +
     '- When word order differs between the languages, attach the displaced English words to the Arabic word at whose position the READER passes them (keep English order; never reorder English).\n' +
+    '- A token that OPENS a quotation (like «"May») belongs to the first Arabic word INSIDE the quote, never to the word that introduces the quote.\n' +
     '- Inside Quranic quotes or any passage where word-by-word correspondence is unclear, distribute the English words roughly evenly across the Arabic words — the reader must advance steadily, never receive a long run on one word.\n' +
     'Every line MUST start with {"u". No commentary, no code fences.';
   // Tokenization contract shared with the player's splitEn: whitespace split
@@ -757,12 +758,28 @@ export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> 
   // twin (names, loanwords) must own the English word — nudge group
   // boundaries up to 3 words so it does. Exact-skeleton or long-substring
   // matches only; the looser audit matcher false-flags too much to act on.
-  const sk = (t: string) => {
-    const MAP: Record<string, string> = { 'ا':'a','أ':'a','إ':'a','آ':'a','ب':'b','ت':'t','ث':'t','ج':'j','ح':'h','خ':'k','د':'d','ذ':'d','ر':'r','ز':'z','س':'s','ش':'s','ص':'s','ض':'d','ط':'t','ظ':'z','ع':'','غ':'g','ف':'f','ق':'q','ك':'k','ل':'l','م':'m','ن':'n','ه':'h','و':'w','ي':'y','ى':'a','ة':'h','ء':'','ئ':'','ؤ':'' };
-    let x = (t || '').toLowerCase().replace(/[\u064b-\u0652\u0670\u0640]/g, '').replace(/^ال/, '').replace(/^al[-'\u2019]?/, '');
-    let o = '';
-    for (const ch of x) o += MAP[ch] !== undefined ? MAP[ch] : ch;
-    return o.replace(/[^a-z]/g, '').replace(/[aeiouwhy]/g, '');
+  // Each word contributes BOTH skeleton forms, article-stripped and raw:
+  // stripping the leading al- blindly turned the divine name into a 1-char
+  // skeleton, invisible to this pass in every prior rebuild.
+  const SKMAP: Record<string, string> = { 'ا':'a','أ':'a','إ':'a','آ':'a','ب':'b','ت':'t','ث':'t','ج':'j','ح':'h','خ':'k','د':'d','ذ':'d','ر':'r','ز':'z','س':'s','ش':'s','ص':'s','ض':'d','ط':'t','ظ':'z','ع':'','غ':'g','ف':'f','ق':'q','ك':'k','ل':'l','م':'m','ن':'n','ه':'h','و':'w','ي':'y','ى':'a','ة':'h','ء':'','ئ':'','ؤ':'' };
+  const sks = (t: string): string[] => {
+    const base = (x: string) => {
+      let o = '';
+      for (const ch of x) o += SKMAP[ch] !== undefined ? SKMAP[ch] : ch;
+      return o.replace(/[^a-z]/g, '').replace(/[aeiouwhy]/g, '');
+    };
+    const low = (t || '').toLowerCase().replace(/[\u064b-\u0652\u0670\u0640]/g, '');
+    const forms = new Set<string>([base(low)]);
+    const st = low.replace(/^ال/, '').replace(/^al[-'\u2019]?/, '');
+    if (st !== low) forms.add(base(st));
+    return [...forms].filter(Boolean);
+  };
+  const skMatch = (A: string[], E: string[], cap: boolean): boolean => {
+    for (const a of A) for (const e of E) {
+      if (a === e && (a.length >= 3 || (a.length === 2 && cap))) return true;
+      if (a.length >= 4 && e.length >= 4 && (a.includes(e) || e.includes(a))) return true;
+    }
+    return false;
   };
   // Smoothing, two passes. (1) A giant group flanked by empty ones spreads
   // across the run. (2) Canonical Quran translations run 4-7x wordier than
@@ -802,14 +819,20 @@ export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> 
     const [, w0, w1] = units[i];
     const span = w1 - w0 + 1;
     const parts = enWords(i);
-    const esk = parts.map(sk);
+    const esk = parts.map(sks);
     const used = new Set<number>();
     for (let k = 0; k < span; k++) {
-      const a = sk(words[w0 + k][0]);
-      if (a.length < 3) continue;
+      const aF = sks(words[w0 + k][0]);
+      if (!aF.some((x) => x.length >= 2)) continue;
+      // 2-consonant skeletons (Allah -> ll) are allowed only against
+      // capitalized English words: the proper-noun signal rules out
+      // collisions like "all" without any hardcoded vocabulary
+      // 2-consonant matches (divine name = ll) only against capitalized
+      // English words: the proper-noun signal rules out collisions like
+      // "all" without any hardcoded vocabulary
       const cands = esk
-        .map((e, j) => ({ e, j }))
-        .filter(({ e, j }) => !used.has(j) && (e === a || (e.length >= 4 && a.length >= 4 && (e.includes(a) || a.includes(e)))));
+        .map((eF, j) => ({ eF, j }))
+        .filter(({ eF, j }) => !used.has(j) && skMatch(aF, eF, k > 0 && j > 0 && /^[A-Z]/.test(parts[j])));
       if (cands.length !== 1) continue;
       const j = cands[0].j;
       used.add(j);
