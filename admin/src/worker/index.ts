@@ -1391,7 +1391,7 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
   if (!asrObj || !cuesObj) return c.json({ error: 'asr.json or cues.json missing' }, 404);
   const asr: any = await asrObj.json();
   const cues: any = await cuesObj.json();
-  const { buildTranscript, buildSpeakerTxt, nameSpeakers, elevenFormats } = await import('./scribe/audiobook');
+  const { buildTranscript, buildSpeakerTxt, nameSpeakers, elevenFormats, alignUnits } = await import('./scribe/audiobook');
   let native = elevenFormats(asr);
   // Legacy jobs never requested exports at create time — ask ElevenLabs'
   // stored transcript once and persist whatever it can still give us.
@@ -1413,6 +1413,10 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
     }
   }
   const doc: any = buildTranscript(asr.words || [], cues, job.chapters, native.segments);
+  const schRow: any = await c.env.DB.prepare(
+    'SELECT s.name AS scholar FROM videos v JOIN scholars s ON s.id = v.scholar_id WHERE v.video_key LIKE ?'
+  ).bind(`scribe/${jobId}/%`).first().catch(() => null);
+  const scholar: string | null = schRow?.scholar || null;
   if (doc.turns) {
     let existing: string[] | null = null;
     try {
@@ -1420,8 +1424,11 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
       const pj: any = prev ? await prev.json() : null;
       if (Array.isArray(pj?.speakers) && !pj.speakers.every((x: string) => /^Speaker \d+$/.test(x))) existing = pj.speakers;
     } catch {}
-    doc.speakers = existing || await nameSpeakers(c.env as any, doc, { title: job.title, channel: job.channel });
+    // a known featured scholar should appear by name; re-name if he doesn't yet
+    if (existing && scholar && !existing.some((x) => x.toLowerCase() === scholar.toLowerCase())) existing = null;
+    doc.speakers = existing || await nameSpeakers(c.env as any, doc, { title: job.title, channel: job.channel, scholar });
   }
+  doc.align = await alignUnits(c.env as any, doc);
   let lang = 'en';
   try { lang = JSON.parse(job.target_langs || '[]')[0] || 'en'; } catch {}
   const body = JSON.stringify(doc);
@@ -1449,8 +1456,10 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
         .bind(jrow.source_key, orig, vid.id).run();
       afterVideoSave(c, {});
     }
+    await c.env.DB.prepare('UPDATE videos SET media_v = COALESCE(media_v, 0) + 1 WHERE id = ?').bind(vid.id).run();
+    afterVideoSave(c, {});
   }
-  return c.json({ ok: true, turns: doc.turns?.length || 0, speakers: doc.speakers || null, native: !!native.segments, native_txt: !!native.txt, slug: vid?.slug || null });
+  return c.json({ ok: true, turns: doc.turns?.length || 0, speakers: doc.speakers || null, native: !!native.segments, native_txt: !!native.txt, slug: vid?.slug || null, aligned: doc.align.filter((p: any) => p.length).length });
 });
 
 app.post('/api/scribe/:id/publish', async (c) => {

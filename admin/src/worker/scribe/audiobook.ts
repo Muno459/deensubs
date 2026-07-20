@@ -544,7 +544,7 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
 export async function nameSpeakers(
   env: ScribeEnv,
   doc: any,
-  context: { title?: string | null; channel?: string | null }
+  context: { title?: string | null; channel?: string | null; scholar?: string | null }
 ): Promise<string[]> {
   const turns: [number, number, number][] = doc.turns || [];
   const n = 1 + Math.max(...turns.map((t) => t[2]));
@@ -570,7 +570,7 @@ export async function nameSpeakers(
     },
     {
       role: 'user',
-      content: `Recording: ${context.title || 'untitled'}${context.channel ? ` — ${context.channel}` : ''}\n\n${body}`,
+      content: `Recording: ${context.title || 'untitled'}${context.channel ? ` — ${context.channel}` : ''}${context.scholar ? `\nFeatured scholar: ${context.scholar} — if one voice is evidently the main lecturer or commentator, label that voice with exactly this name.` : ''}\n\n${body}`,
     },
   ];
   const generic = (x: string) => /^\s*(speaker|voice|person)\b/i.test(x) || /^\s*\d+\s*$/.test(x);
@@ -617,4 +617,67 @@ export function buildSpeakerTxt(doc: any, kind: 'source' | 'translated'): string
     blocks.push(`${st(words[w0][1])} --> ${st(words[w1][2])} [${label(s)}]\n${text}\n`);
   }
   return blocks.join('\n');
+}
+
+/* ── word alignment ───────────────────────────────────────────────────
+   The karaoke cursor interpolates between anchors; transliteration only
+   pins names, leaving whole units anchorless (proportional guessing put
+   the cursor at "and" while the reciter said "companions"). One cheap
+   LLM pass aligns content words per unit; the pairs ship in
+   transcript.json and drive both the cursor and word tap-to-seek. */
+export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][][]> {
+  const words: [string, number, number][] = doc.words || [];
+  const units: [string, number, number][] = doc.units || [];
+  // Word echoes, not indices — the same lesson the span audit proved: models
+  // copy words reliably and miscount numbers. Indices are computed here.
+  const SYS =
+    'You align a translated transcript with its Arabic source. For each unit you receive the Arabic source words and the English translation words. Reply in JSONL, one line per unit, nothing else:\n' +
+    '{"u":UNIT_ID,"p":[["ARABIC_WORD","ENGLISH_WORD"],...]}\n' +
+    'Each pair states that this English word renders that Arabic word. Copy both words EXACTLY as given. Pair only content words you are sure of (names, nouns, verbs, numbers — skip articles and connectives), in the order they occur. 3-6 pairs per unit is typical; an empty list is fine. Every line MUST start with {"u". No commentary, no code fences.';
+  const enWords = (i: number) => units[i][0].replace(/\*+/g, '').split(/\s+/).filter(Boolean);
+  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const out: number[][][] = units.map(() => []);
+  const runBatch = async (lo: number, hi: number) => {
+    const lines: string[] = [];
+    for (let i = lo; i < hi; i++) {
+      const [, w0, w1] = units[i];
+      const ar: string[] = [];
+      for (let k = w0; k <= w1 && k < words.length; k++) ar.push(words[k][0]);
+      lines.push(`UNIT ${i}\nAR: ${ar.join(' ')}\nEN: ${enWords(i).join(' ')}`);
+    }
+    const raw = await llmChat(env, [
+      { role: 'system', content: SYS },
+      { role: 'user', content: lines.join('\n\n') },
+    ], 8000, undefined);
+    for (const line of raw.split('\n')) {
+      const m = line.match(/\{.*\}/);
+      if (!m) continue;
+      let o: any;
+      try { o = JSON.parse(m[0]); } catch { continue; }
+      if (!Number.isInteger(o.u) || o.u < lo || o.u >= hi || !Array.isArray(o.p)) continue;
+      const [, w0, w1] = units[o.u];
+      const ew = enWords(o.u).map(norm);
+      const pairs: number[][] = [];
+      let la = -1, le = -1;
+      for (const pr of o.p) {
+        if (!Array.isArray(pr) || pr.length !== 2 || typeof pr[0] !== 'string' || typeof pr[1] !== 'string') continue;
+        const an = norm(pr[0]), en = norm(pr[1]);
+        if (!an || !en) continue;
+        let a = -1, e = -1;
+        for (let k = la + 1; k <= w1 - w0; k++) if (norm(words[w0 + k]?.[0] || '') === an) { a = k; break; }
+        for (let j = le + 1; j < ew.length; j++) if (ew[j] === en) { e = j; break; }
+        if (a < 0 || e < 0) continue;
+        pairs.push([a, e]);
+        la = a; le = e;
+      }
+      out[o.u] = pairs;
+    }
+  };
+  const BATCH = 12;
+  const ranges: [number, number][] = [];
+  for (let lo = 0; lo < units.length; lo += BATCH) ranges.push([lo, Math.min(units.length, lo + BATCH)]);
+  for (let g = 0; g < ranges.length; g += 6) {
+    await Promise.all(ranges.slice(g, g + 6).map(([lo, hi]) => runBatch(lo, hi).catch(() => {})));
+  }
+  return out;
 }

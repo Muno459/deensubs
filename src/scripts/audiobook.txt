@@ -36,11 +36,12 @@ function centerActive(){
 }
 
 /* ---- transcript ---- */
-var words=[],units=[],unitEls=[],active=-1,follow=true,arOn=false;
-fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='+new Date().toISOString().slice(0,10))
+var words=[],units=[],unitEls=[],active=-1,follow=true,arOn=false,alignPairs=null;
+fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='+(window.__TRV||new Date().toISOString().slice(0,10)))
 .then(function(r){if(!r.ok)throw 0;return r.json()})
 .then(function(doc){
   words=doc.words||[];
+  alignPairs=doc.align||null;
   units=(doc.units||[]).map(function(u){
     var w0=u[1],w1=u[2];
     return {t:u[0].replace(/\*+/g,''),raw:u[0],w0:w0,w1:w1,a:words[w0]?words[w0][1]:0,b:words[w1]?words[w1][2]:0};
@@ -70,11 +71,14 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='
     var sIdx=turnSpk(w0);
     var showHead=doc.turns&&doc.turns.length&&sIdx!==prevS;
     prevS=sIdx;
-    html+='<div class="ab-turn'+(showHead?'':' solo')+'"><div class="ab-tside">';
+    html+='<div class="ab-turn'+(showHead?'':' solo')+'"><div class="ab-thead">';
     if(showHead){
       var name=(doc.speakers&&doc.speakers[sIdx])||('Speaker '+(sIdx+1));
       var hue=Math.round(sIdx*137.508)%360;
-      html+='<span class="ab-av" style="--h:'+hue+'"></span><span class="ab-spk">'+esc(name)+'</span>';
+      var sch=window.__SCH&&window.__SCH.i&&name.toLowerCase()===window.__SCH.n.toLowerCase();
+      html+=(sch?'<img class="ab-av" src="'+esc(window.__SCH.i)+'" alt="" loading="lazy">'
+               :'<span class="ab-av" style="--h:'+hue+'">'+esc((name[0]||'?').toUpperCase())+'</span>')
+           +'<span class="ab-spk">'+esc(name)+'</span>';
     }
     html+='<span class="ab-tt" data-t="'+at+'" title="Jump here">'+fmt(at)+'</span></div><div class="ab-tbody"><p class="ab-p">';
     for(var i=p[0];i<=p[1]&&i<units.length;i++)html+=uSpan(i);
@@ -86,8 +90,33 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='
     var ts=ev.target.closest('.ab-tt');
     if(ts){au.currentTime=(+ts.dataset.t)+0.01;au.play();return}
     var el=ev.target.closest('.ab-u');if(!el)return;
-    var u=units[+el.dataset.i];
-    au.currentTime=u.a+0.01;au.play();
+    var i=+el.dataset.i,u=units[i],t=u.a;
+    // word-level seek: map the clicked English word back to its Arabic word
+    var wEl=ev.target.closest('.ab-w');
+    if(!wEl&&ev.target.closest('.ab-en')){
+      splitEn(el); // split now, then resolve which word sat under the pointer
+      var rng=document.caretRangeFromPoint?document.caretRangeFromPoint(ev.clientX,ev.clientY)
+             :(document.caretPositionFromPoint?document.caretPositionFromPoint(ev.clientX,ev.clientY):null);
+      var n=rng?(rng.startContainer||rng.offsetNode):null;
+      if(n)wEl=(n.nodeType===3?n.parentElement:n).closest('.ab-w');
+    }
+    if(wEl){
+      var ws=el.querySelectorAll('.ab-w'),idx=Array.prototype.indexOf.call(ws,wEl);
+      if(idx>=0){
+        var A=(alignPairs&&alignPairs[i]&&alignPairs[i].length)?alignPairs[i]:null;
+        if(!A){var pw=[];ws.forEach(function(x){pw.push(x.textContent)});A=buildAnchors(u,pw)}
+        var span=u.w1-u.w0+1,pts=[[0,0]].concat(A).concat([[span,ws.length]]),pos=idx+0.5,ar=0;
+        for(var j=0;j<pts.length-1;j++){
+          if((pts[j][1]<=pos&&pos<=pts[j+1][1])||j===pts.length-2){
+            var f=pts[j+1][1]>pts[j][1]?(pos-pts[j][1])/(pts[j+1][1]-pts[j][1]):0;
+            ar=pts[j][0]+f*(pts[j+1][0]-pts[j][0]);break;
+          }
+        }
+        var k=u.w0+Math.max(0,Math.min(span-1,Math.floor(ar)));
+        if(words[k])t=words[k][1];
+      }
+    }
+    au.currentTime=t+0.01;au.play();
   });
 })
 .catch(function(){tr.innerHTML='<p class="ab-p ab-dim">Transcript unavailable.</p>'});
@@ -145,12 +174,26 @@ function buildAnchors(u,parts){
   return A;
 }
 function splitEn(el){
-  // lazily split the active unit's English into word spans (kept afterwards)
+  // lazily split a unit's English into word spans (kept afterwards),
+  // walking the tree so <b>/<i> markup survives the split
   var en=el.querySelector('.ab-en');
   if(!en)return null;
   if(!en.dataset.split){
-    var parts=en.textContent.split(/\s+/).filter(Boolean);
-    en.innerHTML=parts.map(function(w){return '<i class="ab-w">'+esc(w)+'</i>'}).join(' ');
+    (function wrap(node){
+      for(var c=node.firstChild;c;){
+        var nx=c.nextSibling;
+        if(c.nodeType===3){
+          var parts=c.textContent.split(/(\s+)/),frag=document.createDocumentFragment();
+          for(var j=0;j<parts.length;j++){
+            if(!parts[j])continue;
+            if(/^\s+$/.test(parts[j]))frag.appendChild(document.createTextNode(parts[j]));
+            else{var sp=document.createElement('span');sp.className='ab-w';sp.textContent=parts[j];frag.appendChild(sp)}
+          }
+          node.replaceChild(frag,c);
+        }else if(c.nodeType===1&&!/\bab-(w|ar)\b/.test(c.className))wrap(c);
+        c=nx;
+      }
+    })(en);
     en.dataset.split='1';
   }
   return en.querySelectorAll('.ab-w');
@@ -187,13 +230,8 @@ function sweep(u,t){
   }
   lit=Math.max(0,Math.min(enWords.length,lit));
   if(lit===litCount)return;
-  // multi-word steps cascade left-to-right instead of flashing at once
-  var adv=lit>litCount;
   for(var i=Math.min(lit,litCount);i<Math.max(lit,litCount);i++){
-    if(enWords[i]){
-      enWords[i].style.transitionDelay=adv?Math.min(180,(i-litCount)*60)+'ms':'0ms';
-      enWords[i].classList.toggle('on',i<lit);
-    }
+    if(enWords[i])enWords[i].classList.toggle('on',i<lit);
   }
   litCount=lit;
 }
@@ -214,7 +252,7 @@ function tick(){
         enWords=splitEn(unitEls[i]);
         if(enWords){
           var pw=[];enWords.forEach(function(x){pw.push(x.textContent)});
-          anch=buildAnchors(units[i],pw);
+          anch=(alignPairs&&alignPairs[i]&&alignPairs[i].length)?alignPairs[i]:buildAnchors(units[i],pw);
         }
         if(follow)centerActive();
       }

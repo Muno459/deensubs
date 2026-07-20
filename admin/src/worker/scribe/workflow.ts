@@ -311,7 +311,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             if (!cuesObj) throw new Error('cues missing for transcript');
             const cues: any[] = await cuesObj.json();
             const row = await env.DB.prepare('SELECT chapters, title, channel FROM scribe_jobs WHERE id = ?').bind(jobId).first<any>();
-            const { nameSpeakers, buildSpeakerTxt, elevenFormats } = await import('./audiobook');
+            const { nameSpeakers, buildSpeakerTxt, elevenFormats, alignUnits } = await import('./audiobook');
             // ElevenLabs' native exports are the structural truth: their raw
             // txt is stored verbatim and their source-language segmentation
             // drives the paragraph blocks
@@ -327,6 +327,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               } catch {}
               doc.speakers = existing || await nameSpeakers(env, doc, { title: row?.title, channel: row?.channel });
             }
+            doc.align = await alignUnits(env, doc);
             await env.MEDIA_BUCKET.put(`scribe/${jobId}/transcript.json`, JSON.stringify(doc), {
               httpMetadata: { contentType: 'application/json' },
             });
@@ -335,7 +336,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             if (native.txt) await put(`scribe/${jobId}/elevenlabs.txt`, native.txt);
             await put(`scribe/${jobId}/transcript-source.txt`, native.txt || buildSpeakerTxt(doc, 'source'));
             await put(`scribe/${jobId}/transcript-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
-            return { units: doc.units.length, words: doc.words.length, speakers: doc.speakers || null, native: !!native.segments };
+            return { units: doc.units.length, words: doc.words.length, speakers: doc.speakers || null, native: !!native.segments, aligned: doc.align.filter((p: any) => p.length).length };
           });
         }
 
