@@ -8,7 +8,7 @@
 //    right zone of the artwork (Apple-Music lyrics feel), and a
 //    vp-style auto-hiding control bar sits along the bottom.
 // 2. Classic Apple-Podcasts look for scholars without a card.
-import { e, fv, ft, thu, ago, jsStr, cdn, schImg, schImgSm, schCard } from '../lib/helpers.js';
+import { e, fv, ft, thu, ago, jsStr, cdn, schImg, schImgSm, schCard, STAGE_BG } from '../lib/helpers.js';
 import AB_JS from '../scripts/audiobook.min.txt';
 import { scard } from '../components/video-card.js';
 import { tsvg } from '../components/thumbnail.js';
@@ -78,13 +78,17 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
   const plIdx = playlist ? playlist.items.findIndex((p) => p.slug === video.slug) : -1;
   const plNext = plIdx >= 0 && plIdx < playlist.items.length - 1 ? playlist.items[plIdx + 1] : null;
   return `
-<link rel="preload" as="image" href="${e(card.src)}" imagesrcset="${e(card.srcset)}" imagesizes="(max-width:960px) 100vw, 66vw">
+<link rel="preload" as="image" href="${e(card.src)}" imagesrcset="${e(card.srcset)}" imagesizes="(max-width:960px) 100vw, 66vw" media="(min-width:720px)">
+<link rel="preload" as="image" href="${e(STAGE_BG)}" media="(max-width:719px)">
 <script type="application/ld+json">${jsonLd}</script>
 <div class="wl">
   <div class="wm">
     <div class="abv" id="abv">
       <div class="abv-frame">
-        <img class="abv-bg" id="abv-bg" src="${e(card.src)}" srcset="${e(card.srcset)}" sizes="(max-width:960px) 100vw, 66vw" alt="${e(video.scholar_name || video.title)}">
+        <picture class="abv-pic">
+          <source media="(max-width:719px)" srcset="${e(STAGE_BG)}">
+          <img class="abv-bg" id="abv-bg" src="${e(card.src)}" srcset="${e(card.srcset)}" sizes="(max-width:960px) 100vw, 66vw" alt="${e(video.scholar_name || video.title)}">
+        </picture>
         <div class="abv-head">
           <div class="abv-head-k"><span class="abv-kind">Audiobook</span>${video.speech_enhanced ? '<span class="abv-kind ab-se">Speech Enhanced</span>' : ''}</div>
           <h2>${e(video.title)}</h2>

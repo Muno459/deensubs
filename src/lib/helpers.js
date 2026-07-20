@@ -157,6 +157,13 @@ export function schCard(slug) {
   return { src: `${base}.avif`, srcset: `${base}-960w.avif 960w, ${base}.avif 1920w` };
 }
 
+// Portrait backdrop for the phone audiobook stage: the card's pattern and
+// palette without the scholar, who otherwise sits behind the title and reads as
+// clutter at that size (identity is carried by the sheet's chapter row instead).
+// Scholar-independent, so one shared 1080x1920 asset. Source: Desktop
+// 'static images scholars/generate-stage-bg.py'.
+export const STAGE_BG = `/img/${IMG_V}/scholars/cards/stage-bg.avif`;
+
 // Responsive thumbnail URLs — served from KV via /img/
 export function thu(v) {
   if (!v.thumb_key) return null;

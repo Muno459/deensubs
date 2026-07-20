@@ -939,6 +939,7 @@ h1,h2,h3{color:#000}a{color:#333}
 .abv:fullscreen{border-radius:0;aspect-ratio:auto}
 .abv-frame{position:relative;width:100%;aspect-ratio:16/9;margin:auto;container-type:inline-size}
 .abv:fullscreen .abv-frame{width:min(100%,calc(100vh*16/9))}
+.abv-pic{display:contents} /* the img keeps positioning against .abv-frame */
 .abv-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;cursor:pointer}
 .abv-txt{position:absolute;top:0;bottom:0;left:41.5%;right:2.5%;z-index:2;overflow-y:auto;overscroll-behavior:contain;scroll-behavior:smooth;scrollbar-width:none;padding:7cqi 1.5cqi 15cqi 0;-webkit-mask-image:linear-gradient(transparent,#000 8%,#000 78%,transparent 94%);mask-image:linear-gradient(transparent,#000 8%,#000 78%,transparent 94%)}
 .abv-txt::-webkit-scrollbar{display:none}
@@ -980,8 +981,11 @@ h1,h2,h3{color:#000}a{color:#333}
 @media(max-width:719px){
   .abv{aspect-ratio:auto;height:calc(100svh - 11rem);min-height:27rem;border-radius:14px}
   .abv-frame{aspect-ratio:auto;height:100%;display:flex;flex-direction:column;padding:.85rem .8rem .8rem}
-  .abv-bg{object-position:left center}
-  .abv-frame::before{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(10,14,12,.55),rgba(10,14,12,.86) 45%,rgba(8,11,10,.95))}
+  /* backdrop is the scholar-free pattern (see STAGE_BG), so it needs far less
+     scrim than the portrait did: enough for the title, not enough to lose the
+     lattice the design is carried by */
+  .abv-bg{object-position:center}
+  .abv-frame::before{content:'';position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(10,14,12,.18),rgba(10,14,12,.42) 45%,rgba(8,11,10,.72))}
 
   .abv-head{display:block;position:relative;z-index:2;flex:0 0 auto;text-align:center;padding:.2rem .6rem .85rem}
   .abv-head-k{display:flex;justify-content:center;gap:.55rem;margin-bottom:.5rem}
