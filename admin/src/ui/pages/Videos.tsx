@@ -10,7 +10,7 @@ import { Icon } from '../components/Icon';
 import { AiFillButton } from '../components/AiFill';
 import { ImageField, R2Picker } from '../components/ImageField';
 
-type Video = {
+export type Video = {
   id: number; title: string; title_ar: string | null; slug: string; description: string | null;
   category_id: number | null; scholar_id: number | null; source: string | null; duration: number;
   video_key: string; srt_key: string | null; srt_ar_key: string | null; thumb_key: string | null;
@@ -38,7 +38,7 @@ function KeyField({ label, value, onChange, prefix }: { label: string; value: st
   );
 }
 
-function VideoForm({ initial, meta, onDone, onCancel }: { initial: Partial<Video>; meta: any; onDone: () => void; onCancel: () => void }) {
+export function VideoForm({ initial, meta, onDone, onCancel }: { initial: Partial<Video>; meta: any; onDone: () => void; onCancel: () => void }) {
   const [form, setForm] = useState<Partial<Video>>({ ...EMPTY, ...initial });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -176,7 +176,7 @@ export default function Videos() {
   const [deleting, setDeleting] = useState<Video | null>(null);
 
   const filtered = useMemo(() => {
-    const videos = data?.videos || [];
+    const videos = (data?.videos || []).filter((v: any) => v.media !== 'audio'); // audiobooks live in their own tab
     if (!q.trim()) return videos;
     const needle = q.toLowerCase();
     return videos.filter((v) =>

@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import Analytics from './pages/Analytics';
 import Watch from './pages/Watch';
 import Videos from './pages/Videos';
+import Audiobooks from './pages/Audiobooks';
 import Playlists from './pages/Playlists';
 import Comments from './pages/Comments';
 import Users from './pages/Users';
@@ -38,6 +39,7 @@ const NAV: { group: string; items: { id: string; label: string; icon: string }[]
     group: 'Content',
     items: [
       { id: 'videos', label: 'Videos', icon: 'video' },
+      { id: 'audio', label: 'Audiobooks', icon: 'headphones' },
       { id: 'playlists', label: 'Playlists', icon: 'folder' },
       { id: 'scribe', label: 'Scribe', icon: 'captions' },
       { id: 'clips', label: 'Clip Studio', icon: 'play' },
@@ -68,6 +70,7 @@ const PAGES: Record<string, React.ComponentType> = {
   analytics: Analytics,
   watch: Watch,
   videos: Videos,
+  audio: Audiobooks,
   playlists: Playlists,
   scribe: Scribe,
   clips: Clips,
