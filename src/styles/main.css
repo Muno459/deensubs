@@ -908,10 +908,10 @@ h1,h2,h3{color:#000}a{color:#333}
 .ab-p{font-size:1.08rem;line-height:2;color:var(--t2);margin-bottom:1.15em}
 .ab-dim{color:var(--t3)}
 .ab-u{cursor:pointer;border-radius:6px;padding:.08em .15em;margin:-.08em -.05em;transition:color .25s}
-.ab-u:hover{color:var(--tx)}
-.ab-u.on{background:rgba(62,166,152,.10);box-shadow:inset 0 0 0 1px rgba(62,166,152,.18)}
-.ab-w{font-style:normal;transition:color .18s,background .18s;border-radius:4px}
-.ab-u.on .ab-w.on{color:var(--tx);background:rgba(62,166,152,.26)}
+.ab-u:not(.on):hover{color:var(--tx)}
+.ab-u.was{color:var(--tx)}
+.ab-w{font-style:normal;transition:color .18s}
+.ab-u.on .ab-w.on{color:var(--tx)}
 .ab-ar{display:none;color:var(--t3);font-size:.94em;margin-inline-start:.35em}
 .ab-showar .ab-ar{display:inline}
 .ab-showar .ab-u.on .ab-ar{color:var(--t2)}
@@ -926,3 +926,47 @@ h1,h2,h3{color:#000}a{color:#333}
 .ab-sch{justify-content:center}
 .ab-tr{padding:1.2rem 1.1rem;max-height:48vh}
 }
+
+/* ── Audiobook video-format stage ─────────────────────────────────────
+   The 16:9 viewport IS the baked 1920x1080 scholar card: portrait card +
+   names occupy the left ~40%, the transcript scrolls over the empty right
+   zone the design reserves for it. Colors are literal (not theme vars)
+   because they sit on the fixed dark artwork. */
+.abv{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9;display:flex}
+.abv:fullscreen{border-radius:0;aspect-ratio:auto}
+.abv-frame{position:relative;width:100%;aspect-ratio:16/9;margin:auto;container-type:inline-size}
+.abv:fullscreen .abv-frame{width:min(100%,calc(100vh*16/9))}
+.abv-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;cursor:pointer}
+.abv-txt{position:absolute;top:0;bottom:0;left:41.5%;right:2.5%;z-index:2;overflow-y:auto;overscroll-behavior:contain;scroll-behavior:smooth;scrollbar-width:none;padding:7cqi 1.5cqi 15cqi 0;-webkit-mask-image:linear-gradient(transparent,#000 8%,#000 78%,transparent 94%);mask-image:linear-gradient(transparent,#000 8%,#000 78%,transparent 94%)}
+.abv-txt::-webkit-scrollbar{display:none}
+.abv-ttl{margin-bottom:2.4cqi}
+.abv-kind{font-size:.95cqi;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#45b3a2}
+.abv-ttl h2{font-size:2.3cqi;line-height:1.25;font-weight:600;color:#eceadf;margin:.5cqi 0 0;text-shadow:0 1px 12px rgba(0,0,0,.35)}
+.abv-ttl-ar{font-family:'Amiri',serif;font-size:2cqi;color:#45b3a2;direction:rtl;margin-top:.6cqi}
+.abv-txt .ab-tr,.ab-trpanel .ab-tr{background:none;border:none;box-shadow:none;border-radius:0;padding:0;max-height:none;overflow:visible}
+.abv .ab-p{font-size:1.7cqi;line-height:1.8;font-weight:500;color:rgba(232,230,220,.42);margin-bottom:1.35em;text-shadow:0 1px 10px rgba(0,0,0,.4)}
+.abv .ab-u{transition:color .3s;border-radius:.3em;padding:.04em .12em;margin:-.04em -.12em}
+.abv .ab-u:not(.on):hover{color:rgba(236,234,223,.75)}
+.abv .ab-u.was{color:rgba(236,234,223,.86)}
+.abv .ab-u.on .ab-w.on{color:#fff}
+.abv .ab-ar{color:rgba(232,230,220,.35)}
+.abv .ab-showar .ab-u.on .ab-ar{color:rgba(236,234,223,.8)}
+.abv .ab-followbtn{position:absolute;top:auto;left:70%;bottom:17%;transform:translateX(-50%);margin:0;z-index:5}
+.abv-bar{position:absolute;left:0;right:0;bottom:0;z-index:4;display:flex;align-items:center;gap:.55rem;padding:2.2rem .9rem .55rem;background:linear-gradient(transparent,rgba(0,0,0,.82));opacity:0;transition:opacity .25s}
+.abv:hover .abv-bar,.abv:not(.playing) .abv-bar{opacity:1}
+@media(hover:none){.abv-bar{opacity:1}}
+.abv.fs .abv-bar{padding:2.6rem 1.4rem .8rem}
+#ab-play .ab-ic-pause{display:none}
+#ab-play.playing .ab-ic-play{display:none}
+#ab-play.playing .ab-ic-pause{display:block}
+.abv-sk{flex:1;position:relative;height:22px;display:flex;align-items:center;min-width:0}
+.abv #ab-seek::-webkit-slider-runnable-track{background:rgba(255,255,255,.25);height:4px}
+.abv #ab-seek::-webkit-slider-thumb{background:#fff;width:12px;height:12px;margin-top:-4px;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.abv #ab-seek::-moz-range-track{background:rgba(255,255,255,.25);height:4px}
+.abv #ab-seek::-moz-range-thumb{background:#fff;width:12px;height:12px}
+.abv .ab-ticks i{background:rgba(255,255,255,.4)}
+.abv-tm{font-size:.72rem;color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums;white-space:nowrap}
+.abv-chl{font-size:.72rem;color:rgba(255,255,255,.6);max-width:16%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ab-trpanel{position:relative;margin-top:1rem;background:var(--s1);border:1px solid var(--bd);border-radius:20px;padding:1.2rem 1.1rem;max-height:48vh;overflow-y:auto;scroll-behavior:smooth;box-shadow:var(--sh)}
+.ab-trpanel .ab-followbtn{top:.4rem}
+@media(max-width:719px){.abv-txt,.abv .ab-followbtn{display:none}}

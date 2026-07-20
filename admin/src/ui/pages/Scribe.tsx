@@ -239,13 +239,16 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
       category_id: null,
       scholar_id: null,
     });
-    // Generate frame candidates via the container
-    api(`/api/scribe/${job.id}/thumbs`, { method: 'POST' })
-      .then((r) => {
-        setCands(r.candidates || []);
-        if (r.candidates?.length) setChosenTs(r.candidates[0].ts);
-      })
-      .catch((e) => { setCands([]); setCandErr(e.message); });
+    // Generate frame candidates via the container (video jobs only — audio
+    // jobs have no frames; artwork is the scholar stage card or an upload)
+    if (job.full_video) {
+      api(`/api/scribe/${job.id}/thumbs`, { method: 'POST' })
+        .then((r) => {
+          setCands(r.candidates || []);
+          if (r.candidates?.length) setChosenTs(r.candidates[0].ts);
+        })
+        .catch((e) => { setCands([]); setCandErr(e.message); });
+    } else setCands([]);
     setCustomThumb(null);
     setChosenKey(null);
     // AI drafts the rest: category/scholar picks + Arabic title + slug (silent best-effort)
@@ -364,6 +367,19 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 }} />
             </div>
             <div className="grid grid-cols-3 gap-2">
+              {!job.full_video && (() => {
+                const schSlug = (meta.data?.scholars || []).find((s: any) => s.id === form.scholar_id)?.slug;
+                if (!schSlug) return null;
+                return (
+                  <button key={schSlug} onClick={() => { setChosenKey(null); setChosenTs(null); }}
+                    className={`relative overflow-hidden rounded-lg border-2 transition-all ${chosenKey === null ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'}`}>
+                    <img src={`https://cdn.deensubs.com/scholars/cards/${schSlug}.jpg`} alt=""
+                      className="aspect-video w-full object-cover"
+                      onError={(e) => { const b = e.currentTarget.closest('button') as HTMLElement | null; if (b) b.style.display = 'none'; }} />
+                    <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[10px] text-cream">Scholar card · auto</span>
+                  </button>
+                );
+              })()}
               {customThumb && (
                 <button onClick={() => { setChosenKey(customThumb); setChosenTs(null); }}
                   className={`relative overflow-hidden rounded-lg border-2 transition-all ${chosenKey === customThumb ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'}`}>
@@ -391,7 +407,8 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 </div>
               )}
             </div>
-            {cands?.length === 0 && <p className="mt-1 text-[11px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}.</p>}
+            {!!job.full_video && cands?.length === 0 && <p className="mt-1 text-[11px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}.</p>}
+            {!job.full_video && <p className="mt-1 text-[11px] text-faint">Audio-only job: the selected scholar's stage card is attached automatically; upload or paste an image to override.</p>}
             <p className="mt-1.5 text-[11px] text-faint">Responsive WebP variants (320/480/640) are generated on publish and mirrored to KV.</p>
           </div>
 

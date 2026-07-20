@@ -129,6 +129,34 @@ export function schImgSm(key) {
   return `/img/${IMG_V}/` + key.replace(/\.(png|jpg|jpeg)$/i, '-64w.avif');
 }
 
+// Scholars with a baked 1920x1080 stage card in R2 under scholars/cards/
+// ({slug}.jpg + {slug}.avif + {slug}-960w.avif). Rendered by the static-card
+// generator; add the slug here after uploading a new card. Audiobooks by these
+// scholars get the video-format player (card as the stage, transcript overlay).
+export const SCHOLAR_CARDS = new Set([
+  'salih-al-fawzan',
+  'sulayman-ar-ruhaily',
+  'salih-aal-ash-sheikh',
+  'saad-al-shithri',
+  'sheikh-abdulrahman-al-sudais',
+  'sheikh-yasir-al-dossary',
+  'sheikh-saleh-al-usaymi',
+  'sheikh-bandar-baleelah',
+  'sheikh-saud-al-shuraim',
+  'sheikh-aziz-al-enezy',
+  'sheikh-abdussalam-al-shuwayr',
+  'sheikh-abdurrazzaq-al-badr',
+  'sheikh-abdulmuhsin-al-abbad',
+  'sheikh-abdulkarim-al-khudhayr',
+  'sheikh-othman-al-khamis',
+]);
+
+export function schCard(slug) {
+  if (!slug || !SCHOLAR_CARDS.has(slug)) return null;
+  const base = `/img/${IMG_V}/scholars/cards/${slug}`;
+  return { src: `${base}.avif`, srcset: `${base}-960w.avif 960w, ${base}.avif 1920w` };
+}
+
 // Responsive thumbnail URLs — served from KV via /img/
 export function thu(v) {
   if (!v.thumb_key) return null;

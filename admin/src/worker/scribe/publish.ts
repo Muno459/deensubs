@@ -166,14 +166,23 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   // 2. Thumbnail + responsive WebP variants, generated upfront. Source is
   // either a chosen video frame (thumb_ts) or a ready image (thumb_key —
   // the AI-translated original or a custom upload). Audiobooks cannot frame-
-  // grab: artwork comes from the chosen image or the channel's cover art.
+  // grab: artwork is the scholar's baked 1920x1080 stage card when one exists
+  // (scholars/cards/{slug}.jpg — the site also renders it as the player
+  // stage), else the chosen image or the channel's cover art.
+  let scholarCard: string | null = null;
+  if (isAudiobook && !opts.thumb_key && opts.scholar_id) {
+    const sch: any = await env.DB.prepare('SELECT slug FROM scholars WHERE id = ?').bind(opts.scholar_id).first();
+    if (sch?.slug && (await env.MEDIA_BUCKET.head(`scholars/cards/${sch.slug}.jpg`))) {
+      scholarCard = `scholars/cards/${sch.slug}.jpg`;
+    }
+  }
   const fromImage = !!opts.thumb_key || isAudiobook;
   const thumbSrc = opts.thumb_key
     ? `${CDN_BASE}/${opts.thumb_key}`
     : isAudiobook
-      ? (job.thumb_url as string)
+      ? (scholarCard ? `${CDN_BASE}/${scholarCard}` : (job.thumb_url as string))
       : `${CDN_BASE}/${job.source_key}`;
-  if (isAudiobook && !thumbSrc) throw new Error('audiobook needs artwork: set a thumbnail image first');
+  if (isAudiobook && !thumbSrc) throw new Error('audiobook needs artwork: pick a scholar with a stage card or set a thumbnail image first');
   const ts = fromImage ? 0 : opts.thumb_ts ?? Math.max(1, Math.round((job.duration || 60) * 0.3));
   const start = await containerCall(env, jobId, '/thumbs', {
     method: 'POST',
