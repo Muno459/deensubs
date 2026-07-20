@@ -899,9 +899,24 @@ app.post('/api/companion/enhance/complete', async (c) => {
   if (job.duration > 0 && Math.abs(Number(duration) - job.duration) > 0.15) {
     return c.json({ error: `duration contract violated: job ${job.duration}s vs enhanced ${duration}s` }, 400);
   }
+  // Capture the pre-swap key: it IS the original recording
+  const origRow: any = await c.env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(job_id).first();
   await c.env.DB.prepare(
     "UPDATE scribe_jobs SET source_key = ?, speech_enhanced = 1, se_status = 'done' WHERE id = ?"
   ).bind(key, job_id).run();
+  // If this job is ALREADY published (an enhancement finishing after a
+  // publish or during a re-run), sync the live video row immediately: the
+  // site must play the enhanced file, show the badge, and keep the original
+  // selectable. This is the moment the swap happens, so nothing can desync.
+  const vid: any = await c.env.DB.prepare(
+    "SELECT id FROM videos WHERE video_key LIKE 'scribe/' || ? || '/%' AND video_key != ?"
+  ).bind(job_id, key).first();
+  if (vid) {
+    const orig = origRow?.source_key && !/-enhanced\./.test(origRow.source_key) ? origRow.source_key : null;
+    await c.env.DB.prepare('UPDATE videos SET video_key = ?, speech_enhanced = 1, orig_key = COALESCE(orig_key, ?) WHERE id = ?')
+      .bind(key, orig, vid.id).run();
+    afterVideoSave(c, {});
+  }
   return c.json({ ok: true });
 });
 
@@ -1373,11 +1388,21 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
   if (native.txt) await putTxt(`scribe/${jobId}/elevenlabs.txt`, native.txt);
   await putTxt(`scribe/${jobId}/transcript-source.txt`, sourceTxt);
   await putTxt(`scribe/${jobId}/transcript-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
-  const vid: any = await c.env.DB.prepare("SELECT slug FROM videos WHERE video_key LIKE ?").bind(`scribe/${jobId}/%`).first();
+  const vid: any = await c.env.DB.prepare("SELECT id, slug, video_key FROM videos WHERE video_key LIKE ?").bind(`scribe/${jobId}/%`).first();
   if (vid?.slug) {
     await putJson(`transcripts/${vid.slug}.json`);
     await putTxt(`transcripts/${vid.slug}-source.txt`, sourceTxt);
     await putTxt(`transcripts/${vid.slug}-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
+    // A re-run may have enhanced the job AFTER publish: sync the video row so
+    // the site plays the enhanced file (original stays selectable)
+    const jrow: any = await c.env.DB.prepare('SELECT source_key, speech_enhanced FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+    if (jrow?.speech_enhanced && /-enhanced\.m4a$/.test(jrow.source_key || '') && vid.video_key !== jrow.source_key) {
+      const listed = await c.env.MEDIA_BUCKET.list({ prefix: `scribe/${jobId}/source.` });
+      const orig = listed.objects.map((o) => o.key).find((k) => !/-enhanced\./.test(k)) || null;
+      await c.env.DB.prepare('UPDATE videos SET video_key = ?, speech_enhanced = 1, orig_key = ? WHERE id = ?')
+        .bind(jrow.source_key, orig, vid.id).run();
+      afterVideoSave(c, {});
+    }
   }
   return c.json({ ok: true, turns: doc.turns?.length || 0, speakers: doc.speakers || null, native: !!native.segments, native_txt: !!native.txt, slug: vid?.slug || null });
 });
