@@ -73,8 +73,15 @@ function CompanionsCard() {
     } catch (e: any) { toast.push(e.message, 'error'); }
   };
 
+  const selectTarget = async (target: string) => {
+    try {
+      await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target }) });
+      loadProxies();
+    } catch (e: any) { toast.push(e.message, 'error'); }
+  };
+
   const capChip = (c: string) =>
-    c.startsWith('enhance') ? `enhance ${c.includes('cuda') ? '⚡GPU' : 'CPU'}` : c;
+    c.startsWith('enhance') ? `enhance ${c.includes('cuda') ? '⚡GPU' : c.includes('mps') ? '⚡Metal' : 'CPU'}` : c;
 
   return (
     <div className="rounded-xl border border-hairline bg-panel/60 p-4">
@@ -83,6 +90,28 @@ function CompanionsCard() {
           <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
           <h3 className="text-[13px] font-semibold text-cream">Companions</h3>
           <span className="text-[11px] text-muted">{roster.length ? `${roster.length} online` : 'none online — downloads use the proxy'}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint">Downloads via</span>
+          {[{ v: '', label: 'Auto' }, { v: 'proxy', label: 'Proxy only' },
+            ...roster.filter((c) => c.caps?.some((x: string) => x.startsWith('download'))).map((c) => ({ v: c.name, label: c.name }))]
+            .map((o) => {
+              const sel = String(proxies?.target || '') === o.v;
+              return (
+                <button
+                  key={o.v || 'auto'}
+                  disabled={sel}
+                  title={o.v === '' ? 'any online companion first, proxy container as fallback' : o.v === 'proxy' ? 'never offer downloads to companions' : `route downloads only to ${o.label}`}
+                  onClick={() => selectTarget(o.v)}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    sel ? 'border-[#45b3a2]/50 bg-[#45b3a2]/10 text-[#7fe0d2]'
+                    : 'border-hairline bg-soft text-muted hover:text-cream'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
         </div>
         {proxies && proxies.proxies?.length > 0 && (
           <div className="flex items-center gap-1.5">

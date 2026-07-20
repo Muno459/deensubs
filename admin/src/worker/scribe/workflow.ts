@@ -66,8 +66,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         const offered = await step.do('companion-download-offer', async () => {
           const row: any = await env.DB.prepare('SELECT source_key, dl_status FROM scribe_jobs WHERE id = ?').bind(jobId).first();
           if (row?.source_key || row?.dl_status === 'done') return false;
+          const target: any = await env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
+          const t = String(target?.value || '');
+          if (t === 'proxy') return false; // admin routed downloads to the container
           const { onlineCompanions, hasCap } = await import('../companion');
-          if (!hasCap(await onlineCompanions(env), 'download')) return false;
+          const online = await onlineCompanions(env);
+          if (t) {
+            if (!online.some((x) => x.name === t && x.caps.some((cp: string) => cp.startsWith('download')))) return false;
+          } else if (!hasCap(online, 'download')) return false;
           await env.DB.prepare(
             "UPDATE scribe_jobs SET dl_status = 'wanted' WHERE id = ? AND source_key IS NULL AND (dl_status IS NULL OR dl_status = '' OR dl_status = 'failed')"
           ).bind(jobId).run();
@@ -80,8 +86,12 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               if (r?.source_key && r?.dl_status === 'done') return 'done';
               if (r?.dl_status === 'failed') return 'abandon';
               if (r?.dl_status === 'wanted') {
+                const target: any = await env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
+                const t = String(target?.value || '');
+                if (t === 'proxy') return 'abandon';
                 const { onlineCompanions, hasCap } = await import('../companion');
-                if (!hasCap(await onlineCompanions(env), 'download')) return 'abandon';
+                const online = await onlineCompanions(env);
+                if (t ? !online.some((x) => x.name === t) : !hasCap(online, 'download')) return 'abandon';
               }
               return 'wait';
             });

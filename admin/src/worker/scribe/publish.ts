@@ -147,6 +147,14 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   // publish bottleneck; retention + delete exempt scribe keys referenced by
   // videos). Small subtitle files still get canonical copies.
   const videoKey = job.source_key as string;
+  // Enhanced audiobooks keep BOTH files: the enhanced one plays by default,
+  // the untouched original stays selectable in the player. Retention spares
+  // the whole scribe/{id}/ prefix while the video row references it.
+  let origKey: string | null = null;
+  if (isAudiobook && job.speech_enhanced && /-enhanced\.m4a$/.test(videoKey)) {
+    const listed = await env.MEDIA_BUCKET.list({ prefix: `scribe/${jobId}/source.` });
+    origKey = listed.objects.map((o) => o.key).find((k) => !/-enhanced\./.test(k)) || null;
+  }
   const srtKey = `subs/${slug}.srt`;
   if (job.srt_key) await copyObject(env, job.srt_key, srtKey);
   const isArabicSource = (job.language_code || '').startsWith('ar');
@@ -220,7 +228,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   // 3. Insert the video row (with chapters + language list); media='audio'
   // marks audiobooks so the site renders the karaoke player
   await env.DB.prepare(
-    'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, duration, video_key, srt_key, srt_ar_key, thumb_key, chapters, srt_langs, media, speech_enhanced) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, duration, video_key, srt_key, srt_ar_key, thumb_key, chapters, srt_langs, media, speech_enhanced, orig_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
   ).bind(
     title,
     opts.title_ar ?? job.title_ar ?? null,
@@ -236,7 +244,8 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     job.chapters || null,
     langs.length ? JSON.stringify(langs) : null,
     isAudiobook ? 'audio' : null,
-    job.speech_enhanced ? 1 : 0
+    job.speech_enhanced ? 1 : 0,
+    origKey
   ).run();
 
   // 3a. Attach to the site playlist this job was queued from (playlist imports).

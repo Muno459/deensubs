@@ -819,13 +819,19 @@ app.get('/api/companion/roster', async (c) => {
 
 app.post('/api/companion/download/claim', async (c) => {
   const body: any = await c.req.json().catch(() => ({}));
+  const worker = String(body.worker || 'companion').slice(0, 40);
+  // Admin-chosen routing: '' = any companion, 'proxy' = container only,
+  // anything else = only that companion instance gets download work.
+  const target: any = await c.env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
+  const t = String(target?.value || '');
+  if (t === 'proxy' || (t && t !== worker)) return c.json({ job: null });
   const job: any = await c.env.DB.prepare(
     `UPDATE scribe_jobs SET dl_status='claimed', dl_claimed_by=?, dl_claimed_at=unixepoch()
      WHERE id = (SELECT id FROM scribe_jobs
        WHERE dl_status = 'wanted' OR (dl_status = 'claimed' AND dl_claimed_at < unixepoch() - 1800)
        ORDER BY created_at LIMIT 1)
      RETURNING id, url, full_video, title`
-  ).bind(String(body.worker || 'companion').slice(0, 40)).first();
+  ).bind(worker).first();
   return c.json({ job: job || null });
 });
 
@@ -914,12 +920,24 @@ app.get('/api/companion/proxies', async (c) => {
     "SELECT holder, until FROM locks WHERE name = 'download' AND until > unixepoch()"
   ).first().catch(() => null);
   const sel: any = await c.env.DB.prepare("SELECT value FROM config WHERE name = 'active_proxy'").first().catch(() => null);
+  const target: any = await c.env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
   return c.json({
     proxies: list.map((p, i) => ({ index: i, label: maskProxy(p) })),
     selected: sel?.value ?? 'auto',
+    target: String(target?.value || ''),
     busy: !!lock,
     busy_job: lock?.holder || null,
   });
+});
+
+// Where download work is routed: '' any companion (proxy fallback),
+// 'proxy' container only, or a companion instance name.
+app.post('/api/companion/target', async (c) => {
+  const { target } = await c.req.json();
+  await c.env.DB.prepare(
+    "INSERT INTO config (name, value) VALUES ('download_target', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value"
+  ).bind(String(target || '').slice(0, 40)).run();
+  return c.json({ ok: true, target: String(target || '') });
 });
 
 app.post('/api/companion/proxies/select', async (c) => {

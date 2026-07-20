@@ -170,6 +170,35 @@ speedBtn.addEventListener('click',function(){
   speedBtn.textContent=speeds[si]+'×';
 });
 
+/* enhanced/original source toggle: the Speech Enhanced badge becomes a switch
+   when the untouched original is kept alongside (same duration to the sample,
+   so the position carries over exactly) */
+var ORIG='__ORIG__';
+if(ORIG){
+  var seOn=true,srcEnh=au.currentSrc||au.src;
+  var seBadges=[].slice.call(document.querySelectorAll('.ab-se'));
+  seBadges.forEach(function(b){
+    b.style.cursor='pointer';
+    b.setAttribute('role','button');
+    b.title='Switch between the enhanced and original recording';
+    b.addEventListener('click',function(){
+      seOn=!seOn;
+      var t=au.currentTime,playing=!au.paused,rate=au.playbackRate;
+      au.src=seOn?srcEnh:ORIG;
+      au.addEventListener('loadedmetadata',function once(){
+        au.removeEventListener('loadedmetadata',once);
+        au.currentTime=t;au.playbackRate=rate;
+        if(playing)au.play();
+      });
+      au.load();
+      seBadges.forEach(function(x){
+        x.textContent=seOn?'Speech Enhanced':'Original Audio';
+        x.classList.toggle('ab-se-off',!seOn);
+      });
+    });
+  });
+}
+
 /* stage extras: tap artwork to play, double-tap / f / button for fullscreen */
 if(bg){
   bg.addEventListener('click',function(){au.paused?au.play():au.pause()});

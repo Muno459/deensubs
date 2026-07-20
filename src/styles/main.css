@@ -992,3 +992,4 @@ h1,h2,h3{color:#000}a{color:#333}
 
 /* Speech Enhanced badge (Sidon-restored audio) */
 .ab-se{color:#b79bf5!important;margin-inline-start:.6em}
+.ab-se-off{color:var(--t3)!important}
