@@ -480,13 +480,18 @@ app.delete('/api/scribe/cookies', async (c) => {
 type JobIdentity = { title?: string; channel?: string; thumb_url?: string };
 type JobPlaylist = { id: number; pos: number };
 
-async function createScribeJob(env: Env, url: string, targetLangs: string[], fullVideo: boolean, ident: JobIdentity = {}, createdBy?: number, playlist?: JobPlaylist) {
-  const id = genJobId();
+// upload: local file already streamed into R2 — the job starts with source_key
+// preset so the workflow's download step resume-check short-circuits past yt-dlp
+type JobUpload = { id: string; sourceKey: string; duration: number };
+
+async function createScribeJob(env: Env, url: string, targetLangs: string[], fullVideo: boolean, ident: JobIdentity = {}, createdBy?: number, playlist?: JobPlaylist, upload?: JobUpload) {
+  const id = upload?.id || genJobId();
   const primary = targetLangs[0] || 'en';
-  await env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, target_langs, full_video, status, step, title, channel, thumb_url, created_by, playlist_id, playlist_pos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  await env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, target_langs, full_video, status, step, title, channel, thumb_url, created_by, playlist_id, playlist_pos, source_key, download_method, download_pct, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(id, url, primary, JSON.stringify(targetLangs), fullVideo ? 1 : 0, 'queued', 'queued',
       ident.title || null, ident.channel || null, ident.thumb_url || null, createdBy ?? null,
-      playlist?.id ?? null, playlist?.pos ?? null).run();
+      playlist?.id ?? null, playlist?.pos ?? null,
+      upload?.sourceKey ?? null, upload ? 'upload' : null, upload ? 100 : 0, upload?.duration ?? 0).run();
   await env.DB.prepare('UPDATE scribe_jobs SET wf_instance = ? WHERE id = ?').bind(id, id).run();
   await env.SCRIBE_WORKFLOW.create({ id, params: { jobId: id, url, targetLang: primary, targetLangs, fullVideo } });
   return id;
@@ -867,6 +872,52 @@ app.post('/api/scribe/4k/upload/finish', async (c) => {
   if (!Array.isArray(parts) || !parts.length) return c.json({ error: 'parts required' }, 400);
   const obj = await mpu.complete(parts);
   return c.json({ ok: true, size: obj.size });
+});
+
+// Local media upload → Scribe job (drag & drop in the admin). start allocates
+// the job id + R2 multipart; parts stream through /api/scribe/4k/upload/part
+// (already generic over scribe/* keys); finish completes the object and starts
+// the pipeline with the download step pre-satisfied (source_key in R2,
+// download_method='upload'). Video files are always full_video (the source IS
+// the video — there is nothing to fetch later); audio files publish as
+// audiobooks.
+const UPLOAD_EXT = /\.(mp4|webm|mkv|mov|m4a|mp3|wav|aac|ogg|opus|flac)$/i;
+app.post('/api/scribe/upload/start', async (c) => {
+  const { filename, content_type, size } = await c.req.json();
+  const ext = UPLOAD_EXT.exec(filename || '')?.[1]?.toLowerCase();
+  if (!ext) return c.json({ error: 'Unsupported file — video (mp4/webm/mkv/mov) or audio (mp3/m4a/wav/aac/ogg/opus/flac)' }, 400);
+  if (typeof size === 'number' && size > 8e9) return c.json({ error: 'File too large (8 GB max)' }, 400);
+  const jobId = genJobId();
+  const key = `scribe/${jobId}/source.${ext}`;
+  const mpu = await c.env.MEDIA_BUCKET.createMultipartUpload(key, {
+    httpMetadata: { contentType: content_type || 'application/octet-stream' },
+  });
+  return c.json({ job_id: jobId, key, uploadId: mpu.uploadId });
+});
+
+app.post('/api/scribe/upload/finish', async (c) => {
+  const { job_id, objkey, uploadId, parts, abort, filename, duration, target_langs } = await c.req.json();
+  if (!job_id || !objkey?.startsWith(`scribe/${job_id}/`) || !uploadId) return c.json({ error: 'job_id, objkey, uploadId required' }, 400);
+  const mpu = c.env.MEDIA_BUCKET.resumeMultipartUpload(objkey, uploadId);
+  if (abort) {
+    await mpu.abort().catch(() => {});
+    return c.json({ ok: true, aborted: true });
+  }
+  if (!Array.isArray(parts) || !parts.length) return c.json({ error: 'parts required' }, 400);
+  await mpu.complete(parts);
+  const langs = Array.isArray(target_langs) && target_langs.length ? target_langs : ['en'];
+  const title = String(filename || job_id).replace(/\.[^.]+$/, '');
+  const isVideo = /\.(mp4|webm|mkv|mov)$/i.test(objkey);
+  let id = '';
+  try {
+    id = await createScribeJob(c.env, 'upload://' + (filename || objkey), langs, isVideo, { title }, c.get('user')?.id, undefined, {
+      id: job_id, sourceKey: objkey, duration: Math.max(0, Math.round(+duration || 0)),
+    });
+  } catch (err: any) {
+    return c.json({ error: 'Failed to start pipeline: ' + err.message }, 500);
+  }
+  const job = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
+  return c.json({ job });
 });
 
 app.get('/api/scribe/4k/stats', async (c) => {

@@ -763,6 +763,11 @@ export default function Scribe() {
   const [q, setQ] = useState('');
   const toast = useToast();
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Local file drag & drop → chunked upload → job with the download step pre-satisfied
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepth = useRef(0);
+  const [upload, setUpload] = useState<{ name: string; pct: number; phase: string; queued: number } | null>(null);
+  const upFileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     (window as any).__openEditor = (j: any) => setEditorJob(j);
     return () => { delete (window as any).__openEditor; };
@@ -891,11 +896,99 @@ export default function Scribe() {
     setEnumerating(false);
   }
 
+  const UP_EXT = /\.(mp4|webm|mkv|mov|m4a|mp3|wav|aac|ogg|opus|flac)$/i;
+
+  async function uploadLocal(files: File[]) {
+    const good = files.filter((f) => {
+      if (!UP_EXT.test(f.name)) { toast.push(`${f.name}: unsupported type (video or audio files only)`, 'error'); return false; }
+      if (!f.size) { toast.push(`${f.name}: empty file`, 'error'); return false; }
+      return true;
+    });
+    for (let fi = 0; fi < good.length; fi++) {
+      const file = good[fi];
+      const queued = good.length - fi - 1;
+      setUpload({ name: file.name, pct: 0, phase: 'Reading', queued });
+      // Duration from the browser's decoder — free, and lets the pipeline skip a probe
+      const duration = await new Promise<number>((resolve) => {
+        const el = document.createElement('video');
+        el.preload = 'metadata';
+        const src = URL.createObjectURL(file);
+        const done = (d: number) => { URL.revokeObjectURL(src); resolve(d); };
+        el.onloadedmetadata = () => done(Number.isFinite(el.duration) ? Math.round(el.duration) : 0);
+        el.onerror = () => done(0);
+        el.src = src;
+      });
+      let started: any = null;
+      try {
+        started = await api('/api/scribe/upload/start', {
+          method: 'POST',
+          body: JSON.stringify({ filename: file.name, content_type: file.type, size: file.size }),
+        });
+        const CHUNK = 32 * 1024 * 1024;
+        const total = Math.ceil(file.size / CHUNK);
+        const parts: { partNumber: number; etag: string }[] = [];
+        for (let n = 1; n <= total; n++) {
+          const blob = file.slice((n - 1) * CHUNK, Math.min(n * CHUNK, file.size));
+          let uploaded: any = null;
+          for (let attempt = 0; ; attempt++) {
+            try {
+              const r = await fetch(`/api/scribe/4k/upload/part?objkey=${encodeURIComponent(started.key)}&uploadId=${encodeURIComponent(started.uploadId)}&part=${n}`,
+                { method: 'PUT', body: blob, credentials: 'include' });
+              if (!r.ok) throw new Error(`part ${n}/${total}: HTTP ${r.status}`);
+              uploaded = await r.json();
+              break;
+            } catch (e) {
+              if (attempt >= 2) throw e;
+            }
+          }
+          parts.push({ partNumber: uploaded.partNumber, etag: uploaded.etag });
+          setUpload({ name: file.name, pct: Math.round((n / total) * 100), phase: 'Uploading', queued });
+        }
+        setUpload({ name: file.name, pct: 100, phase: 'Starting pipeline', queued });
+        const fin = await api('/api/scribe/upload/finish', {
+          method: 'POST',
+          body: JSON.stringify({
+            job_id: started.job_id, objkey: started.key, uploadId: started.uploadId, parts,
+            filename: file.name, duration, target_langs: [lang, ...extraLangs],
+          }),
+        });
+        setExpanded(fin.job?.id || null);
+        refetch();
+      } catch (e: any) {
+        if (started) {
+          api('/api/scribe/upload/finish', {
+            method: 'POST',
+            body: JSON.stringify({ job_id: started.job_id, objkey: started.key, uploadId: started.uploadId, abort: true }),
+          }).catch(() => {});
+        }
+        toast.push(`${file.name}: ${e.message}`, 'error');
+      }
+    }
+    setUpload(null);
+  }
+
   return (
     <div className="space-y-5">
       {/* Composer */}
       <BlurFade>
+        <div
+          onDragEnter={(e) => { e.preventDefault(); dragDepth.current++; setDragOver(true); }}
+          onDragOver={(e) => e.preventDefault()}
+          onDragLeave={() => { if (--dragDepth.current <= 0) { dragDepth.current = 0; setDragOver(false); } }}
+          onDrop={(e) => {
+            e.preventDefault();
+            dragDepth.current = 0;
+            setDragOver(false);
+            const fs = [...(e.dataTransfer?.files || [])];
+            if (fs.length) uploadLocal(fs);
+          }}
+        >
         <GlowCard className="relative overflow-hidden p-6">
+          {dragOver && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] border-2 border-dashed border-[#45b3a2] bg-[#45b3a2]/10">
+              <p className="text-[13px] font-medium text-cream">Drop video / audio files to transcribe</p>
+            </div>
+          )}
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-[15px] font-semibold tracking-tight text-cream">Add a video</h2>
@@ -903,7 +996,7 @@ export default function Scribe() {
                 Direct links download at the edge. YouTube and blocked hosts spin up an isolated yt-dlp container
                 that dials through the Padborg proxies (always the latest yt-dlp, with your cookies). ElevenLabs
                 Scribe v2 transcribes, Gemini translates on word-index timing, and metadata is written from the
-                full transcript.
+                full transcript. Or drag &amp; drop a local video / mp3 anywhere on this card.
               </p>
             </div>
             <button
@@ -927,6 +1020,23 @@ export default function Scribe() {
             <Button onClick={submit} disabled={submitting || enumerating || !url.trim()} className="px-5">
               {enumerating ? 'Listing...' : submitting ? 'Starting...' : looksLikePlaylist ? 'List videos' : 'Transcribe'}
             </Button>
+            <button
+              onClick={() => upFileRef.current?.click()}
+              disabled={!!upload}
+              className="flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-3 py-2.5 text-[12px] font-medium text-muted transition-colors hover:text-cream disabled:opacity-50"
+              title="Upload a local video or audio file"
+            >
+              Upload file
+            </button>
+            <input
+              ref={upFileRef} type="file" multiple className="hidden"
+              accept="video/*,audio/*,.mkv,.mov,.m4a,.opus,.flac"
+              onChange={(e) => {
+                const fs = [...(e.target.files || [])];
+                e.target.value = '';
+                if (fs.length) uploadLocal(fs);
+              }}
+            />
           </div>
           {(probe || probing) && !looksLikePlaylist && (
             <div className="mt-3 flex items-center gap-3 rounded-xl border border-hairline bg-inset p-2.5">
@@ -973,8 +1083,23 @@ export default function Scribe() {
               ))}
             </div>
           </div>
+          {upload && (
+            <div className="mt-3 flex items-center gap-3 rounded-xl border border-hairline bg-inset p-2.5">
+              <Spinner className="h-4 w-4 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-cream">{upload.name}</p>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-soft">
+                  <div className="h-full rounded-full bg-[#45b3a2] transition-all" style={{ width: upload.pct + '%' }} />
+                </div>
+              </div>
+              <span className="shrink-0 text-[11px] tabular-nums text-muted">
+                {upload.phase} · {upload.pct}%{upload.queued > 0 ? ` · ${upload.queued} more queued` : ''}
+              </span>
+            </div>
+          )}
           {submitErr && <p className="mt-2 text-[12px] text-red-400">{submitErr}</p>}
         </GlowCard>
+        </div>
       </BlurFade>
 
       {error && <ErrorNote message={error} onRetry={refetch} />}
