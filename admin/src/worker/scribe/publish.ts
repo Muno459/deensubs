@@ -10,6 +10,7 @@
 // then the videos row is inserted and the KV cache purged.
 
 import type { ScribeEnv } from './types';
+import { sanitizeChapters } from './metadata';
 import { streamToR2 } from './download';
 
 const CDN_BASE = 'https://cdn.deensubs.com';
@@ -23,6 +24,7 @@ export type PublishOptions = {
   scholar_id?: number | null;
   thumb_ts?: number; // seconds into the video for the thumbnail frame
   thumb_key?: string; // OR a ready image key (AI-translated original / custom upload)
+  chapters?: { t: number; title: string }[]; // edited in the publish form; overrides the AI chapters
 };
 
 type PublishEnv = ScribeEnv & { CACHE: KVNamespace; MEDIA_KV: KVNamespace; AI?: Ai; VECTORIZE?: VectorizeIndex };
@@ -229,6 +231,11 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   }
   containerCall(env, jobId, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
 
+  const editedCh = Array.isArray(opts.chapters) ? sanitizeChapters(opts.chapters) : null;
+  const chaptersJson = editedCh ? (editedCh.length ? JSON.stringify(editedCh) : null) : job.chapters || null;
+  if (editedCh) {
+    await env.DB.prepare('UPDATE scribe_jobs SET chapters = ? WHERE id = ?').bind(chaptersJson, jobId).run();
+  }
   // 3. Insert the video row (with chapters + language list); media='audio'
   // marks audiobooks so the site renders the karaoke player
   await env.DB.prepare(
@@ -245,7 +252,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     job.srt_key ? srtKey : null,
     srtArKey,
     thumbKey,
-    job.chapters || null,
+    chaptersJson,
     langs.length ? JSON.stringify(langs) : null,
     isAudiobook ? 'audio' : null,
     job.speech_enhanced ? 1 : 0,

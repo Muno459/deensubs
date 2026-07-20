@@ -364,6 +364,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
       title: job.title || '',
       title_ar: job.title_ar || '',
       description: job.description || '',
+      chapters: (() => { try { const a = JSON.parse(job.chapters || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } })(),
       slug: (job.title || job.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80),
       category_id: null,
       scholar_id: null,
@@ -420,6 +421,10 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
     return () => { live = false; clearTimeout(t); };
   }, [open, schCardSlug, form?.title]);
 
+  const fmtT = (sec: number) => { const v = Math.max(0, Math.round(sec || 0)); const h = Math.floor(v / 3600), m = Math.floor((v % 3600) / 60), x = v % 60; return (h ? `${h}:${String(m).padStart(2, '0')}` : String(m)) + ':' + String(x).padStart(2, '0'); };
+  const parseT = (v: string) => { const parts = v.split(':').map((x) => parseInt(x, 10)); return parts.some((x) => isNaN(x)) ? null : parts.reduce((a, x) => a * 60 + x, 0); };
+  const updCh = (i: number, patch: any) => setForm((f: any) => ({ ...f, chapters: f.chapters.map((c: any, j: number) => (j === i ? { ...c, ...patch } : c)) }));
+
   if (!open || !form) return null;
 
   return (
@@ -453,6 +458,25 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
           </div>
           <Field label="Description">
             <textarea rows={3} className={inputCls + ' resize-y'} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          </Field>
+          <Field label={`Chapters (${(form.chapters || []).length})`}>
+            <div className="space-y-1.5">
+              {(form.chapters || []).map((ch: any, i: number) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input className={inputCls + ' w-24 text-center font-mono'} value={ch._t ?? fmtT(ch.t)}
+                    onChange={(e) => updCh(i, { _t: e.target.value })}
+                    onBlur={() => { const t = parseT(ch._t ?? ''); updCh(i, { t: t == null ? ch.t : t, _t: undefined }); }} />
+                  <input className={inputCls + ' flex-1'} value={ch.title} placeholder="Chapter title"
+                    onChange={(e) => updCh(i, { title: e.target.value })} />
+                  <button type="button" className="px-1 text-[15px] leading-none text-muted hover:text-cream" title="Remove chapter"
+                    onClick={() => setForm({ ...form, chapters: form.chapters.filter((_: any, j: number) => j !== i) })}>×</button>
+                </div>
+              ))}
+              <button type="button" className="text-[11px] font-medium text-muted hover:text-cream"
+                onClick={() => setForm({ ...form, chapters: [...(form.chapters || []), { t: ((form.chapters || [])[form.chapters.length - 1]?.t ?? -60) + 60, title: '' }] })}>
+                + Add chapter
+              </button>
+            </div>
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Category">
@@ -580,7 +604,12 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                   }
                   const r = await api(`/api/scribe/${job.id}/publish`, {
                     method: 'POST',
-                    body: JSON.stringify({ ...form, thumb_ts: thumbKey ? undefined : chosenTs ?? undefined, thumb_key: thumbKey }),
+                    body: JSON.stringify({
+                      ...form,
+                      chapters: (form.chapters || []).filter((c: any) => c.title && c.title.trim())
+                        .map((c: any) => ({ t: Math.max(0, Math.round(c.t || 0)), title: c.title.trim() })),
+                      thumb_ts: thumbKey ? undefined : chosenTs ?? undefined, thumb_key: thumbKey,
+                    }),
                   });
                   setDone(r);
                   toast.push(`Published /watch/${r.slug}`);

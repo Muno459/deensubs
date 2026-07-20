@@ -6,7 +6,7 @@ import { download, needsYtdlp, acquireDownloadSlot, releaseDownloadSlot } from '
 import { runAsr, loadAsr } from './asr';
 import { translateWords, qaPass, takeUsage, takeCost } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
-import { generateMetadata, generateChapters } from './metadata';
+import { generateChapters, generateMetaAndChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
 import { assessQuality } from './quality';
 import { renderSrt } from './srt';
@@ -416,8 +416,8 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           const obj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
           if (!obj) throw new Error('cues missing from R2');
           const cues = await obj.json<Cue[]>();
-          const m = await generateMetadata(env, jobId, cues, asr.languageCode);
-          const chapters = await generateChapters(env, cues).catch(() => []);
+          const m = await generateMetaAndChapters(env, jobId, cues, asr.languageCode);
+          const chapters = m.chapters;
           if (chapters.length) {
             await env.MEDIA_BUCKET.put(`scribe/${jobId}/chapters.json`, JSON.stringify(chapters), {
               httpMetadata: { contentType: 'application/json' },
