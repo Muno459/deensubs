@@ -37,6 +37,8 @@ RULES:
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
 - Keep as transliterations (do not translate): fatwa, mufti, Sharia, fiqh, usul al-fiqh, ifta, Haramain, madhhab, and similar established terms.
 - Quranic verses and hadith quotations: use established translation wording, wrapped in quotes and *italicized* with single asterisks.
+- Italicize ONLY Quranic verses, hadith, and book titles; never ordinary reported speech or names.
+- Never use em-dashes or en-dashes; write with commas, colons, semicolons, or parentheses instead.
 - Nested quotations use single quotes inside double quotes — never two double quotes in a row.
 - **Bold** (double asterisks) sparingly for a key term being defined or emphasized by the speaker.
 - No other markdown, no commentary, no code fences — only JSONL lines.`;
@@ -645,7 +647,23 @@ export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> 
     '- When word order differs between the languages, attach the displaced English words to the Arabic word at whose position the READER passes them (keep English order; never reorder English).\n' +
     '- Inside Quranic quotes or any passage where word-by-word correspondence is unclear, distribute the English words roughly evenly across the Arabic words — the reader must advance steadily, never receive a long run on one word.\n' +
     'Every line MUST start with {"u". No commentary, no code fences.';
-  const enWords = (i: number) => units[i][0].replace(/\*+/g, '').split(/\s+/).filter(Boolean);
+  // Tokenization contract shared with the player's splitEn: whitespace split
+  // with asterisks stripped, then a further split AFTER em/en-dashes; the
+  // translation glues words ("Zayd\u2014who") and the highlight can never be
+  // finer than the tokens.
+  const enWords = (i: number) => {
+    const out: string[] = [];
+    for (const rough of units[i][0].replace(/\*+/g, '').split(/\s+/)) {
+      if (!rough) continue;
+      let acc = '';
+      for (const part of rough.split(/([\u2014\u2013])/)) {
+        if (part === '\u2014' || part === '\u2013') { acc += part; out.push(acc); acc = ''; }
+        else acc += part;
+      }
+      if (acc) out.push(acc);
+    }
+    return out;
+  };
   const normAr = (w: string) =>
     (w || '').replace(/[\u064b-\u0652\u0670\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[^\u0600-\u06ff]/g, '');
   const normEn = (w: string) => (w || '').toLowerCase().replace(/[^a-z0-9']/g, '');

@@ -255,29 +255,44 @@ function buildAnchors(u,parts){
   return A;
 }
 function splitEn(el){
-  // Word spans MUST tokenize exactly like the server (raw text split on
-  // whitespace, asterisks stripped) or every cursor/click index shifts after
-  // markup that touches punctuation ("books\u2014*Zad al-Ma'ad*"). So: split the
-  // RAW unit text and render the markdown state inside each token.
+  // Tokenization contract shared with the server map: whitespace split with
+  // asterisks stripped, then a further split AFTER em/en-dashes. Markdown is
+  // encoded as PAIRED control chars first (same regexes the renderer uses),
+  // so a stray unpaired asterisk can never leak italic across the unit.
   var en=el.querySelector('.ab-en');
   if(!en)return null;
   if(!en.dataset.split){
-    var raw=units[+el.dataset.i].raw,toks=raw.split(/\s+/),out=[],b=false,it=false;
+    var raw=units[+el.dataset.i].raw;
+    var enc=raw.replace(/\*\*([^*]+)\*\*/g,'$1').replace(/\*([^*]+)\*/g,'$1').replace(/\*+/g,'');
+    var toks=[],rough=enc.split(/\s+/);
+    for(var r=0;r<rough.length;r++){
+      if(!rough[r])continue;
+      var ps=rough[r].split(/([—–])/),acc='';
+      for(var q=0;q<ps.length;q++){
+        if(ps[q]==='—'||ps[q]==='–'){acc+=ps[q];toks.push(acc);acc=''}
+        else acc+=ps[q];
+      }
+      if(acc)toks.push(acc);
+    }
+    var out=[],b=false,it=false;
     for(var j=0;j<toks.length;j++){
       var tk=toks[j];
-      if(!tk)continue;
-      if(!tk.replace(/\*+/g,'')){ // pure-marker token: toggles state, no word
+      if(!tk.replace(/[-]/g,'')){
         for(var c0=0;c0<tk.length;c0++){
-          if(tk[c0+1]==='*'){b=!b;c0++}else it=!it;
+          var cc=tk[c0];
+          if(cc==='')b=true;else if(cc==='')b=false;
+          else if(cc==='')it=true;else if(cc==='')it=false;
         }
         continue;
       }
       var h=(b?'<b>':'')+(it?'<i>':'');
       for(var c=0;c<tk.length;c++){
-        if(tk[c]==='*'){
-          if(tk[c+1]==='*'){b=!b;h+=b?'<b>':'</b>';c++}
-          else{it=!it;h+=it?'<i>':'</i>'}
-        }else h+=esc(tk[c]);
+        var ch=tk[c];
+        if(ch===''){b=true;h+='<b>'}
+        else if(ch===''){b=false;h+='</b>'}
+        else if(ch===''){it=true;h+='<i>'}
+        else if(ch===''){it=false;h+='</i>'}
+        else h+=esc(ch);
       }
       if(it)h+='</i>';
       if(b)h+='</b>';
