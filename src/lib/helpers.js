@@ -153,7 +153,11 @@ export const SCHOLAR_CARDS = new Set([
 
 export function schCard(slug) {
   if (!slug || !SCHOLAR_CARDS.has(slug)) return null;
-  const base = `/img/${IMG_V}/scholars/cards/${slug}`;
+  // cards-v2: regenerated from the site's uncropped hero photos (the originals
+  // clipped shoulders). New key prefix instead of an IMG_V bump so only the
+  // cards refetch — a fresh path misses both the edge cache and the
+  // version-stripped KV key, no in-place cache to invalidate.
+  const base = `/img/${IMG_V}/scholars/cards-v2/${slug}`;
   return { src: `${base}.avif`, srcset: `${base}-960w.avif 960w, ${base}.avif 1920w` };
 }
 
