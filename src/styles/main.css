@@ -939,7 +939,6 @@ h1,h2,h3{color:#000}a{color:#333}
 .abv .ab-peek{background:rgba(10,14,13,.92);border-color:rgba(255,255,255,.14);color:rgba(232,230,220,.75)}
 .abv .ab-peek b{color:#fff}
 .ab-showar .ab-ar{display:inline}
-.ab-showar .ab-u.on .ab-ar{color:var(--t2)}
 .ab-desc{margin-top:1.3rem;background:var(--s1);border:1px solid var(--bd);border-radius:16px;padding:1rem 1.2rem;color:var(--t2)}
 .ab-desc summary{cursor:pointer;font-weight:600;color:var(--tx)}
 .ab-desc p{margin-top:.6rem;white-space:pre-wrap;font-size:.93rem}
@@ -976,7 +975,6 @@ h1,h2,h3{color:#000}a{color:#333}
 .abv .ab-u.was{color:#fff}
 .abv .ab-u.on .ab-w.on{color:#fff}
 .abv .ab-ar{color:rgba(232,230,220,.35)}
-.abv .ab-showar .ab-u.on .ab-ar{color:rgba(236,234,223,.8)}
 .abv .ab-followbtn{position:absolute;top:auto;left:70%;bottom:17%;transform:translateX(-50%);margin:0;z-index:5}
 .abv-head,.abv-chrow,.abv-chls{display:none} /* phone-only pieces, see below */
 .abv-bar{position:absolute;left:0;right:0;bottom:0;z-index:4;display:flex;align-items:center;gap:.55rem;padding:2.2rem .9rem .55rem;background:linear-gradient(transparent,rgba(0,0,0,.82));opacity:0;transition:opacity .25s}
