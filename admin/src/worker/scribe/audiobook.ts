@@ -388,78 +388,86 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
   const ordered = [...cues].sort((a, b) => a.w[0] - b.w[0]);
   for (const c of ordered) unitArr.push([dedupeQuotes(c.text), c.w[0], c.w[1]]);
 
-  // A degenerate export (one giant segment on defaults-era jobs) must not
-  // collapse the whole book into a single block — fall back to the heuristic.
-  if (nativeSegments && nativeSegments.length < 3 && ordered.length > 8) nativeSegments = null;
-  if (nativeSegments?.length) {
-    // ElevenLabs' own segmentation: a unit belongs to the segment its first
-    // word starts in; consecutive units in the same segment form a paragraph.
-    const segOf = (t: number) => {
-      let lo = 0, hi = nativeSegments.length - 1, ans = 0;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (nativeSegments[mid].start <= t + 0.05) { ans = mid; lo = mid + 1; } else hi = mid - 1;
-      }
-      return ans;
-    };
-    let pStart = 0;
-    for (let i = 0; i < ordered.length; i++) {
-      const next = ordered[i + 1];
-      if (!next || segOf(words[next.w[0]].start) !== segOf(words[ordered[i].w[0]].start)) {
-        paragraphs.push([pStart, i]);
-        pStart = i + 1;
-      }
-    }
-  } else {
-    let pStart = 0;
-    for (let i = 0; i < ordered.length; i++) {
-      const c = ordered[i];
-      const next = ordered[i + 1];
-      const gap = next ? words[next.w[0]].start - words[c.w[1]].end : 99;
-      const sentenceEnd = /[.!?؟”)]$/.test(c.text.trim());
-      const paraLen = i - pStart + 1;
-      if (!next || (gap >= 1.2 && sentenceEnd) || (paraLen >= 14 && sentenceEnd) || paraLen >= 28) {
-        paragraphs.push([pStart, i]);
-        pStart = i + 1;
+  // ---- Diarized speaker turns (computed FIRST: speaker changes are hard
+  // block boundaries for the paragraph builder). Single-word flicker folds
+  // back into its surroundings. ----
+  const spk = words.map((w) => w.speaker || '');
+  for (let k = 1; k < spk.length - 1; k++) {
+    if (spk[k] !== spk[k - 1] && spk[k - 1] === spk[k + 1]) spk[k] = spk[k - 1];
+  }
+  const speakerIds = [...new Set(spk.filter(Boolean))];
+  const turns: [number, number, number][] = [];
+  if (speakerIds.length > 1) {
+    let t0 = 0;
+    for (let k = 1; k <= spk.length; k++) {
+      if (k === spk.length || spk[k] !== spk[t0]) {
+        turns.push([t0, k - 1, speakerIds.indexOf(spk[t0])]);
+        t0 = k;
       }
     }
   }
-  // Presentation hygiene regardless of source: an English paragraph must not
-  // OPEN mid-sentence (lowercase start) — merge such a break into the
-  // previous paragraph. Boundaries themselves stay ElevenLabs' when native.
-  const merged: [number, number][] = [];
+
+  // ---- Paragraph blocks, production reading rhythm ----
+  // Sentence integrity is absolute: a block only breaks after a unit that
+  // ends a sentence and never before a lowercase continuation — except at
+  // speaker changes, which always break. Within that, boundaries prefer
+  // real pauses and ElevenLabs' acoustic segment edges, and blocks aim for
+  // a 14–55 s rhythm with tiny fragments merged away.
+  const turnOfWord = (w: number) => {
+    if (!turns.length) return -1;
+    let lo = 0, hi = turns.length - 1, ans = 0;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (turns[m][0] <= w) { ans = m; lo = m + 1; } else hi = m - 1; }
+    return turns[ans][2];
+  };
+  const edges: number[] = (nativeSegments || []).map((g) => g.end).sort((a, b) => a - b);
+  const nearNative = (t: number) => {
+    let lo = 0, hi = edges.length - 1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (edges[m] < t) lo = m + 1; else hi = m - 1; }
+    const c1 = edges[lo], c0 = edges[lo - 1];
+    return (c1 !== undefined && Math.abs(c1 - t) <= 0.7) || (c0 !== undefined && Math.abs(c0 - t) <= 0.7);
+  };
+  const uStart = (k: number) => words[ordered[k].w[0]].start;
+  const uEnd = (k: number) => words[ordered[k].w[1]].end;
+  const endsSentence = (k: number) => /[.!?؟…"”)'\]]\s*$/.test((unitArr[k][0] || '').trim());
+  const lowerNext = (k: number) =>
+    k + 1 < ordered.length && /^[a-z]/.test((unitArr[k + 1][0] || '').trim().replace(/^[*"'“‘(\[]+/, ''));
+  const gapAfter = (k: number) => (k + 1 < ordered.length ? Math.max(0, uStart(k + 1) - uEnd(k)) : 99);
+
+  let s0 = 0, lastCand = -1, i = 0;
+  while (i < ordered.length) {
+    const last = i === ordered.length - 1;
+    const turnBreak = !last && turnOfWord(ordered[i + 1].w[0]) !== turnOfWord(ordered[i].w[0]);
+    const dur = uEnd(i) - uStart(s0);
+    const cand = endsSentence(i) && !lowerNext(i);
+    const strong = cand && (gapAfter(i) >= 0.55 || nearNative(uEnd(i)));
+    if (last || turnBreak || (dur >= 14 && strong) || (dur >= 30 && cand)) {
+      paragraphs.push([s0, i]); s0 = i + 1; lastCand = -1; i++;
+      continue;
+    }
+    if (dur >= 55 && lastCand >= s0) { // run-on: rewind to the last sentence end
+      paragraphs.push([s0, lastCand]); s0 = lastCand + 1; i = s0; lastCand = -1;
+      continue;
+    }
+    if (dur >= 75) { paragraphs.push([s0, i]); s0 = i + 1; lastCand = -1; i++; continue; }
+    if (cand) lastCand = i;
+    i++;
+  }
+  // Tiny fragments read as noise: merge blocks under ~5 s into the previous
+  // block, but never across a speaker change.
+  const mergedP: [number, number][] = [];
   for (const p of paragraphs) {
-    const first = (unitArr[p[0]]?.[0] || '').trim().replace(/^[*"'“‘(\[]+/, '');
-    if (merged.length && /^[a-z]/.test(first)) merged[merged.length - 1][1] = p[1];
-    else merged.push([p[0], p[1]]);
+    const prev = mergedP[mergedP.length - 1];
+    const dur = uEnd(p[1]) - uStart(p[0]);
+    const sameTurn = prev && turnOfWord(ordered[p[0]].w[0]) === turnOfWord(ordered[prev[1]].w[1]);
+    if (prev && sameTurn && dur < 5) prev[1] = p[1];
+    else mergedP.push([p[0], p[1]]);
   }
-  paragraphs = merged;
+  paragraphs = mergedP;
   let chapters: [number, string][] = [];
   try {
     const ch = JSON.parse(chaptersJson || '[]');
     chapters = (Array.isArray(ch) ? ch : []).map((c: any) => [Math.round(c.start ?? c.t ?? 0), String(c.title || '')]);
   } catch {}
-
-  // Diarized speaker turns as word-index spans [w0, w1, speakerIdx]. Only
-  // emitted when the recording really has multiple voices — single-speaker
-  // lectures keep the plain reading layout. Single-word flicker (a lone word
-  // attributed to another speaker between two same-speaker runs) is folded
-  // back into its surroundings.
-  const spk = words.map((w) => w.speaker || '');
-  for (let i = 1; i < spk.length - 1; i++) {
-    if (spk[i] !== spk[i - 1] && spk[i - 1] === spk[i + 1]) spk[i] = spk[i - 1];
-  }
-  const speakerIds = [...new Set(spk.filter(Boolean))];
-  let turns: [number, number, number][] = [];
-  if (speakerIds.length > 1) {
-    let t0 = 0;
-    for (let i = 1; i <= spk.length; i++) {
-      if (i === spk.length || spk[i] !== spk[t0]) {
-        turns.push([t0, i - 1, speakerIds.indexOf(spk[t0])]);
-        t0 = i;
-      }
-    }
-  }
 
   return {
     v: 1,
@@ -471,43 +479,54 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
   };
 }
 
-/** LLM display labels for diarized voices, judged from what each voice
- * actually says. Real names only when evident from the words themselves;
- * otherwise honest role labels. Falls back to "Speaker N". */
+/** LLM display labels for diarized voices, judged from each voice's own
+ * (translated) words. Real names only when evident; otherwise honest role
+ * labels. Generic "Speaker N" answers are rejected and retried once on the
+ * strong model; the caller persists accepted names forever. */
 export async function nameSpeakers(
   env: ScribeEnv,
-  wordTexts: string[],
-  turns: [number, number, number][],
+  doc: any,
   context: { title?: string | null; channel?: string | null }
 ): Promise<string[]> {
+  const turns: [number, number, number][] = doc.turns || [];
   const n = 1 + Math.max(...turns.map((t) => t[2]));
   const fallback = Array.from({ length: n }, (_, i) => `Speaker ${i + 1}`);
-  try {
-    const samples: string[][] = Array.from({ length: n }, () => []);
-    for (const [w0, w1, s] of turns) {
-      if (samples[s].join(' ').length > 900) continue;
-      samples[s].push(wordTexts.slice(w0, Math.min(w1 + 1, w0 + 60)).join(' '));
-    }
-    const body = samples
-      .map((sa, i) => `VOICE ${i}:\n${sa.slice(0, 6).map((t) => `- ${t}`).join('\n')}`)
-      .join('\n\n');
-    const raw = await llmChat(env, [
-      {
-        role: 'system',
-        content:
-          'You label diarized voices in an Islamic audio recording. For each voice, give a short English display label. Use a real name or title ONLY if it is evident from the quoted words (someone introduces themselves or is addressed by name); otherwise use an honest role label like "Sheikh (main speaker)", "Questioner", "Student", "Host", "Translator". Never invent names. Reply with ONLY a JSON object: {"names": ["label for voice 0", ...]} — one label per voice, in order.',
-      },
-      {
-        role: 'user',
-        content: `Recording: ${context.title || 'untitled'}${context.channel ? ` — ${context.channel}` : ''}\n\n${body}`,
-      },
-    ], 400);
-    const m = raw.match(/\{[\s\S]*\}/);
-    const names = m ? JSON.parse(m[0]).names : null;
-    if (Array.isArray(names) && names.length === n && names.every((x: any) => typeof x === 'string' && x.trim())) {
-      return names.map((x: string) => x.trim().slice(0, 60));
-    }
-  } catch {}
+  const turnOf = (w: number) => {
+    let lo = 0, hi = turns.length - 1, ans = 0;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (turns[m][0] <= w) { ans = m; lo = m + 1; } else hi = m - 1; }
+    return turns[ans][2];
+  };
+  const samples: string[][] = Array.from({ length: n }, () => []);
+  for (const u of doc.units as [string, number, number][]) {
+    const sIdx = turnOf(u[1]);
+    if (samples[sIdx].join(' ').length < 1400) samples[sIdx].push(u[0].replace(/\*+/g, ''));
+  }
+  const body = samples
+    .map((sa, i) => `VOICE ${i} says:\n${sa.slice(0, 8).map((t) => `- ${t}`).join('\n')}`)
+    .join('\n\n');
+  const messages = [
+    {
+      role: 'system',
+      content:
+        'You label the voices in an Islamic audio recording for its transcript. For each voice give a short English display label based on WHAT IT SAYS: use a real name or title ONLY if the quoted words make it evident (introduced or addressed by name); otherwise an honest descriptive role such as "Sheikh (main speaker)", "Reciter", "Questioner", "Student", "Host", "Announcer". NEVER answer with generic labels like "Speaker 1", "Voice 2", "Person A", or bare numbers — a role description is always possible. Reply with ONLY a JSON object: {"names": ["label for voice 0", ...]} — one label per voice, in order.',
+    },
+    {
+      role: 'user',
+      content: `Recording: ${context.title || 'untitled'}${context.channel ? ` — ${context.channel}` : ''}\n\n${body}`,
+    },
+  ];
+  const generic = (x: string) => /^\s*(speaker|voice|person)\b/i.test(x) || /^\s*\d+\s*$/.test(x);
+  for (const model of [undefined, STRONG_MODEL]) {
+    try {
+      const raw = await llmChat(env, messages, 400, model);
+      const m = raw.match(/\{[\s\S]*\}/);
+      const names = m ? JSON.parse(m[0]).names : null;
+      if (Array.isArray(names) && names.length === n
+          && names.every((x: any) => typeof x === 'string' && x.trim() && !generic(x))) {
+        return names.map((x: string) => x.trim().slice(0, 60));
+      }
+    } catch {}
+  }
   return fallback;
 }
 

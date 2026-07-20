@@ -318,8 +318,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             const native = elevenFormats(data);
             const doc: any = buildTranscript(data.words, cues as any, row?.chapters, native.segments);
             if (doc.turns) {
-              doc.speakers = await nameSpeakers(env, doc.words.map((w: any) => w[0]), doc.turns,
-                { title: row?.title, channel: row?.channel });
+              // Name once, keep forever: reuse existing non-generic labels
+              let existing: string[] | null = null;
+              try {
+                const prev = await env.MEDIA_BUCKET.get(`scribe/${jobId}/transcript.json`);
+                const pj: any = prev ? await prev.json() : null;
+                if (Array.isArray(pj?.speakers) && !pj.speakers.every((x: string) => /^Speaker \d+$/.test(x))) existing = pj.speakers;
+              } catch {}
+              doc.speakers = existing || await nameSpeakers(env, doc, { title: row?.title, channel: row?.channel });
             }
             await env.MEDIA_BUCKET.put(`scribe/${jobId}/transcript.json`, JSON.stringify(doc), {
               httpMetadata: { contentType: 'application/json' },

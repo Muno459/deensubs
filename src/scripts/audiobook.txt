@@ -52,37 +52,33 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='
     else if(/^\*\*.*\*\*$/.test(raw.trim()))cls+=' ab-strong';
     return '<span class="'+cls+'" data-i="'+i+'"><span class="ab-en">'+md(raw)+'</span></span> ';
   }
-  // Unified block layout: every recording reads as timestamped, ruled blocks.
-  // Multi-voice adds the avatar + speaker label; single voice keeps just the
-  // time gutter. Long turns sub-break into paragraphs inside the block.
+  // Production block layout: every paragraph is a timestamped, ruled block
+  // (click the time to jump). The speaker header (avatar + label) appears
+  // only when the voice CHANGES — a long single-voice stretch reads as many
+  // clean blocks, never one giant wall.
   var paras=(doc.paragraphs&&doc.paragraphs.length?doc.paragraphs:[[0,units.length-1]]);
-  var paraStart={};paras.forEach(function(p){paraStart[p[0]]=1});
-  var blocks=[];
-  if(doc.turns&&doc.turns.length){
-    doc.turns.forEach(function(t){blocks.push({w0:t[0],w1:t[1],s:t[2]})});
-  }else{
-    paras.forEach(function(p){
-      if(units[p[0]]&&units[p[1]])blocks.push({w0:units[p[0]].w0,w1:units[p[1]].w1,s:null});
-    });
-  }
-  var html='';
-  blocks.forEach(function(b){
-    var at=words[b.w0]?words[b.w0][1]:0;
-    var name=b.s!=null?((doc.speakers&&doc.speakers[b.s])||('Speaker '+(b.s+1))):null;
-    html+='<div class="ab-turn'+(name?'':' solo')+'"><div class="ab-tside">';
-    if(name){
-      var hue=Math.round(b.s*137.508)%360;
+  var turnSpk=function(w){
+    var ts=doc.turns;if(!ts||!ts.length)return -1;
+    var lo=0,hi=ts.length-1,ans=0;
+    while(lo<=hi){var m=(lo+hi)>>1;if(ts[m][0]<=w){ans=m;lo=m+1}else hi=m-1}
+    return ts[ans][2];
+  };
+  var html='',prevS=null;
+  paras.forEach(function(p){
+    if(!units[p[0]]||!units[p[1]])return;
+    var w0=units[p[0]].w0,at=words[w0]?words[w0][1]:0;
+    var sIdx=turnSpk(w0);
+    var showHead=doc.turns&&doc.turns.length&&sIdx!==prevS;
+    prevS=sIdx;
+    html+='<div class="ab-turn'+(showHead?'':' solo')+'"><div class="ab-tside">';
+    if(showHead){
+      var name=(doc.speakers&&doc.speakers[sIdx])||('Speaker '+(sIdx+1));
+      var hue=Math.round(sIdx*137.508)%360;
       html+='<span class="ab-av" style="--h:'+hue+'"></span><span class="ab-spk">'+esc(name)+'</span>';
     }
-    html+='<span class="ab-tt" data-t="'+at+'" title="Jump here">'+fmt(at)+'</span></div><div class="ab-tbody">';
-    var open=false;
-    for(var i=0;i<units.length;i++){
-      if(units[i].w0<b.w0||units[i].w0>b.w1)continue;
-      if(!open||paraStart[i]){if(open)html+='</p>';html+='<p class="ab-p">';open=true;}
-      html+=uSpan(i);
-    }
-    html+=open?'</p>':'';
-    html+='</div></div>';
+    html+='<span class="ab-tt" data-t="'+at+'" title="Jump here">'+fmt(at)+'</span></div><div class="ab-tbody"><p class="ab-p">';
+    for(var i=p[0];i<=p[1]&&i<units.length;i++)html+=uSpan(i);
+    html+='</p></div></div>';
   });
   tr.innerHTML=html;
   unitEls=[];tr.querySelectorAll('.ab-u').forEach(function(el){unitEls[+el.dataset.i]=el});

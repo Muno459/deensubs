@@ -942,7 +942,7 @@ app.post('/api/companion/enhance/complete', async (c) => {
   ).bind(job_id, key).first();
   if (vid) {
     const orig = origRow?.source_key && !/-enhanced\./.test(origRow.source_key) ? origRow.source_key : null;
-    await c.env.DB.prepare('UPDATE videos SET video_key = ?, speech_enhanced = 1, orig_key = COALESCE(orig_key, ?) WHERE id = ?')
+    await c.env.DB.prepare('UPDATE videos SET video_key = ?, speech_enhanced = 1, orig_key = COALESCE(orig_key, ?), media_v = COALESCE(media_v, 0) + 1 WHERE id = ?')
       .bind(key, orig, vid.id).run();
     afterVideoSave(c, {});
   }
@@ -1402,8 +1402,13 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
   }
   const doc: any = buildTranscript(asr.words || [], cues, job.chapters, native.segments);
   if (doc.turns) {
-    doc.speakers = await nameSpeakers(c.env as any, doc.words.map((w: any) => w[0]), doc.turns,
-      { title: job.title, channel: job.channel });
+    let existing: string[] | null = null;
+    try {
+      const prev = await c.env.MEDIA_BUCKET.get(`scribe/${jobId}/transcript.json`);
+      const pj: any = prev ? await prev.json() : null;
+      if (Array.isArray(pj?.speakers) && !pj.speakers.every((x: string) => /^Speaker \d+$/.test(x))) existing = pj.speakers;
+    } catch {}
+    doc.speakers = existing || await nameSpeakers(c.env as any, doc, { title: job.title, channel: job.channel });
   }
   let lang = 'en';
   try { lang = JSON.parse(job.target_langs || '[]')[0] || 'en'; } catch {}
@@ -1428,7 +1433,7 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
     if (jrow?.speech_enhanced && /-enhanced\.m4a$/.test(jrow.source_key || '') && vid.video_key !== jrow.source_key) {
       const listed = await c.env.MEDIA_BUCKET.list({ prefix: `scribe/${jobId}/source.` });
       const orig = listed.objects.map((o) => o.key).find((k) => !/-enhanced\./.test(k)) || null;
-      await c.env.DB.prepare('UPDATE videos SET video_key = ?, speech_enhanced = 1, orig_key = ? WHERE id = ?')
+      await c.env.DB.prepare('UPDATE videos SET video_key = ?, speech_enhanced = 1, orig_key = ?, media_v = COALESCE(media_v, 0) + 1 WHERE id = ?')
         .bind(jrow.source_key, orig, vid.id).run();
       afterVideoSave(c, {});
     }
