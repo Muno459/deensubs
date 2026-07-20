@@ -1114,6 +1114,44 @@ app.post('/api/scribe/4k/flag', async (c) => {
 // ElevenLabs stores every Scribe transcription — these endpoints recover
 // transcripts that were paid for but lost to transport errors (e.g. 524s),
 // so a job never has to be transcribed twice.
+// Temporary diagnostics: what does ElevenLabs actually return for
+// additional_formats (create-sync) and for a stored transcript (get)?
+app.post('/api/scribe/stt-format-test', async (c) => {
+  const { url, formats, model, webhook } = await c.req.json();
+  const form = new FormData();
+  form.append('model_id', model || 'scribe_v2');
+  form.append('cloud_storage_url', url);
+  form.append('diarize', 'true');
+  form.append('additional_formats', JSON.stringify(formats || [{ format: 'txt' }, { format: 'segmented_json' }]));
+  if (webhook) form.append('webhook', 'true');
+  const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+    method: 'POST', headers: { 'xi-api-key': c.env.ELEVENLABS_API_KEY! }, body: form,
+  });
+  const body: any = await res.json().catch(async () => ({ raw: await res.text() }));
+  const t = body.words ? body : body.transcription || body;
+  return c.json({
+    status: res.status,
+    keys: Object.keys(body),
+    formats: (t.additional_formats || []).map((f: any) => ({
+      requested_format: f.requested_format, is_base64_encoded: f.is_base64_encoded,
+      content_len: (f.content || '').length, head: (f.content || '').slice(0, 120),
+    })),
+    error: body.detail || body.error || null,
+  });
+});
+
+app.get('/api/scribe/stt-get-raw/:tid', async (c) => {
+  const res = await fetch(`https://api.elevenlabs.io/v1/speech-to-text/transcripts/${c.req.param('tid')}`, {
+    headers: { 'xi-api-key': c.env.ELEVENLABS_API_KEY! },
+  });
+  const body: any = await res.json().catch(() => ({}));
+  const t = body.words ? body : body.transcription || body;
+  return c.json({
+    status: res.status, keys: Object.keys(body),
+    formats: (t.additional_formats || []).map((f: any) => ({ requested_format: f.requested_format, content_len: (f.content || '').length })),
+  });
+});
+
 app.get('/api/scribe/stt-transcripts', async (c) => {
   const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text/transcripts?page_size=30', {
     headers: { 'xi-api-key': c.env.ELEVENLABS_API_KEY! },
@@ -1286,8 +1324,28 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
   if (!asrObj || !cuesObj) return c.json({ error: 'asr.json or cues.json missing' }, 404);
   const asr: any = await asrObj.json();
   const cues: any = await cuesObj.json();
-  const { buildTranscript, buildSpeakerTxt, nameSpeakers } = await import('./scribe/audiobook');
-  const doc: any = buildTranscript(asr.words || [], cues, job.chapters);
+  const { buildTranscript, buildSpeakerTxt, nameSpeakers, elevenFormats } = await import('./scribe/audiobook');
+  let native = elevenFormats(asr);
+  // Legacy jobs never requested exports at create time — ask ElevenLabs'
+  // stored transcript once and persist whatever it can still give us.
+  if (!native.segments && asr.transcription_id) {
+    const res = await fetch(`https://api.elevenlabs.io/v1/speech-to-text/transcripts/${asr.transcription_id}`, {
+      headers: { 'xi-api-key': c.env.ELEVENLABS_API_KEY! },
+    }).catch(() => null);
+    if (res?.ok) {
+      const remote: any = await res.json();
+      const t = remote.words ? remote : remote.transcription || remote;
+      const retro = elevenFormats(t);
+      if (retro.segments || retro.txt) {
+        native = retro;
+        asr.additional_formats = t.additional_formats;
+        await c.env.MEDIA_BUCKET.put(`scribe/${jobId}/asr.json`, JSON.stringify(asr), {
+          httpMetadata: { contentType: 'application/json' },
+        });
+      }
+    }
+  }
+  const doc: any = buildTranscript(asr.words || [], cues, job.chapters, native.segments);
   if (doc.turns) {
     doc.speakers = await nameSpeakers(c.env as any, doc.words.map((w: any) => w[0]), doc.turns,
       { title: job.title, channel: job.channel });
@@ -1299,16 +1357,18 @@ app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
     c.env.MEDIA_BUCKET.put(key, body, { httpMetadata: { contentType: 'application/json' } });
   const putTxt = (key: string, text: string) =>
     c.env.MEDIA_BUCKET.put(key, text, { httpMetadata: { contentType: 'text/plain; charset=utf-8' } });
+  const sourceTxt = native.txt || buildSpeakerTxt(doc, 'source');
   await putJson(`scribe/${jobId}/transcript.json`);
-  await putTxt(`scribe/${jobId}/transcript-source.txt`, buildSpeakerTxt(doc, 'source'));
+  if (native.txt) await putTxt(`scribe/${jobId}/elevenlabs.txt`, native.txt);
+  await putTxt(`scribe/${jobId}/transcript-source.txt`, sourceTxt);
   await putTxt(`scribe/${jobId}/transcript-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
   const vid: any = await c.env.DB.prepare("SELECT slug FROM videos WHERE video_key LIKE ?").bind(`scribe/${jobId}/%`).first();
   if (vid?.slug) {
     await putJson(`transcripts/${vid.slug}.json`);
-    await putTxt(`transcripts/${vid.slug}-source.txt`, buildSpeakerTxt(doc, 'source'));
+    await putTxt(`transcripts/${vid.slug}-source.txt`, sourceTxt);
     await putTxt(`transcripts/${vid.slug}-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
   }
-  return c.json({ ok: true, turns: doc.turns?.length || 0, speakers: doc.speakers || null, slug: vid?.slug || null });
+  return c.json({ ok: true, turns: doc.turns?.length || 0, speakers: doc.speakers || null, native: !!native.segments, native_txt: !!native.txt, slug: vid?.slug || null });
 });
 
 app.post('/api/scribe/:id/publish', async (c) => {

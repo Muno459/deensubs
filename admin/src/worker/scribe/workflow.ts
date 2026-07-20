@@ -292,8 +292,13 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
 
         // Karaoke transcript document (audiobook, primary language): one
         // shared timed word array + English units as index spans into it.
-        if (isAudiobook && lang === primary && !tr.cached) {
+        // Runs even when translate came from cache — a resume after a crash
+        // between translate and transcript must still produce the document.
+        if (isAudiobook && lang === primary) {
           await step.do('transcript', { retries: { limit: 2, delay: '30 seconds' }, timeout: '10 minutes' }, async () => {
+            if (tr.cached && (await env.MEDIA_BUCKET.head(`scribe/${jobId}/transcript.json`))) {
+              return { cached: true };
+            }
             const [cuesObj, data] = await Promise.all([
               env.MEDIA_BUCKET.get(cuesKey),
               loadAsr(env, asr.asrKey),
@@ -301,23 +306,25 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             if (!cuesObj) throw new Error('cues missing for transcript');
             const cues: any[] = await cuesObj.json();
             const row = await env.DB.prepare('SELECT chapters, title, channel FROM scribe_jobs WHERE id = ?').bind(jobId).first<any>();
-            const doc: any = buildTranscript(data.words, cues as any, row?.chapters);
+            const { nameSpeakers, buildSpeakerTxt, elevenFormats } = await import('./audiobook');
+            // ElevenLabs' native exports are the structural truth: their raw
+            // txt is stored verbatim and their source-language segmentation
+            // drives the paragraph blocks
+            const native = elevenFormats(data);
+            const doc: any = buildTranscript(data.words, cues as any, row?.chapters, native.segments);
             if (doc.turns) {
-              const { nameSpeakers } = await import('./audiobook');
               doc.speakers = await nameSpeakers(env, doc.words.map((w: any) => w[0]), doc.turns,
                 { title: row?.title, channel: row?.channel });
             }
             await env.MEDIA_BUCKET.put(`scribe/${jobId}/transcript.json`, JSON.stringify(doc), {
               httpMetadata: { contentType: 'application/json' },
             });
-            // ElevenLabs-style speaker txt exports: the source recording and
-            // the translation, both grouped by diarized turns
-            const { buildSpeakerTxt } = await import('./audiobook');
             const put = (key: string, body: string) =>
               env.MEDIA_BUCKET.put(key, body, { httpMetadata: { contentType: 'text/plain; charset=utf-8' } });
-            await put(`scribe/${jobId}/transcript-source.txt`, buildSpeakerTxt(doc, 'source'));
+            if (native.txt) await put(`scribe/${jobId}/elevenlabs.txt`, native.txt);
+            await put(`scribe/${jobId}/transcript-source.txt`, native.txt || buildSpeakerTxt(doc, 'source'));
             await put(`scribe/${jobId}/transcript-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
-            return { units: doc.units.length, words: doc.words.length, speakers: doc.speakers || null };
+            return { units: doc.units.length, words: doc.words.length, speakers: doc.speakers || null, native: !!native.segments };
           });
         }
 

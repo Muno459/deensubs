@@ -26,7 +26,7 @@ export function sttResultKey(requestId: string): string {
   return `scribe/stt-results/${requestId}.json`;
 }
 
-async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, attempts = 5): Promise<any> {
+async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, attempts = 5, withFormats = false): Promise<any> {
   // Async mode when the webhook secret is configured: the request returns
   // immediately with a transcription_id, and the result arrives EITHER via
   // the /hooks/elevenlabs webhook OR by polling their GET transcript
@@ -40,7 +40,7 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, a
     if (pending) {
       const { transcription_id } = (await pending.json()) as any;
       if (transcription_id) {
-        const result = await awaitResult(env, transcription_id);
+        const result = await awaitResult(env, transcription_id, withFormats);
         if (result) {
           env.MEDIA_BUCKET.delete(pendingKey).catch(() => {});
           return result;
@@ -55,9 +55,18 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, a
   for (let i = 0; i < attempts; i++) {
     const form = new FormData();
     form.append('model_id', 'scribe_v2');
-    form.append('cloud_storage_url', sourceUrl);
+    form.append('source_url', sourceUrl); // cloud_storage_url is deprecated
     form.append('diarize', 'true');
     form.append('tag_audio_events', 'true');
+    if (withFormats) {
+      // ElevenLabs' own exports ride along with the transcript: their native
+      // (source-language, silence-based) segmentation is the structural truth
+      // for audiobooks — we store it verbatim instead of re-deriving.
+      form.append('additional_formats', JSON.stringify([
+        { format: 'txt', include_speakers: true, include_timestamps: true },
+        { format: 'segmented_json' },
+      ]));
+    }
     if (useWebhook) form.append('webhook', 'true');
     const res = await fetch(STT_URL, {
       method: 'POST',
@@ -74,7 +83,7 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, a
           httpMetadata: { contentType: 'application/json' },
         });
       }
-      const result = await awaitResult(env, transcriptionId);
+      const result = await awaitResult(env, transcriptionId, withFormats);
       if (result) {
         if (pendingKey) env.MEDIA_BUCKET.delete(pendingKey).catch(() => {});
         return result;
@@ -94,7 +103,12 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, a
 /** Wait for an async transcription: the webhook drop in R2 is the fast path,
  * and their GET transcript endpoint is polled as the reliable path (works
  * even if webhook delivery is broken). Up to 40 minutes. */
-async function awaitResult(env: ScribeEnv, transcriptionId: string): Promise<any | null> {
+async function awaitResult(env: ScribeEnv, transcriptionId: string, preferFormats = false): Promise<any | null> {
+  // The GET endpoint strips additional_formats — only the webhook payload
+  // carries them. When formats were requested, a complete GET result waits a
+  // grace window for the webhook drop before being accepted as-is.
+  let stripped: any = null;
+  let grace = 9; // ~90 s
   for (let i = 0; i < 240; i++) {
     await new Promise((r) => setTimeout(r, 10_000));
     const obj = await env.MEDIA_BUCKET.get(sttResultKey(transcriptionId));
@@ -103,6 +117,7 @@ async function awaitResult(env: ScribeEnv, transcriptionId: string): Promise<any
       env.MEDIA_BUCKET.delete(sttResultKey(transcriptionId)).catch(() => {});
       return payload.words ? payload : payload.transcription || payload.data?.transcription || payload;
     }
+    if (stripped && --grace <= 0) return stripped;
     if (i % 3 === 2) { // every ~30s, ask ElevenLabs directly
       const res = await fetch(`${STT_URL}/transcripts/${transcriptionId}`, {
         headers: { 'xi-api-key': env.ELEVENLABS_API_KEY! },
@@ -110,11 +125,14 @@ async function awaitResult(env: ScribeEnv, transcriptionId: string): Promise<any
       if (res?.ok) {
         const data: any = await res.json();
         const t = data.words ? data : data.transcription || data;
-        if (t?.words?.length) return t;
+        if (t?.words?.length) {
+          if (!preferFormats || t.additional_formats?.length) return t;
+          stripped = t;
+        }
       }
     }
   }
-  return null;
+  return stripped;
 }
 
 /** Run tasks with a bounded worker pool (order-preserving results). */
@@ -226,7 +244,7 @@ export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, d
   const data: any = existing
     ? await existing.json()
     : webhookMode || durationSec <= CHUNK_THRESHOLD_SEC
-      ? await sttCall(env, `${CDN_BASE}/${sourceKey}`, `scribe/${jobId}/stt-req-full.json`)
+      ? await sttCall(env, `${CDN_BASE}/${sourceKey}`, `scribe/${jobId}/stt-req-full.json`, 5, true)
       : await chunkedAsr(env, jobId, sourceKey);
 
   const words: Word[] = data.words || [];

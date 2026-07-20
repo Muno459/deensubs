@@ -325,9 +325,40 @@ Rules: flowing book-quality prose with full punctuation, keep honorifics (Allah 
   return { cues: out, fixes };
 }
 
+/** ElevenLabs' native exports riding on the transcript response: the raw txt
+ * (verbatim, their formatting) and their source-language segmentation. */
+export function elevenFormats(asr: any): { txt?: string; segments?: { start: number; end: number }[] } {
+  const out: { txt?: string; segments?: { start: number; end: number }[] } = {};
+  for (const f of asr?.additional_formats || []) {
+    let content: string | undefined = f?.content;
+    if (content && f?.is_base64_encoded) {
+      try {
+        content = new TextDecoder().decode(Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0)));
+      } catch { content = undefined; }
+    }
+    if (!content) continue;
+    if (f.requested_format === 'txt') out.txt = content;
+    if (f.requested_format === 'segmented_json') {
+      try {
+        const j = JSON.parse(content);
+        const raw = Array.isArray(j) ? j : j.segments || j.transcription_segments || [];
+        const segs = raw
+          .map((s: any) => ({ start: Number(s.start ?? s.start_time ?? s.start_s), end: Number(s.end ?? s.end_time ?? s.end_s) }))
+          .filter((s: any) => isFinite(s.start) && isFinite(s.end) && s.end > s.start);
+        if (segs.length) out.segments = segs;
+      } catch {}
+    }
+  }
+  return out;
+}
+
 /** The karaoke document: one shared timed word array, English units as index
- * spans into it, paragraph + chapter grouping. Compact array form. */
-export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson?: string | null): any {
+ * spans into it, paragraph + chapter grouping. Compact array form. When
+ * ElevenLabs' native segments are provided they ARE the paragraph structure
+ * (source-language, silence-based); the punctuation heuristic only serves
+ * legacy jobs transcribed before exports were requested. */
+export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson?: string | null,
+  nativeSegments?: { start: number; end: number }[] | null): any {
   const words = cleanWords(allWords);
   const r2 = (n: number) => Math.round(n * 100) / 100;
   // LLM quote hygiene: collapse runs of double-quote glyphs (a citation
@@ -335,21 +366,53 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
   const dedupeQuotes = (s: string) =>
     s.replace(/["“”]{2,}/g, (m) => (m.includes('”') ? '”' : m.includes('“') ? '“' : '"'));
   const unitArr: [string, number, number][] = [];
-  const paragraphs: [number, number][] = [];
+  let paragraphs: [number, number][] = [];
   const ordered = [...cues].sort((a, b) => a.w[0] - b.w[0]);
-  let pStart = 0;
-  for (let i = 0; i < ordered.length; i++) {
-    const c = ordered[i];
-    unitArr.push([dedupeQuotes(c.text), c.w[0], c.w[1]]);
-    const next = ordered[i + 1];
-    const gap = next ? words[next.w[0]].start - words[c.w[1]].end : 99;
-    const sentenceEnd = /[.!?؟”)]$/.test(c.text.trim());
-    const paraLen = i - pStart + 1;
-    if (!next || (gap >= 1.2 && sentenceEnd) || paraLen >= 14) {
-      paragraphs.push([pStart, i]);
-      pStart = i + 1;
+  for (const c of ordered) unitArr.push([dedupeQuotes(c.text), c.w[0], c.w[1]]);
+
+  if (nativeSegments?.length) {
+    // ElevenLabs' own segmentation: a unit belongs to the segment its first
+    // word starts in; consecutive units in the same segment form a paragraph.
+    const segOf = (t: number) => {
+      let lo = 0, hi = nativeSegments.length - 1, ans = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (nativeSegments[mid].start <= t + 0.05) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      return ans;
+    };
+    let pStart = 0;
+    for (let i = 0; i < ordered.length; i++) {
+      const next = ordered[i + 1];
+      if (!next || segOf(words[next.w[0]].start) !== segOf(words[ordered[i].w[0]].start)) {
+        paragraphs.push([pStart, i]);
+        pStart = i + 1;
+      }
+    }
+  } else {
+    let pStart = 0;
+    for (let i = 0; i < ordered.length; i++) {
+      const c = ordered[i];
+      const next = ordered[i + 1];
+      const gap = next ? words[next.w[0]].start - words[c.w[1]].end : 99;
+      const sentenceEnd = /[.!?؟”)]$/.test(c.text.trim());
+      const paraLen = i - pStart + 1;
+      if (!next || (gap >= 1.2 && sentenceEnd) || (paraLen >= 14 && sentenceEnd) || paraLen >= 28) {
+        paragraphs.push([pStart, i]);
+        pStart = i + 1;
+      }
     }
   }
+  // Presentation hygiene regardless of source: an English paragraph must not
+  // OPEN mid-sentence (lowercase start) — merge such a break into the
+  // previous paragraph. Boundaries themselves stay ElevenLabs' when native.
+  const merged: [number, number][] = [];
+  for (const p of paragraphs) {
+    const first = (unitArr[p[0]]?.[0] || '').trim().replace(/^[*"'“‘(\[]+/, '');
+    if (merged.length && /^[a-z]/.test(first)) merged[merged.length - 1][1] = p[1];
+    else merged.push([p[0], p[1]]);
+  }
+  paragraphs = merged;
   let chapters: [number, string][] = [];
   try {
     const ch = JSON.parse(chaptersJson || '[]');
