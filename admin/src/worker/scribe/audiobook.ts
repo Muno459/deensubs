@@ -400,6 +400,24 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
   nativeSegments?: { start: number; end: number }[] | null): any {
   const words = cleanWords(allWords);
   const r2 = (n: number) => Math.round(n * 100) / 100;
+  // Character-timestamp warp: on long words (madd elongations, stretched
+  // syllables) the sub-word fill should follow articulation, not linear
+  // time. Stored per word as [q25,q50,q75] — percent of the duration at
+  // which a quarter/half/three-quarters of the letters are complete — and
+  // only where that differs meaningfully from linear.
+  const curveOf = (w: CleanWord): [number, number, number] | null => {
+    const ch = w.chars;
+    const dur = w.end - w.start;
+    if (!ch || ch.length < 4 || dur < 0.5) return null;
+    const q = (f: number) => {
+      const idx = Math.min(ch.length - 1, Math.max(0, Math.ceil(f * ch.length) - 1));
+      return Math.round(Math.max(0, Math.min(1, (ch[idx].end - w.start) / dur)) * 100);
+    };
+    let a = q(0.25), b = q(0.5), c = q(0.75);
+    b = Math.max(a, b); c = Math.max(b, c);
+    if (Math.abs(a - 25) < 8 && Math.abs(b - 50) < 8 && Math.abs(c - 75) < 8) return null;
+    return [a, b, c];
+  };
   // LLM quote hygiene: collapse runs of double-quote glyphs (a citation
   // nested directly inside a spoken quotation) into one, preferring curly
   const dedupeQuotes = (s: string) =>
@@ -532,7 +550,10 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
 
   return {
     v: 1,
-    words: words.map((w) => [w.text, r2(w.start), r2(w.end)]),
+    words: words.map((w) => {
+      const cv = curveOf(w);
+      return cv ? [w.text, r2(w.start), r2(w.end), cv] : [w.text, r2(w.start), r2(w.end)];
+    }),
     units: unitArr,
     paragraphs,
     chapters,

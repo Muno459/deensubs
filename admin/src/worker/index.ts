@@ -1173,11 +1173,12 @@ app.post('/api/scribe/llm-test', async (c) => {
 });
 
 app.post('/api/scribe/stt-format-test', async (c) => {
-  const { url, formats, model, webhook } = await c.req.json();
+  const { url, formats, model, webhook, granularity } = await c.req.json();
   const form = new FormData();
   form.append('model_id', model || 'scribe_v2');
   form.append('cloud_storage_url', url);
   form.append('diarize', 'true');
+  if (granularity) form.append('timestamps_granularity', granularity);
   form.append('additional_formats', JSON.stringify(formats || [{ format: 'txt' }, { format: 'segmented_json' }]));
   if (webhook) form.append('webhook', 'true');
   const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
@@ -1192,6 +1193,7 @@ app.post('/api/scribe/stt-format-test', async (c) => {
       requested_format: f.requested_format, is_base64_encoded: f.is_base64_encoded,
       content_len: (f.content || '').length, head: (f.content || '').slice(0, 120),
     })),
+    word_sample: (t.words || []).filter((w: any) => (w.type || 'word') === 'word').slice(0, 2),
     error: body.detail || body.error || null,
   });
 });

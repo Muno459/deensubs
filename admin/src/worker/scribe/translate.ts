@@ -9,7 +9,7 @@
 import type { Cue, ScribeEnv, Word } from './types';
 import { findQuranQuotes, citeQuote, type QuranQuote } from './quran';
 
-export type CleanWord = { i: number; text: string; start: number; end: number; speaker: string };
+export type CleanWord = { i: number; text: string; start: number; end: number; speaker: string; chars?: { start: number; end: number }[] };
 
 const WINDOW_SIZE = 180; // words per LLM call — bigger windows = fewer calls; hole-filling catches drops
 const WINDOW_LOOKAHEAD = 30; // stretch to a natural boundary
@@ -22,7 +22,9 @@ export function cleanWords(words: Word[]): CleanWord[] {
     if (type !== 'word') continue;
     const text = (w.text || '').trim();
     if (!text) continue;
-    out.push({ i: out.length, text, start: w.start, end: w.end, speaker: w.speaker_id || '' });
+    const ch = (w as any).characters;
+    out.push({ i: out.length, text, start: w.start, end: w.end, speaker: w.speaker_id || '',
+      chars: Array.isArray(ch) && ch.length ? ch.map((x: any) => ({ start: x.start, end: x.end })) : undefined });
   }
   return out;
 }

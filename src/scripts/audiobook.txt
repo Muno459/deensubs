@@ -312,6 +312,15 @@ function markRead(target){
   else for(k=target+1;k<=wasTo;k++)if(unitEls[k])unitEls[k].classList.remove('was');
   wasTo=target;
 }
+/* per-letter articulation curve: long uneven words (madd elongations)
+   carry [q25,q50,q75] percent marks — remap linear time to letters-done */
+function warp(c,f){
+  var xs=[0,c[0]/100,c[1]/100,c[2]/100,1],ys=[0,.25,.5,.75,1];
+  for(var i=0;i<4;i++){
+    if(f<=xs[i+1]){var dx=xs[i+1]-xs[i];return ys[i]+(dx>0?(f-xs[i])/dx:1)*(ys[i+1]-ys[i])}
+  }
+  return 1;
+}
 function sweep(u,t){
   // Arabic-word-anchored progress, quantized to ENGLISH word boundaries.
   // Transliteration anchors pin names; interpolation runs between them.
@@ -328,6 +337,7 @@ function sweep(u,t){
     wEnd=Math.max(wEnd,Math.min(units[active+1].a,wEnd+2.5));
   }
   var frac=w?Math.max(0,Math.min(1,(t-w[1])/Math.max(0.05,wEnd-w[1]))):0;
+  if(w&&w[3]&&wEnd===w[2])frac=warp(w[3],frac);
   var pos=k-u.w0+frac,lit;
   var gA=-1,gB=-1,cpos=-1;
   if(anch&&anch.length&&typeof anch[0]==='number'){

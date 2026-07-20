@@ -57,6 +57,7 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, a
     form.append('model_id', 'scribe_v2');
     form.append('source_url', sourceUrl); // cloud_storage_url is deprecated
     form.append('diarize', 'true');
+    form.append('timestamps_granularity', 'character'); // per-letter timing -> articulation-true sub-word fill
     form.append('tag_audio_events', 'true');
     if (withFormats) {
       // ElevenLabs' own exports ride along with the transcript: their native
