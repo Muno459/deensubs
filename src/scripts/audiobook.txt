@@ -187,8 +187,13 @@ function sweep(u,t){
   }
   lit=Math.max(0,Math.min(enWords.length,lit));
   if(lit===litCount)return;
+  // multi-word steps cascade left-to-right instead of flashing at once
+  var adv=lit>litCount;
   for(var i=Math.min(lit,litCount);i<Math.max(lit,litCount);i++){
-    if(enWords[i])enWords[i].classList.toggle('on',i<lit);
+    if(enWords[i]){
+      enWords[i].style.transitionDelay=adv?Math.min(180,(i-litCount)*60)+'ms':'0ms';
+      enWords[i].classList.toggle('on',i<lit);
+    }
   }
   litCount=lit;
 }
