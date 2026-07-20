@@ -31,6 +31,7 @@ RULES:
 - Cover EVERY word index exactly once, in order, with no gaps and no overlaps.
 - Each unit is a natural prose phrase or clause of roughly 4-16 source words — segment at sentence and clause boundaries, pauses (marked [GAP]) and speaker changes (marked [SPEAKER]). The reader follows these units as they light up with the audio.
 - Write flowing, book-quality ${targetLang} prose with full punctuation. Units read as continuous text when concatenated.
+- Readers follow the audio word by word, so keep the Arabic clause order whenever natural ${targetLang} allows ("Thus says the Imam..." for a verb-first Arabic sentence) — but never sacrifice fluent, correct prose for it.
 - Translate ALL meaningful content faithfully — never paraphrase away or condense meaning.
 - Clean speech artifacts: drop stutters, false starts, and filler sounds (their word indices still belong to the unit covering that span).
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
@@ -625,59 +626,118 @@ export function buildSpeakerTxt(doc: any, kind: 'source' | 'translated'): string
    the cursor at "and" while the reciter said "companions"). One cheap
    LLM pass aligns content words per unit; the pairs ship in
    transcript.json and drive both the cursor and word tap-to-seek. */
-export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][][]> {
+export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> {
   const words: [string, number, number][] = doc.words || [];
   const units: [string, number, number][] = doc.units || [];
-  // Word echoes, not indices — the same lesson the span audit proved: models
-  // copy words reliably and miscount numbers. Indices are computed here.
+  // Complete word map, not sparse anchors: every Arabic word carries the
+  // English words the reader finishes as it is spoken. Concatenating the
+  // English fields must reproduce the translation exactly, so a shifted or
+  // hallucinated map fails structurally instead of shipping. Stored per unit
+  // as cumulative lit-through counts — the cursor jumps group by group and
+  // interpolation (which smeared multi-word merges and VSO inversions) is
+  // gone entirely.
   const SYS =
-    'You align a translated transcript with its Arabic source. For each unit you receive the Arabic source words and the English translation words. Reply in JSONL, one line per unit, nothing else:\n' +
-    '{"u":UNIT_ID,"p":[["ARABIC_WORD","ENGLISH_WORD"],...]}\n' +
-    'Each pair states that this English word renders that Arabic word. Copy both words EXACTLY as given. Pair only content words you are sure of (names, nouns, verbs, numbers — skip articles and connectives), in the order they occur. 3-6 pairs per unit is typical; an empty list is fine. Every line MUST start with {"u". No commentary, no code fences.';
+    'You map a translated transcript onto its Arabic source for a karaoke reader. For each unit you receive the Arabic words and the English translation. Reply in JSONL, one line per unit:\n' +
+    '{"u":UNIT_ID,"m":[["ARABIC_WORD","english words"],...]}\n' +
+    'Rules:\n' +
+    '- "m" lists EVERY Arabic word of the unit, in order, each copied EXACTLY.\n' +
+    '- Attach to each Arabic word the English words a reader should finish as that word is spoken. Concatenating all English fields MUST reproduce the English text exactly — same words, same order, nothing added or dropped. Use "" for an Arabic word that adds no new English words (e.g. merged honorifics).\n' +
+    '- When word order differs between the languages, attach the displaced English words to the Arabic word at whose position the READER passes them (keep English order; never reorder English).\n' +
+    'Every line MUST start with {"u". No commentary, no code fences.';
   const enWords = (i: number) => units[i][0].replace(/\*+/g, '').split(/\s+/).filter(Boolean);
-  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-  const out: number[][][] = units.map(() => []);
-  const runBatch = async (lo: number, hi: number) => {
-    const lines: string[] = [];
-    for (let i = lo; i < hi; i++) {
+  const normAr = (w: string) =>
+    (w || '').replace(/[\u064b-\u0652\u0670\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[^\u0600-\u06ff]/g, '');
+  const normEn = (w: string) => (w || '').toLowerCase().replace(/[^a-z0-9']/g, '');
+  const out: number[][] = units.map(() => []);
+  const accept = (i: number, m: any): boolean => {
+    const [, w0, w1] = units[i];
+    const span = w1 - w0 + 1;
+    if (!Array.isArray(m) || m.length !== span) return false;
+    const enw = enWords(i);
+    const flat: string[] = [];
+    const cum: number[] = [];
+    for (let j = 0; j < span; j++) {
+      const pair = m[j];
+      if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string' || typeof pair[1] !== 'string') return false;
+      if (normAr(pair[0]) !== normAr(words[w0 + j][0])) return false;
+      for (const t of pair[1].split(/\s+/)) if (t) flat.push(t);
+      cum.push(flat.length);
+    }
+    if (flat.length !== enw.length) return false;
+    for (let j = 0; j < flat.length; j++) if (normEn(flat[j]) !== normEn(enw[j])) return false;
+    out[i] = cum;
+    return true;
+  };
+  const ask = async (ids: number[], model?: string) => {
+    const lines = ids.map((i) => {
       const [, w0, w1] = units[i];
       const ar: string[] = [];
       for (let k = w0; k <= w1 && k < words.length; k++) ar.push(words[k][0]);
-      lines.push(`UNIT ${i}\nAR: ${ar.join(' ')}\nEN: ${enWords(i).join(' ')}`);
-    }
+      return `UNIT ${i}\nAR: ${ar.join(' ')}\nEN: ${enWords(i).join(' ')}`;
+    });
     const raw = await llmChat(env, [
       { role: 'system', content: SYS },
       { role: 'user', content: lines.join('\n\n') },
-    ], 8000, undefined);
+    ], 8000, model);
+    const got = new Set<number>();
     for (const line of raw.split('\n')) {
-      const m = line.match(/\{.*\}/);
-      if (!m) continue;
+      const mm = line.match(/\{.*\}/);
+      if (!mm) continue;
       let o: any;
-      try { o = JSON.parse(m[0]); } catch { continue; }
-      if (!Number.isInteger(o.u) || o.u < lo || o.u >= hi || !Array.isArray(o.p)) continue;
-      const [, w0, w1] = units[o.u];
-      const ew = enWords(o.u).map(norm);
-      const pairs: number[][] = [];
-      let la = -1, le = -1;
-      for (const pr of o.p) {
-        if (!Array.isArray(pr) || pr.length !== 2 || typeof pr[0] !== 'string' || typeof pr[1] !== 'string') continue;
-        const an = norm(pr[0]), en = norm(pr[1]);
-        if (!an || !en) continue;
-        let a = -1, e = -1;
-        for (let k = la + 1; k <= w1 - w0; k++) if (norm(words[w0 + k]?.[0] || '') === an) { a = k; break; }
-        for (let j = le + 1; j < ew.length; j++) if (ew[j] === en) { e = j; break; }
-        if (a < 0 || e < 0) continue;
-        pairs.push([a, e]);
-        la = a; le = e;
-      }
-      out[o.u] = pairs;
+      try { o = JSON.parse(mm[0]); } catch { continue; }
+      if (Number.isInteger(o.u) && ids.includes(o.u) && !got.has(o.u) && accept(o.u, o.m)) got.add(o.u);
     }
+    return got;
   };
-  const BATCH = 12;
-  const ranges: [number, number][] = [];
-  for (let lo = 0; lo < units.length; lo += BATCH) ranges.push([lo, Math.min(units.length, lo + BATCH)]);
+  const BATCH = 8;
+  const ranges: number[][] = [];
+  for (let lo = 0; lo < units.length; lo += BATCH) ranges.push(Array.from({ length: Math.min(BATCH, units.length - lo) }, (_, j) => lo + j));
   for (let g = 0; g < ranges.length; g += 6) {
-    await Promise.all(ranges.slice(g, g + 6).map(([lo, hi]) => runBatch(lo, hi).catch(() => {})));
+    await Promise.all(ranges.slice(g, g + 6).map((ids) => ask(ids).catch(() => new Set())));
+  }
+  // rejected units retry solo, then once more on the strong model
+  for (const model of [undefined, STRONG_MODEL]) {
+    const failed = units.map((_, i) => i).filter((i) => !out[i].length && units[i][2] > units[i][1]);
+    for (let g = 0; g < failed.length; g += 6) {
+      await Promise.all(failed.slice(g, g + 6).map((i) => ask([i], model).catch(() => new Set())));
+    }
+  }
+  // Deterministic repair: an Arabic word with an unambiguous transliterated
+  // twin (names, loanwords) must own the English word — nudge group
+  // boundaries up to 3 words so it does. Exact-skeleton or long-substring
+  // matches only; the looser audit matcher false-flags too much to act on.
+  const sk = (t: string) => {
+    const MAP: Record<string, string> = { 'ا':'a','أ':'a','إ':'a','آ':'a','ب':'b','ت':'t','ث':'t','ج':'j','ح':'h','خ':'k','د':'d','ذ':'d','ر':'r','ز':'z','س':'s','ش':'s','ص':'s','ض':'d','ط':'t','ظ':'z','ع':'','غ':'g','ف':'f','ق':'q','ك':'k','ل':'l','م':'m','ن':'n','ه':'h','و':'w','ي':'y','ى':'a','ة':'h','ء':'','ئ':'','ؤ':'' };
+    let x = (t || '').toLowerCase().replace(/[\u064b-\u0652\u0670\u0640]/g, '').replace(/^ال/, '').replace(/^al[-'\u2019]?/, '');
+    let o = '';
+    for (const ch of x) o += MAP[ch] !== undefined ? MAP[ch] : ch;
+    return o.replace(/[^a-z]/g, '').replace(/[aeiouwhy]/g, '');
+  };
+  for (let i = 0; i < units.length; i++) {
+    const cum = out[i];
+    if (!cum.length) continue;
+    const [, w0, w1] = units[i];
+    const span = w1 - w0 + 1;
+    const parts = enWords(i);
+    const esk = parts.map(sk);
+    const used = new Set<number>();
+    for (let k = 0; k < span; k++) {
+      const a = sk(words[w0 + k][0]);
+      if (a.length < 3) continue;
+      const cands = esk
+        .map((e, j) => ({ e, j }))
+        .filter(({ e, j }) => !used.has(j) && (e === a || (e.length >= 4 && a.length >= 4 && (e.includes(a) || a.includes(e)))));
+      if (cands.length !== 1) continue;
+      const j = cands[0].j;
+      used.add(j);
+      const lo = k ? cum[k - 1] : 0;
+      if (lo <= j && j < cum[k]) continue;
+      if (j >= cum[k] && j + 1 - cum[k] <= 3) {
+        for (let m = k; m < span && cum[m] < j + 1; m++) cum[m] = j + 1;
+      } else if (j < lo && lo - j <= 3) {
+        for (let m = k - 1; m >= 0 && cum[m] > j; m--) cum[m] = j;
+      }
+    }
   }
   return out;
 }
