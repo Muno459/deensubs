@@ -130,16 +130,23 @@ async function translateWindow(
       } catch {}
     }
   }
-  // tiny leftovers attach to the neighboring unit
+  // tiny leftovers attach to the neighboring unit; bigger unfilled spans
+  // become visible Arabic-source units rather than silently inflating a
+  // neighbor's time span
   for (const [a, b] of holes(units, lo, hi)) {
-    let best: { w: [number, number]; t: string } | null = null;
-    for (const u of units) {
-      if (u.w[1] === a - 1) best = u;
-    }
-    if (best) best.w[1] = b;
-    else {
-      const after = units.find((u) => u.w[0] === b + 1);
-      if (after) after.w[0] = a;
+    if (b - a + 1 <= 2) {
+      let best: { w: [number, number]; t: string } | null = null;
+      for (const u of units) {
+        if (u.w[1] === a - 1) best = u;
+      }
+      if (best) best.w[1] = b;
+      else {
+        const after = units.find((u) => u.w[0] === b + 1);
+        if (after) after.w[0] = a;
+      }
+    } else {
+      const ar = win.filter((w) => w.i >= a && w.i <= b).map((w) => w.text).join(' ');
+      units.push({ w: [a, b], t: ar });
     }
   }
   return units.sort((x, y) => x.w[0] - y.w[0]);
@@ -219,9 +226,11 @@ export async function translateWordsAudiobook(env: ScribeEnv, allWords: Word[], 
   const split = (cue: AudioCue): AudioCue[] => {
     if ((cue as any).q) return [cue];
     const span = cue.w[1] - cue.w[0] + 1;
-    if (span <= 26) return [cue];
+    const dur = (words[cue.w[1]]?.end ?? 0) - (words[cue.w[0]]?.start ?? 0);
+    if (span <= 14 && dur <= 9) return [cue];
+    if (span < 6) return [cue];
     const text = cue.text;
-    const marks = [...text.matchAll(/[.!?؟…;:]\s+/g)].map((m) => m.index! + m[0].length);
+    const marks = [...text.matchAll(/[.!?؟…,;:]\s+/g)].map((m) => m.index! + m[0].length);
     if (!marks.length) return [cue];
     const mid = text.length / 2;
     const at = marks.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p));
