@@ -375,17 +375,19 @@ function sweep(u,t){
     }
     litCount=lit;
   }
-  // reading pill: the English phrase of the Arabic word being spoken
   if(gA<0){gA=Math.max(0,lit-1);gB=lit;cpos=lit}
-  if(gA!==grpLo||gB!==grpHi){
+  var li=Math.max(gA,Math.min(gB-1,Math.floor(cpos))),lf=Math.max(0,Math.min(1,cpos-li));
+  // reading pill: only the UNSPOKEN remainder of the current phrase — it
+  // shrinks behind the front, so read words are never double-emphasized
+  var pLo=Math.max(gA,li);
+  if(pLo!==grpLo||gB!==grpHi){
     for(var p1=grpLo;p1<grpHi;p1++)if(p1>=0&&enWords[p1])enWords[p1].classList.remove('grp');
-    for(var p2=gA;p2<gB;p2++)if(enWords[p2])enWords[p2].classList.add('grp');
-    grpLo=gA;grpHi=gB;
+    for(var p2=pLo;p2<gB;p2++)if(enWords[p2])enWords[p2].classList.add('grp');
+    grpLo=pLo;grpHi=gB;
   }
   // continuous sub-word fill through the leading word. The fill NEVER
   // toggles at boundaries: 0% renders identical to an unread word and 100%
   // identical to a read one, so handoffs between words are invisible.
-  var li=Math.max(gA,Math.min(gB-1,Math.floor(cpos))),lf=Math.max(0,Math.min(1,cpos-li));
   var le=(gB>gA&&enWords[li])?enWords[li]:null;
   if(fillEl&&fillEl!==le){fillEl.classList.remove('fill');fillEl.style.backgroundImage=''}
   if(le){
