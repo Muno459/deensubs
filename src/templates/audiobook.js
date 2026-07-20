@@ -104,7 +104,7 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
         <span>${ago(video.created_at)}</span>
         ${dur ? `<span>${Math.floor(dur / 60)} min</span>` : ''}
         ${video.category_name ? `<a href="/category/${e(video.category_slug)}" class="tag" style="--tc:${e(video.category_color)}">${e(video.category_name)}</a>` : ''}
-        <span class="tag tag-s">Audiobook</span>
+        <span class="tag tag-s">Audio</span>
       </div>
       <div class="wi-info-card">
         ${video.scholar_slug ? `<a href="/scholar/${e(video.scholar_slug)}" class="wi-sch">

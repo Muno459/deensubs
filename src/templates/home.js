@@ -22,7 +22,10 @@ ${featured ? `
       <div class="hero-ov">
         <div class="hero-pb"></div>
         <div class="hero-meta-ov">
-          ${featured.source ? `<span class="hero-badge">${e(featured.source)}</span>` : ''}
+          <div class="hero-badges">
+            ${featured.source ? `<span class="hero-badge">${e(featured.source)}</span>` : ''}
+            <span class="hero-badge">${featured.media === 'audio' ? 'Audio' : 'Video'}</span>
+          </div>
         </div>
         ${featured.duration ? `<span class="dur hero-dur">${ft(featured.duration)}</span>` : ''}
       </div>

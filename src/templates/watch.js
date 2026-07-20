@@ -110,6 +110,7 @@ ${th?`<link rel="preload" as="image" href="${e(th)}">`:''}
         <span>${ago(video.created_at)}</span>
         ${video.duration?`<span>${Math.floor(video.duration/60)} min</span>`:''}
         ${video.category_name?`<a href="/category/${e(video.category_slug)}" class="tag" style="--tc:${e(video.category_color)}">${e(video.category_name)}</a>`:''}
+        <span class="tag tag-s">Video</span>
         ${video.srt_key?'<span class="tag tag-s">EN subs</span>':''}
         ${video.srt_ar_key?'<span class="tag tag-s">AR subs</span>':''}
       </div>

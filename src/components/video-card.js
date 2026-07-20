@@ -28,6 +28,7 @@ export function vcard(v, opts) {
   </div>
   <div class="card-tg">
     ${v.category_name ? `<span class="tag" style="--tc:${e(col)}">${e(v.category_name)}</span>` : ''}
+    <span class="tag tag-s">${v.media === 'audio' ? 'Audio' : 'Video'}</span>
     ${v.srt_key ? '<span class="tag tag-s">CC</span>' : ''}
   </div>
 </div></a>`;
@@ -41,6 +42,7 @@ export function scard(v) {
 <div class="sc-th">
   ${th ? `<img src="${e(th)}" alt="${e(v.title)}" loading="lazy" decoding="async" class="sc-img">` : tsvg(v.title, col, 140, 79)}
   ${v.duration ? `<span class="dur dur-s">${ft(v.duration)}</span>` : ''}
+  <span class="dur dur-s dur-med">${v.media === 'audio' ? 'Audio' : 'Video'}</span>
 </div>
 <div class="sc-i"><h4>${e(v.title)}</h4><span>${v.source ? e(v.source) : ''}</span><span>${fv(v.views)}</span></div></a>`;
 }
