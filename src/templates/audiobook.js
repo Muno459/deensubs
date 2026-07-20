@@ -41,7 +41,7 @@ export function renderAudiobook({ video, related, base, playlist }) {
     .replace('__TITLE__', jsStr(video.title))
     .replace('__ART__', th ? e(th) : '')
     .replace('__SCHOLAR__', jsStr(video.scholar_name || ''))
-    .replace("'__DUR__'", String(dur))
+    .replace(/['"]__DUR__['"]/, String(dur)) // esbuild may re-quote the literal — match either style
     .replace('__CHAPTERS__', () => chJson)}</script>`;
 
   const card = schCard(video.scholar_slug);

@@ -14,6 +14,13 @@ function fmt(s){s=Math.max(0,Math.floor(s));var h=Math.floor(s/3600),m=Math.floo
 return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0')}
 tot.textContent=fmt(DUR);
 
+/* trust the decoder over the DB — covers rows published with duration 0 */
+au.addEventListener('loadedmetadata',function(){
+  if(au.duration&&isFinite(au.duration)&&Math.abs(au.duration-DUR)>1){
+    DUR=au.duration;seek.max=DUR;tot.textContent=fmt(DUR);renderTicks();
+  }
+});
+
 /* ---- responsive transcript placement (video-format stage only) ----
    Desktop: the transcript scrolls inside the stage, over the empty right
    zone of the scholar card. Under 720px that zone is too small to read,
@@ -232,13 +239,16 @@ function updChapter(t){
   chLabel.textContent=ci>=0?chapters[ci].title:'';
   if(chrCards)for(var k=0;k<chrCards.length;k++)chrCards[k].classList.toggle('chr-on',k===ci);
 }
-if(chapters.length&&DUR){
+function renderTicks(){
   var ticks=$('ab-ticks');
-  if(ticks)chapters.forEach(function(c){
+  if(!ticks||!chapters.length||!DUR)return;
+  ticks.innerHTML='';
+  chapters.forEach(function(c){
     if(!c.t)return;
     var el=document.createElement('i');el.style.left=(c.t/DUR*100)+'%';ticks.appendChild(el);
   });
 }
+renderTicks();
 
 /* lock-screen metadata (Apple-Podcasts feel) */
 if('mediaSession' in navigator){
