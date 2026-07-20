@@ -972,7 +972,10 @@ h1,h2,h3{color:#000}a{color:#333}
 .abv #ab-seek::-moz-range-thumb{background:#fff;width:12px;height:12px}
 .abv .ab-ticks i{background:rgba(255,255,255,.4)}
 .abv-tm{font-size:.72rem;color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums;white-space:nowrap}
-.abv-chl{font-size:.72rem;color:rgba(255,255,255,.6);max-width:16%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* fixed basis, not content width: the label is empty until the first tick and
+   changes text every chapter, and any width change here steals from the seek
+   bar next to it (the bar visibly shrank on play) */
+.abv-chl{flex:0 0 8rem;width:8rem;font-size:.72rem;color:rgba(255,255,255,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Phone: a "now listening" screen instead of a squeezed 16:9 stage. The card
    art stays as a dimmed backdrop, but the title + progress sit in a fixed head
    over it and the transcript moves into a raised sheet that carries its own

@@ -122,7 +122,7 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
             <div class="abv-sk"><div class="ab-ticks" id="ab-ticks"></div><input type="range" id="ab-seek" min="0" max="${dur || 100}" value="0" step="1" aria-label="Seek"></div>
             <span class="abv-tm"><span id="ab-cur">0:00</span> / <span id="ab-tot">0:00</span></span>
             <div class="abv-rt">
-              <span class="abv-chl ab-chl-t" id="ab-chlabel"></span>
+              ${chapters.length ? `<span class="abv-chl ab-chl-t" id="ab-chlabel">${e(chapters[0].title)}</span>` : ''}
               <button class="vb" id="ab-arbtn" title="Show Arabic">ع</button>
               <button class="vb vb-spd" id="ab-speed" title="Playback speed">1×</button>
               <button class="vb vb-spd" id="ab-sleep" title="Sleep timer">☾</button>
