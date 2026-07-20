@@ -352,7 +352,9 @@ function sweep(u,t){
   if(arOn){
     if(!arWords&&unitEls[active]){var arEl=unitEls[active].querySelector('.ab-ar');arWords=arEl?arEl.querySelectorAll('.ab-aw'):null}
     if(arWords){
-      var la=k-u.w0;
+      // the filling word is marked read immediately (hidden under its
+      // gradient) so removing the fill lands on identical bright pixels
+      var la=Math.min(arWords.length,k-u.w0+1);
       if(la!==arLit){
         for(var q=Math.min(la,arLit);q<Math.max(la,arLit);q++){
           if(arWords[q])arWords[q].classList.toggle('on',q<la);

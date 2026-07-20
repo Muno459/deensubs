@@ -914,7 +914,7 @@ h1,h2,h3{color:#000}a{color:#333}
 .ab-u.was{color:var(--tx)}
 .ab-u.on .ab-w.on{color:var(--tx)}
 .ab-ar{display:none;color:var(--t3);font-size:.94em;margin-inline-start:.35em}
-.ab-aw{font-style:normal;cursor:pointer;transition:color .15s}
+.ab-aw{font-style:normal;cursor:pointer}
 .ab-showar .ab-u.on .ab-aw.on{color:var(--tx)}
 /* ع = language SWITCH: the whole transcript reads in Arabic (RTL, exact
    word karaoke on source timestamps), never interleaved with English */
