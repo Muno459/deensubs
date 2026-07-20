@@ -6,7 +6,7 @@ var au=document.getElementById('ab-audio');
 var $=function(id){return document.getElementById(id)};
 var playBtn=$('ab-play'),back=$('ab-back'),fwd=$('ab-fwd'),seek=$('ab-seek'),cur=$('ab-cur'),tot=$('ab-tot'),
     speedBtn=$('ab-speed'),tr=$('ab-tr'),arBtn=$('ab-arbtn'),chLabel=$('ab-chlabel'),followBtn=$('ab-follow'),
-    trwrap=$('ab-trwrap'),stage=$('abv'),below=$('ab-below'),fsBtn=$('ab-fs'),bg=$('abv-bg'),shareBtn=$('ab-share'),
+    trwrap=$('ab-trwrap'),stage=$('abv'),fsBtn=$('ab-fs'),bg=$('abv-bg'),shareBtn=$('ab-share'),
     chrRail=$('chr-ls');
 if(!au)return;
 
@@ -21,29 +21,9 @@ au.addEventListener('loadedmetadata',function(){
   }
 });
 
-/* ---- responsive transcript placement (video-format stage only) ----
-   Desktop: the transcript scrolls inside the stage, over the empty right
-   zone of the scholar card. Under 720px that zone is too small to read,
-   so the same nodes move into a panel below the stage. */
-var mq=window.matchMedia('(max-width:719px)');
-function place(){
-  if(!stage||!below)return;
-  if(mq.matches){
-    if(tr.parentNode!==below){below.appendChild(followBtn);below.appendChild(tr)}
-    below.hidden=false;
-  }else if(tr.parentNode===below){
-    trwrap.appendChild(tr);
-    stage.querySelector('.abv-frame').appendChild(followBtn);
-    below.hidden=true;
-  }
-}
-place();
-if(mq.addEventListener)mq.addEventListener('change',place);
-
-/* the element that actually scrolls the transcript in the current layout */
+/* the element that actually scrolls the transcript */
 function scroller(){
-  if(stage)return tr.parentNode===below?below:trwrap;
-  return tr; // classic: .ab-tr is its own scroll box
+  return stage?trwrap:tr; // classic: .ab-tr is its own scroll box
 }
 function centerActive(){
   var el=unitEls[active];if(!el)return;
@@ -169,11 +149,8 @@ au.addEventListener('pause',function(){playBtn.classList.remove('playing');if(st
 au.addEventListener('timeupdate',function(){if(au.paused)tick()});
 
 /* follow mode: manual scrolling pauses auto-follow */
-[trwrap,below].forEach(function(el){
-  if(!el)return;
-  ['wheel','touchmove'].forEach(function(evt){
-    el.addEventListener(evt,function(){follow=false;followBtn.hidden=false},{passive:true});
-  });
+['wheel','touchmove'].forEach(function(evt){
+  trwrap.addEventListener(evt,function(){follow=false;followBtn.hidden=false},{passive:true});
 });
 followBtn.addEventListener('click',function(){
   follow=true;followBtn.hidden=true;
@@ -200,12 +177,17 @@ if(bg){
 }
 function toggleFs(){
   if(!stage)return;
-  if(document.fullscreenElement)document.exitFullscreen();
-  else if(stage.requestFullscreen)stage.requestFullscreen();
+  if(document.fullscreenElement){document.exitFullscreen();return}
+  if(stage.requestFullscreen)stage.requestFullscreen();
   else if(stage.webkitRequestFullscreen)stage.webkitRequestFullscreen();
+  else{
+    // iPhone Safari: no element fullscreen — CSS theater mode instead
+    var on=stage.classList.toggle('fakefs');
+    document.documentElement.classList.toggle('ab-noscroll',on);
+    if(follow&&active>=0)centerActive();
+  }
 }
 if(fsBtn){
-  if(!stage.requestFullscreen&&!stage.webkitRequestFullscreen)fsBtn.hidden=true;
   fsBtn.addEventListener('click',toggleFs);
   document.addEventListener('fullscreenchange',function(){stage.classList.toggle('fs',document.fullscreenElement===stage)});
 }

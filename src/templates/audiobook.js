@@ -88,7 +88,6 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
       </div>
     </div>
     ${audioTag}
-    <div class="ab-trpanel" id="ab-below" hidden></div>
     <div class="wi">
       <div class="wi-top">
         <div class="wi-tl">
