@@ -93,6 +93,17 @@ app.post('/hooks/elevenlabs', async (c) => {
   return c.json({ ok: true });
 });
 
+// Auto-update manifest for installed companions — public and NEVER cached
+// (the edge would otherwise pin an old manifest for 30 days; the bundles it
+// points to live on the cdn under version-unique names, so those cache fine).
+app.get('/companion/update/latest.json', async (c) => {
+  const obj = await c.env.MEDIA_BUCKET.get('companion/update/latest.json');
+  if (!obj) return c.json({ error: 'no manifest' }, 404);
+  return new Response(obj.body, {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+});
+
 // Companion presence WebSocket — outside /api/* auth; validates the key
 // param (companion apps) or the admin session cookie (dashboard watchers).
 app.get('/ws/companion', async (c) => {
@@ -875,6 +886,24 @@ app.post('/api/companion/download/release', async (c) => {
 
 app.post('/api/companion/enhance/claim', async (c) => {
   const body: any = await c.req.json().catch(() => ({}));
+  // Requeue orphaned claims fast: if the claiming device dropped off the
+  // presence hub (crash, sleep, network loss), its claim goes back to
+  // 'wanted' after 5 minutes so another online companion picks it up —
+  // the 3 h wall stays as the hard fallback for zombie connections.
+  try {
+    const { onlineCompanions } = await import('./companion');
+    const online = (await onlineCompanions(c.env as any)).map((x) => x.name);
+    const stale: any = await c.env.DB.prepare(
+      "SELECT id, se_claimed_by FROM scribe_jobs WHERE se_status = 'claimed' AND se_claimed_at < unixepoch() - 300"
+    ).all();
+    for (const row of (stale.results || []) as any[]) {
+      if (!online.includes(row.se_claimed_by)) {
+        await c.env.DB.prepare(
+          "UPDATE scribe_jobs SET se_status = 'wanted', se_claimed_by = NULL, se_claimed_at = NULL WHERE id = ? AND se_status = 'claimed'"
+        ).bind(row.id).run();
+      }
+    }
+  } catch {}
   const job: any = await c.env.DB.prepare(
     `UPDATE scribe_jobs SET se_status='claimed', se_claimed_by=?, se_claimed_at=unixepoch()
      WHERE id = (SELECT id FROM scribe_jobs
