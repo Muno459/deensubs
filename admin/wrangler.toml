@@ -14,7 +14,7 @@ cpu_ms = 300000
 directory = "./dist/client"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/media-upload/*", "/hooks/*"]
+run_worker_first = ["/api/*", "/media-upload/*", "/hooks/*", "/ws/*"]
 
 [[d1_databases]]
 binding = "DB"
@@ -70,9 +70,17 @@ instance_type = "standard-2"
 name = "YTDLP"
 class_name = "YtdlpContainer"
 
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "CompanionHub"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["YtdlpContainer"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CompanionHub"]
 
 [vars]
 SCRIBE_LLM_MODEL = "ag/gemini-3.5-flash-low"

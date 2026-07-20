@@ -57,6 +57,45 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // 1. Download → R2
       await updateJob(env.DB, jobId, { status: 'running' });
       await markStage(env, jobId, 'download');
+      // Companion offload: if a DeenSubs Companion with download capability
+      // is online, the job is offered to it FIRST — companions download on
+      // home connections with their own browser cookies, in parallel, and
+      // never touch the shared proxies. Falls back to the proxy container
+      // when nobody claims it.
+      if (needsYtdlp(url)) {
+        const offered = await step.do('companion-download-offer', async () => {
+          const row: any = await env.DB.prepare('SELECT source_key, dl_status FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+          if (row?.source_key || row?.dl_status === 'done') return false;
+          const { onlineCompanions, hasCap } = await import('../companion');
+          if (!hasCap(await onlineCompanions(env), 'download')) return false;
+          await env.DB.prepare(
+            "UPDATE scribe_jobs SET dl_status = 'wanted' WHERE id = ? AND source_key IS NULL AND (dl_status IS NULL OR dl_status = '' OR dl_status = 'failed')"
+          ).bind(jobId).run();
+          return true;
+        });
+        if (offered) {
+          for (let w = 0; w < 60; w++) { // up to ~30 min of companion patience
+            const st: string = await step.do(`companion-download-check-${w}`, async () => {
+              const r: any = await env.DB.prepare('SELECT dl_status, source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+              if (r?.source_key && r?.dl_status === 'done') return 'done';
+              if (r?.dl_status === 'failed') return 'abandon';
+              if (r?.dl_status === 'wanted') {
+                const { onlineCompanions, hasCap } = await import('../companion');
+                if (!hasCap(await onlineCompanions(env), 'download')) return 'abandon';
+              }
+              return 'wait';
+            });
+            if (st === 'done') break;
+            if (st === 'abandon') {
+              await step.do('companion-download-cancel', async () => {
+                await env.DB.prepare("UPDATE scribe_jobs SET dl_status = NULL WHERE id = ? AND dl_status IN ('wanted','failed')").bind(jobId).run();
+              });
+              break;
+            }
+            await step.sleep(`companion-download-wait-${w}`, '30 seconds');
+          }
+        }
+      }
       // yt-dlp downloads share the SOCKS proxies — exactly ONE job may be in
       // the download phase at a time. Queue as many videos as you like; the
       // rest wait here (cheap workflow sleeps) for the slot. Cached resumes
@@ -136,6 +175,53 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         } catch {}
       }
 
+      // 1c. Speech enhancement (audiobooks, before ASR — Sidon on a GPU/CPU
+      // companion; the ideal-timeline contract keeps duration exact so the
+      // karaoke timestamps computed downstream stay sample-accurate). Only
+      // offered when a capable companion is online; otherwise the audiobook
+      // proceeds un-enhanced with no flag.
+      let asrSourceKey = dl.key;
+      if (!fullVideo) {
+        const seOffered = await step.do('enhance-offer', async () => {
+          const row: any = await env.DB.prepare('SELECT se_status, speech_enhanced FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+          if (row?.speech_enhanced || row?.se_status === 'done') return false;
+          if (await env.MEDIA_BUCKET.head(`scribe/${jobId}/asr.json`)) return false; // resume past ASR — too late
+          const { onlineCompanions, hasCap } = await import('../companion');
+          if (!hasCap(await onlineCompanions(env), 'enhance')) return false;
+          await env.DB.prepare(
+            "UPDATE scribe_jobs SET se_status = 'wanted', step = 'enhance' WHERE id = ? AND (se_status IS NULL OR se_status = '' OR se_status = 'failed')"
+          ).bind(jobId).run();
+          return true;
+        });
+        if (seOffered) {
+          for (let w = 0; w < 200; w++) { // claimed jobs get hours (CPU Macs are ~realtime)
+            const st: string = await step.do(`enhance-check-${w}`, async () => {
+              const r: any = await env.DB.prepare('SELECT se_status FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+              if (r?.se_status === 'done') return 'done';
+              if (r?.se_status === 'failed') return 'abandon';
+              if (r?.se_status === 'wanted') {
+                if (w >= 20) return 'abandon'; // 20 min unclaimed — move on
+                const { onlineCompanions, hasCap } = await import('../companion');
+                if (!hasCap(await onlineCompanions(env), 'enhance')) return 'abandon';
+              }
+              return 'wait';
+            });
+            if (st === 'done' || st === 'abandon') {
+              if (st === 'abandon') {
+                await step.do('enhance-cancel', async () => {
+                  await env.DB.prepare("UPDATE scribe_jobs SET se_status = NULL WHERE id = ? AND se_status IN ('wanted','failed')").bind(jobId).run();
+                });
+              }
+              break;
+            }
+            await step.sleep(`enhance-wait-${w}`, '60 seconds');
+          }
+          const after: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+          if (after?.source_key) asrSourceKey = after.source_key;
+          await markStage(env, jobId, 'asr');
+        }
+      }
+
       // 2. ASR (ElevenLabs Scribe v2; chunked automatically for long files)
       const asr = await step.do(
         'asr',
@@ -156,7 +242,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             }
           }
           await stampTime(env, jobId, 'asr');
-          const res = await runAsr(env, jobId, dl.key, dl.durationSec || 0);
+          const res = await runAsr(env, jobId, asrSourceKey, dl.durationSec || 0);
           await stampTime(env, jobId, 'asr_end');
           return { ...res, cached: false };
         }

@@ -989,3 +989,6 @@ h1,h2,h3{color:#000}a{color:#333}
 .abv.fakefs{position:fixed;inset:0;z-index:1000;height:100dvh;border-radius:0}
 .abv.fakefs .abv-bar{padding-bottom:max(.55rem,env(safe-area-inset-bottom))}
 .ab-noscroll{overflow:hidden}
+
+/* Speech Enhanced badge (Sidon-restored audio) */
+.ab-se{color:#b79bf5!important;margin-inline-start:.6em}

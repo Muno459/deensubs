@@ -155,7 +155,10 @@ async function ytdlpDownload(env: ScribeEnv, jobId: string, url: string, fullVid
   const start = await call('/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, cookies, video: fullVideo }),
+    body: JSON.stringify({
+      url, cookies, video: fullVideo,
+      proxy: await (await import('../companion')).selectedProxy(env),
+    }),
   });
   if (!start.ok) throw new Error(`yt-dlp container start failed: HTTP ${start.status} ${await start.text().catch(() => '')}`);
   const { id } = (await start.json()) as { id: string };

@@ -28,8 +28,116 @@ function stageIndex(step: string): number {
   if (step === 'queued') return -1;
   if (step === 'render') return 2; // rendering counts as translating
   if (step === 'done') return STAGES.length;
+  if (step === 'enhance') return 1; // companion speech enhancement runs just before ASR
   const i = STAGES.findIndex((s) => s.id === step);
   return i < 0 ? 0 : i;
+}
+
+/** Live companions + proxy control, fed by the presence WebSocket. */
+function CompanionsCard() {
+  const [roster, setRoster] = useState<any[]>([]);
+  const [connected, setConnected] = useState(false);
+  const [proxies, setProxies] = useState<any | null>(null);
+  const toast = useToast();
+
+  const loadProxies = async () => {
+    try { setProxies(await api('/api/companion/proxies')); } catch {}
+  };
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let alive = true;
+    let retry: any;
+    const connect = () => {
+      if (!alive) return;
+      ws = new WebSocket(`wss://${location.host}/ws/companion?role=watch`);
+      ws.onopen = () => setConnected(true);
+      ws.onmessage = (ev) => {
+        try {
+          const m = JSON.parse(ev.data);
+          if (m.type === 'roster') setRoster(m.companions || []);
+        } catch {}
+      };
+      ws.onclose = () => { setConnected(false); if (alive) retry = setTimeout(connect, 5000); };
+      ws.onerror = () => ws?.close();
+    };
+    connect();
+    loadProxies();
+    const t = setInterval(loadProxies, 20000);
+    return () => { alive = false; clearTimeout(retry); clearInterval(t); ws?.close(); };
+  }, []);
+
+  const selectProxy = async (index: any) => {
+    try {
+      await api('/api/companion/proxies/select', { method: 'POST', body: JSON.stringify({ index }) });
+      loadProxies();
+    } catch (e: any) { toast.push(e.message, 'error'); }
+  };
+
+  const capChip = (c: string) =>
+    c.startsWith('enhance') ? `enhance ${c.includes('cuda') ? '⚡GPU' : 'CPU'}` : c;
+
+  return (
+    <div className="rounded-xl border border-hairline bg-panel/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
+          <h3 className="text-[13px] font-semibold text-cream">Companions</h3>
+          <span className="text-[11px] text-muted">{roster.length ? `${roster.length} online` : 'none online — downloads use the proxy'}</span>
+        </div>
+        {proxies && proxies.proxies?.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-faint">Proxy</span>
+            {[{ index: 'auto', label: 'auto' }, ...proxies.proxies].map((p: any) => {
+              const sel = String(proxies.selected) === String(p.index);
+              return (
+                <button
+                  key={p.index}
+                  disabled={proxies.busy || sel}
+                  title={proxies.busy ? `busy downloading ${proxies.busy_job}` : p.label}
+                  onClick={() => selectProxy(p.index)}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    sel ? 'border-gold/50 bg-gold/10 text-gold-bright'
+                    : proxies.busy ? 'cursor-not-allowed border-hairline bg-soft text-muted/40'
+                    : 'border-hairline bg-soft text-muted hover:text-cream'
+                  }`}
+                >
+                  {p.index === 'auto' ? 'Auto' : p.label}
+                  {proxies.busy && sel ? ' · busy' : ''}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {roster.length > 0 && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {roster.map((c) => (
+            <div key={c.name} className="rounded-lg border border-hairline bg-soft/60 px-3 py-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[12.5px] font-semibold text-cream">{c.name}</span>
+                <span className="text-[10px] text-faint">{c.caps.map(capChip).join(' · ')}</span>
+              </div>
+              {c.tasks?.length ? (
+                <div className="mt-1.5 space-y-1">
+                  {c.tasks.map((t: any, i: number) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="w-16 shrink-0 text-[10px] uppercase tracking-wider text-muted">{t.kind}</span>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-hover">
+                        <div className="h-full rounded-full bg-gold transition-all" style={{ width: `${t.pct}%` }} />
+                      </div>
+                      <span className="w-24 shrink-0 truncate text-right text-[10px] text-muted">{t.label}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-[11px] text-faint">idle</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function parseTimes(raw: string | null): Record<string, number> {
@@ -624,6 +732,11 @@ function JobDetail({ job }: { job: any }) {
           </div>
         )}
         <div className="flex flex-wrap gap-1.5 pt-1">
+          {!!job.speech_enhanced && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-violet-300" title="Audio restored with Sidon on a companion">
+              SPEECH ENHANCED
+            </span>
+          )}
           {job.k4_status && job.k4_status !== 'none' && (
             <span className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
               job.k4_status === 'done' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
@@ -1082,6 +1195,7 @@ export default function Scribe() {
             if (fs.length) uploadLocal(fs);
           }}
         >
+        <CompanionsCard />
         <GlowCard className="relative overflow-hidden p-6">
           {dragOver && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] border-2 border-dashed border-[#45b3a2] bg-[#45b3a2]/10">

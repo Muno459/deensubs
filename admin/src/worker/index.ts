@@ -93,6 +93,21 @@ app.post('/hooks/elevenlabs', async (c) => {
   return c.json({ ok: true });
 });
 
+// Companion presence WebSocket — outside /api/* auth; validates the key
+// param (companion apps) or the admin session cookie (dashboard watchers).
+app.get('/ws/companion', async (c) => {
+  if (c.req.header('Upgrade') !== 'websocket') return c.json({ error: 'websocket expected' }, 426);
+  const key = c.req.query('key');
+  let ok = !!(key && c.env.ADMIN_KEY && key === c.env.ADMIN_KEY);
+  if (!ok) {
+    const user = await getUser(c);
+    ok = !!user && user.role === 'admin';
+  }
+  if (!ok) return c.json({ error: 'Unauthorized' }, 401);
+  const stub = (c.env as any).HUB.get((c.env as any).HUB.idFromName('hub'));
+  return stub.fetch(c.req.raw);
+});
+
 app.use('/api/*', async (c, next) => {
   const key = c.req.query('key');
   if (key && c.env.ADMIN_KEY && key === c.env.ADMIN_KEY) {
@@ -791,6 +806,136 @@ app.post('/api/upload', async (c) => {
 });
 
 // Sweep observability: when did the auto-resume cron last fire?
+// ---- Companion coordination ----------------------------------------------
+// Live presence + work offloading for DeenSubs Companion apps. Downloads and
+// speech enhancement claim like the 4K queue; presence flows over WebSockets
+// through the CompanionHub DO (see /ws/companion below, outside this auth
+// middleware, with its own auth).
+
+app.get('/api/companion/roster', async (c) => {
+  const { onlineCompanions } = await import('./companion');
+  return c.json({ companions: await onlineCompanions(c.env) });
+});
+
+app.post('/api/companion/download/claim', async (c) => {
+  const body: any = await c.req.json().catch(() => ({}));
+  const job: any = await c.env.DB.prepare(
+    `UPDATE scribe_jobs SET dl_status='claimed', dl_claimed_by=?, dl_claimed_at=unixepoch()
+     WHERE id = (SELECT id FROM scribe_jobs
+       WHERE dl_status = 'wanted' OR (dl_status = 'claimed' AND dl_claimed_at < unixepoch() - 1800)
+       ORDER BY created_at LIMIT 1)
+     RETURNING id, url, full_video, title`
+  ).bind(String(body.worker || 'companion').slice(0, 40)).first();
+  return c.json({ job: job || null });
+});
+
+app.post('/api/companion/download/complete', async (c) => {
+  const { job_id, key, meta } = await c.req.json();
+  if (!job_id || !key || !key.startsWith(`scribe/${job_id}/source.`)) {
+    return c.json({ error: 'job_id and key scribe/<job_id>/source.<ext> required' }, 400);
+  }
+  const job: any = await c.env.DB.prepare('SELECT source_key, dl_status, full_video FROM scribe_jobs WHERE id = ?').bind(job_id).first();
+  if (!job) return c.json({ error: 'job not found' }, 404);
+  if (job.source_key) return c.json({ error: 'job already has a source (container beat you to it)' }, 409);
+  const head = await c.env.MEDIA_BUCKET.head(key);
+  if (!head || head.size < 100_000) return c.json({ error: 'uploaded file missing or too small in R2' }, 400);
+  const m = meta || {};
+  await c.env.DB.prepare(
+    `UPDATE scribe_jobs SET source_key = ?, dl_status = 'done', download_method = 'companion',
+       download_pct = 100,
+       title = COALESCE(title, ?), channel = COALESCE(channel, ?), thumb_url = COALESCE(thumb_url, ?),
+       duration = CASE WHEN COALESCE(duration, 0) = 0 THEN ? ELSE duration END,
+       orig_description = COALESCE(orig_description, ?), yt_id = COALESCE(yt_id, ?),
+       k4_status = CASE WHEN full_video = 1 THEN ? ELSE k4_status END
+     WHERE id = ?`
+  ).bind(
+    key,
+    m.title || null, m.channel || null, m.thumbnail || null,
+    Math.round(Number(m.duration) || 0),
+    (m.description || '').slice(0, 5000) || null, m.yt_id || null,
+    m.four_k ? 'capable' : 'none',
+    job_id
+  ).run();
+  return c.json({ ok: true });
+});
+
+app.post('/api/companion/download/release', async (c) => {
+  const { job_id, failed } = await c.req.json();
+  await c.env.DB.prepare(
+    "UPDATE scribe_jobs SET dl_status = ?, dl_claimed_by = NULL, dl_claimed_at = NULL WHERE id = ? AND dl_status = 'claimed'"
+  ).bind(failed ? 'failed' : 'wanted', job_id).run();
+  return c.json({ ok: true });
+});
+
+app.post('/api/companion/enhance/claim', async (c) => {
+  const body: any = await c.req.json().catch(() => ({}));
+  const job: any = await c.env.DB.prepare(
+    `UPDATE scribe_jobs SET se_status='claimed', se_claimed_by=?, se_claimed_at=unixepoch()
+     WHERE id = (SELECT id FROM scribe_jobs
+       WHERE se_status = 'wanted' OR (se_status = 'claimed' AND se_claimed_at < unixepoch() - 10800)
+       ORDER BY created_at LIMIT 1)
+     RETURNING id, source_key, duration, title`
+  ).bind(String(body.worker || 'companion').slice(0, 40)).first();
+  return c.json({ job: job || null });
+});
+
+app.post('/api/companion/enhance/complete', async (c) => {
+  const { job_id, key, duration } = await c.req.json();
+  if (!job_id || !key || key !== `scribe/${job_id}/source-enhanced.m4a`) {
+    return c.json({ error: 'job_id and key scribe/<job_id>/source-enhanced.m4a required' }, 400);
+  }
+  const job: any = await c.env.DB.prepare('SELECT duration, se_status FROM scribe_jobs WHERE id = ?').bind(job_id).first();
+  if (!job) return c.json({ error: 'job not found' }, 404);
+  const head = await c.env.MEDIA_BUCKET.head(key);
+  if (!head || head.size < 50_000) return c.json({ error: 'enhanced file missing or too small in R2' }, 400);
+  // The Sidon ideal-timeline contract guarantees exact duration; anything
+  // beyond encoder padding tolerance means broken alignment — reject.
+  if (job.duration > 0 && Math.abs(Number(duration) - job.duration) > 0.15) {
+    return c.json({ error: `duration contract violated: job ${job.duration}s vs enhanced ${duration}s` }, 400);
+  }
+  await c.env.DB.prepare(
+    "UPDATE scribe_jobs SET source_key = ?, speech_enhanced = 1, se_status = 'done' WHERE id = ?"
+  ).bind(key, job_id).run();
+  return c.json({ ok: true });
+});
+
+app.post('/api/companion/enhance/release', async (c) => {
+  const { job_id, failed } = await c.req.json();
+  await c.env.DB.prepare(
+    "UPDATE scribe_jobs SET se_status = ?, se_claimed_by = NULL, se_claimed_at = NULL WHERE id = ? AND se_status = 'claimed'"
+  ).bind(failed ? 'failed' : 'wanted', job_id).run();
+  return c.json({ ok: true });
+});
+
+app.get('/api/companion/proxies', async (c) => {
+  const { parseProxies, maskProxy } = await import('./companion');
+  const list = parseProxies(c.env);
+  const lock: any = await c.env.DB.prepare(
+    "SELECT holder, until FROM locks WHERE name = 'download' AND until > unixepoch()"
+  ).first().catch(() => null);
+  const sel: any = await c.env.DB.prepare("SELECT value FROM config WHERE name = 'active_proxy'").first().catch(() => null);
+  return c.json({
+    proxies: list.map((p, i) => ({ index: i, label: maskProxy(p) })),
+    selected: sel?.value ?? 'auto',
+    busy: !!lock,
+    busy_job: lock?.holder || null,
+  });
+});
+
+app.post('/api/companion/proxies/select', async (c) => {
+  const { index } = await c.req.json();
+  const lock: any = await c.env.DB.prepare(
+    "SELECT holder FROM locks WHERE name = 'download' AND until > unixepoch()"
+  ).first().catch(() => null);
+  if (lock) return c.json({ error: `proxy is downloading job ${lock.holder} — wait for it to finish` }, 409);
+  const value = index === 'auto' ? 'auto' : String(parseInt(index));
+  if (value !== 'auto' && isNaN(parseInt(value))) return c.json({ error: 'index or "auto" required' }, 400);
+  await c.env.DB.prepare(
+    "INSERT INTO config (name, value) VALUES ('active_proxy', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value"
+  ).bind(value).run();
+  return c.json({ ok: true, selected: value });
+});
+
 // ---- 4K upgrade queue ----------------------------------------------------
 // Local encoder machines (any number, any OS) coordinate through these:
 // claim atomically hands out one job at a time, stale claims (4h) recycle,
@@ -1560,6 +1705,7 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 export { ScribePipeline } from './scribe/workflow';
 export { ClipRenderer } from './scribe/clips';
 export { YtdlpContainer } from './scribe/container';
+export { CompanionHub } from './companion';
 
 /** Auto-resume jobs killed by infrastructure (deploy rollouts reset the
  * workflow engine mid-step). Artifact-aware steps make resumes cheap. */

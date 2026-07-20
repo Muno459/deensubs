@@ -220,7 +220,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   // 3. Insert the video row (with chapters + language list); media='audio'
   // marks audiobooks so the site renders the karaoke player
   await env.DB.prepare(
-    'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, duration, video_key, srt_key, srt_ar_key, thumb_key, chapters, srt_langs, media) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    'INSERT INTO videos (title, title_ar, slug, description, category_id, scholar_id, duration, video_key, srt_key, srt_ar_key, thumb_key, chapters, srt_langs, media, speech_enhanced) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
   ).bind(
     title,
     opts.title_ar ?? job.title_ar ?? null,
@@ -235,7 +235,8 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     thumbKey,
     job.chapters || null,
     langs.length ? JSON.stringify(langs) : null,
-    isAudiobook ? 'audio' : null
+    isAudiobook ? 'audio' : null,
+    job.speech_enhanced ? 1 : 0
   ).run();
 
   // 3a. Attach to the site playlist this job was queued from (playlist imports).

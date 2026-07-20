@@ -64,7 +64,7 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
         <img class="abv-bg" id="abv-bg" src="${e(card.src)}" srcset="${e(card.srcset)}" sizes="(max-width:960px) 100vw, 66vw" alt="${e(video.scholar_name || video.title)}">
         <div class="abv-txt" id="ab-trwrap">
           <div class="abv-ttl">
-            <span class="abv-kind">Audiobook</span>
+            <span class="abv-kind">Audiobook</span>${video.speech_enhanced ? '<span class="abv-kind ab-se">Speech Enhanced</span>' : ''}
             <h2>${e(video.title)}</h2>
             ${video.title_ar ? `<p class="abv-ttl-ar" dir="rtl">${e(video.title_ar)}</p>` : ''}
           </div>
@@ -104,7 +104,7 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
         <span>${ago(video.created_at)}</span>
         ${dur ? `<span>${Math.floor(dur / 60)} min</span>` : ''}
         ${video.category_name ? `<a href="/category/${e(video.category_slug)}" class="tag" style="--tc:${e(video.category_color)}">${e(video.category_name)}</a>` : ''}
-        <span class="tag tag-s">Audio</span>
+        <span class="tag tag-s">Audio</span>${video.speech_enhanced ? '<span class="tag tag-s ab-se">Speech Enhanced</span>' : ''}
       </div>
       <div class="wi-info-card">
         ${video.scholar_slug ? `<a href="/scholar/${e(video.scholar_slug)}" class="wi-sch">
@@ -158,7 +158,7 @@ function renderClassic({ video, related, th, dur, chapters, jsonLd, audioTag, sc
   <div class="ab-hero">
     ${th ? `<img class="ab-art" src="${e(th)}" alt="${e(video.title)}" width="280" height="280">` : ''}
     <div class="ab-meta">
-      <span class="ab-kind">Audiobook</span>
+      <span class="ab-kind">Audiobook</span>${video.speech_enhanced ? '<span class="ab-kind ab-se">Speech Enhanced</span>' : ''}
       <h1 class="ab-title">${e(video.title)}</h1>
       ${video.title_ar ? `<p class="ab-title-ar" dir="rtl">${e(video.title_ar)}</p>` : ''}
       ${video.scholar_name ? `<a class="ab-sch" href="/scholar/${e(video.scholar_slug || '')}">${video.scholar_photo ? `<img src="${e(schImgSm(video.scholar_photo))}" alt="" width="28" height="28">` : ''}<span>${e(video.scholar_name)}</span></a>` : ''}

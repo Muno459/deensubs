@@ -64,7 +64,7 @@ def maybe_self_update() -> None:
         pass  # never block downloads on update failures
 
 
-def run_download(job_id: str, url: str, cookies: str | None = None, video: bool = False) -> None:
+def run_download(job_id: str, url: str, cookies: str | None = None, video: bool = False, pinned_proxy: str | None = None) -> None:
     maybe_self_update()
     out_tmpl = os.path.join(DIR, f"{job_id}.%(ext)s")
     cookies_file = None
@@ -73,6 +73,8 @@ def run_download(job_id: str, url: str, cookies: str | None = None, video: bool 
         with open(cookies_file, "w") as fh:
             fh.write(cookies)
     attempts = PROXIES + [None]  # proxy first: YouTube throttles datacenter IPs
+    if pinned_proxy:
+        attempts = [pinned_proxy, None]  # admin chose a specific proxy
     last_err = "no attempts"
     for proxy in attempts:
         if video:
@@ -742,7 +744,7 @@ class Handler(BaseHTTPRequestHandler):
         job_id = str(uuid.uuid4())
         with jobs_lock:
             jobs[job_id] = {"status": "running", "url": url}
-        threading.Thread(target=run_download, args=(job_id, url, payload.get("cookies"), bool(payload.get("video"))), daemon=True).start()
+        threading.Thread(target=run_download, args=(job_id, url, payload.get("cookies"), bool(payload.get("video")), payload.get("proxy") or None), daemon=True).start()
         return self._send(200, {"id": job_id})
 
     def do_DELETE(self):  # noqa: N802
