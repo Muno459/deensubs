@@ -172,16 +172,37 @@ echo "y" | npx wrangler kv key delete "home" --namespace-id=c025d769b8584d02aedc
 - Compressed page size: ~22KB (Brotli)
 - Image serving: ~5ms from edge cache
 
-## 4K upgrades (ds4k)
+## DeenSubs Companion (dsc)
 
-The 4K pipeline lives in the private repo **Muno459/deensubs-4k** (local: `~/deensubs-4k`).
-Lectures with >1080p source formats are flagged automatically at yt-dlp ingest
-(`scribe_jobs.k4_status`, "4K available" badge in Scribe). Admins run the **ds4k**
-app (Tauri desktop "DeenSubs 4K Studio", `ds4k -gui` web dashboard, or plain CLI)
-on their own machines: it claims jobs via `/api/scribe/4k/claim` (atomic, multi-
-machine safe, 4h stale-claim recycling), downloads the 4K source locally with
-browser cookies, hardware-encodes ONE HEVC mp4 (hvc1 + faststart), uploads
-direct to R2, and `/api/scribe/4k/complete` swaps `source_key`/`video_key` and
-deletes the 1080p original. `ds4k -doctor` self-checks a machine; `-scan`
-backfills capability flags for old jobs. Binaries with keys baked in are on the
-repo's GitHub releases (CI builds mac + windows installers on tags).
+The companion app lives in the private repo **Muno459/deensubs-companion**
+(local: `~/deensubs-companion`, binary `dsc`, data dir `~/.dsc`). One native
+Rust binary, GUI + CLI (`dsc -work` headless). Admins run it on their own
+machines; each instance announces itself over a WebSocket presence hub
+(`/ws/companion`, Durable Object) under the machine's OS username — peers are
+visible live in the app and in the admin Scribe page. Three engine lanes, each
+toggleable in Settings:
+
+- **Downloads**: claims scribe download jobs (`/api/companion/download/claim`)
+  so the single proxy container stops being the bottleneck — yt-dlp with the
+  machine's own browser cookies (browser selectable in Settings), parallel
+  1-4 lanes, direct R2 multipart upload, `download_method: companion`.
+- **4K upgrades**: claims `k4_status` jobs (flagged automatically at ingest),
+  downloads the 4K source, hardware-encodes ONE HEVC mp4 (hvc1 + faststart),
+  uploads direct to R2; complete swaps `source_key`/`video_key` and deletes
+  the 1080p original.
+- **Speech enhance (Sidon)**: audiobook jobs get `se_status`; the companion
+  runs Sidon locally IN PARALLEL with ASR + translation (ASR transcribes the
+  RAW audio — the exact-duration contract keeps its word timestamps valid on
+  the enhanced file; the workflow rendezvouses before marking the job done,
+  and publish ships the enhanced audio with the `speech_enhanced` flag and
+  violet badges end-to-end). Tiers:
+  CUDA (60s chunks), **MPS on Apple Silicon** (~14x realtime; an eager rebuild
+  loading exact merged weights from `cdn.deensubs.com/companion/sidon/` — the
+  published HF adapter is missing the 16 trained output_dense biases, ours are
+  recovered from the frozen TorchScript export), CPU pool fallback. First
+  enhance provisions a cached uv venv + weights under `~/.dsc/enhance`
+  (warmed at app launch); the enhanced file must keep the source duration
+  EXACTLY (3:1 sample contract) so karaoke word timestamps stay accurate.
+
+Binaries with keys baked in (`DS4K_*` env at compile) are on the repo's GitHub
+releases; CI builds mac + windows installers on tags with cargo caching.

@@ -175,52 +175,24 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         } catch {}
       }
 
-      // 1c. Speech enhancement (audiobooks, before ASR — Sidon on a GPU/CPU
-      // companion; the ideal-timeline contract keeps duration exact so the
-      // karaoke timestamps computed downstream stay sample-accurate). Only
-      // offered when a capable companion is online; otherwise the audiobook
-      // proceeds un-enhanced with no flag.
-      let asrSourceKey = dl.key;
-      if (!fullVideo) {
-        const seOffered = await step.do('enhance-offer', async () => {
-          const row: any = await env.DB.prepare('SELECT se_status, speech_enhanced FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-          if (row?.speech_enhanced || row?.se_status === 'done') return false;
-          if (await env.MEDIA_BUCKET.head(`scribe/${jobId}/asr.json`)) return false; // resume past ASR — too late
-          const { onlineCompanions, hasCap } = await import('../companion');
-          if (!hasCap(await onlineCompanions(env), 'enhance')) return false;
-          await env.DB.prepare(
-            "UPDATE scribe_jobs SET se_status = 'wanted', step = 'enhance' WHERE id = ? AND (se_status IS NULL OR se_status = '' OR se_status = 'failed')"
-          ).bind(jobId).run();
-          return true;
-        });
-        if (seOffered) {
-          for (let w = 0; w < 200; w++) { // claimed jobs get hours (CPU Macs are ~realtime)
-            const st: string = await step.do(`enhance-check-${w}`, async () => {
-              const r: any = await env.DB.prepare('SELECT se_status FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-              if (r?.se_status === 'done') return 'done';
-              if (r?.se_status === 'failed') return 'abandon';
-              if (r?.se_status === 'wanted') {
-                if (w >= 20) return 'abandon'; // 20 min unclaimed — move on
-                const { onlineCompanions, hasCap } = await import('../companion');
-                if (!hasCap(await onlineCompanions(env), 'enhance')) return 'abandon';
-              }
-              return 'wait';
-            });
-            if (st === 'done' || st === 'abandon') {
-              if (st === 'abandon') {
-                await step.do('enhance-cancel', async () => {
-                  await env.DB.prepare("UPDATE scribe_jobs SET se_status = NULL WHERE id = ? AND se_status IN ('wanted','failed')").bind(jobId).run();
-                });
-              }
-              break;
-            }
-            await step.sleep(`enhance-wait-${w}`, '60 seconds');
-          }
-          const after: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-          if (after?.source_key) asrSourceKey = after.source_key;
-          await markStage(env, jobId, 'asr');
-        }
-      }
+      // 1c. Speech enhancement offer (audiobooks). ASR transcribes the RAW
+      // audio — the ideal-timeline contract keeps the enhanced file's duration
+      // exact, so word timestamps from the raw transcription stay sample-
+      // accurate on the enhanced audio that ships. Offering here (and waiting
+      // only at the end of the pipeline) lets Sidon run on a companion in
+      // parallel with ASR + translation.
+      const seOffered = !fullVideo
+        ? await step.do('enhance-offer', async () => {
+            const row: any = await env.DB.prepare('SELECT se_status, speech_enhanced FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+            if (row?.speech_enhanced || row?.se_status === 'done') return false;
+            const { onlineCompanions, hasCap } = await import('../companion');
+            if (!hasCap(await onlineCompanions(env), 'enhance')) return false;
+            await env.DB.prepare(
+              "UPDATE scribe_jobs SET se_status = 'wanted' WHERE id = ? AND (se_status IS NULL OR se_status = '' OR se_status = 'failed')"
+            ).bind(jobId).run();
+            return true;
+          })
+        : false;
 
       // 2. ASR (ElevenLabs Scribe v2; chunked automatically for long files)
       const asr = await step.do(
@@ -242,7 +214,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             }
           }
           await stampTime(env, jobId, 'asr');
-          const res = await runAsr(env, jobId, asrSourceKey, dl.durationSec || 0);
+          const res = await runAsr(env, jobId, dl.key, dl.durationSec || 0);
           await stampTime(env, jobId, 'asr_end');
           return { ...res, cached: false };
         }
@@ -421,6 +393,36 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           const c = await generateThumbCandidates(env as any, jobId).catch(() => []);
           return { count: c.length };
         });
+      }
+
+      // Enhancement rendezvous: Sidon has been running on a companion since
+      // the offer at 1c. Settle it before the job is marked reviewable, so
+      // publish never races the source_key swap (publish would ship raw audio
+      // while the flag says enhanced).
+      if (seOffered) {
+        await markStage(env, jobId, 'enhance');
+        for (let w = 0; w < 200; w++) { // claimed jobs get hours (CPU Macs are ~realtime)
+          const st: string = await step.do(`enhance-check-${w}`, async () => {
+            const r: any = await env.DB.prepare('SELECT se_status FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+            if (r?.se_status === 'done') return 'done';
+            if (r?.se_status === 'failed') return 'abandon';
+            if (r?.se_status === 'wanted') {
+              if (w >= 20) return 'abandon'; // still unclaimed after the whole pipeline + 20 min — move on
+              const { onlineCompanions, hasCap } = await import('../companion');
+              if (!hasCap(await onlineCompanions(env), 'enhance')) return 'abandon';
+            }
+            return 'wait';
+          });
+          if (st === 'done' || st === 'abandon') {
+            if (st === 'abandon') {
+              await step.do('enhance-cancel', async () => {
+                await env.DB.prepare("UPDATE scribe_jobs SET se_status = NULL WHERE id = ? AND se_status IN ('wanted','failed')").bind(jobId).run();
+              });
+            }
+            break;
+          }
+          await step.sleep(`enhance-wait-${w}`, '60 seconds');
+        }
       }
 
       await markStage(env, jobId, 'done', {

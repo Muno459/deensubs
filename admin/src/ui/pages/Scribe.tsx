@@ -28,7 +28,7 @@ function stageIndex(step: string): number {
   if (step === 'queued') return -1;
   if (step === 'render') return 2; // rendering counts as translating
   if (step === 'done') return STAGES.length;
-  if (step === 'enhance') return 1; // companion speech enhancement runs just before ASR
+  if (step === 'enhance') return 3; // rendezvous with the parallel companion enhancement at the end
   const i = STAGES.findIndex((s) => s.id === step);
   return i < 0 ? 0 : i;
 }
