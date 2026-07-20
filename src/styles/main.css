@@ -927,7 +927,8 @@ h1,h2,h3{color:#000}a{color:#333}
 .abv .ab-showar .ab-u.on .ab-aw.on{color:#fff}
 .ab-tr{--kfill:var(--tx);--kdim:var(--t3);--kpill:rgba(62,166,152,.13)}
 .abv .ab-tr{--kfill:#fff;--kdim:rgba(232,230,220,.42);--kpill:rgba(69,179,162,.16)}
-.ab-u.on .ab-w.grp,.ab-u.on .ab-aw.fill{background-color:var(--kpill);border-radius:5px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.ab-w,.ab-aw{transition:background-color .18s}
+.ab-u.on .ab-w.grp{background-color:var(--kpill);border-radius:5px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .ab-u.on .ab-w.fill,.ab-u.on .ab-aw.fill{-webkit-background-clip:text!important;background-clip:text!important;color:transparent!important;background-color:transparent}
 .ab-u.on .ab-aw.fill{background-color:transparent}
 .ab-dens{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);width:100%;pointer-events:none;opacity:.85;border-radius:4px}

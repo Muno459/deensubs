@@ -337,20 +337,21 @@ function sweep(u,t){
   if(arOn){
     if(!arWords&&unitEls[active]){var arEl=unitEls[active].querySelector('.ab-ar');arWords=arEl?arEl.querySelectorAll('.ab-aw'):null}
     if(arWords){
-      var la=k-u.w0+(frac>0.5?1:0);
+      var la=k-u.w0;
       if(la!==arLit){
         for(var q=Math.min(la,arLit);q<Math.max(la,arLit);q++){
           if(arWords[q])arWords[q].classList.toggle('on',q<la);
         }
         arLit=la;
       }
-      var ae=(frac>0.04&&frac<0.96)?arWords[k-u.w0]:null;
-      if(arFillEl&&arFillEl!==ae){arFillEl.classList.remove('fill');arFillEl.style.backgroundImage='';arFillEl=null}
+      var ae=arWords[k-u.w0]||null;
+      if(arFillEl&&arFillEl!==ae){arFillEl.classList.remove('fill');arFillEl.style.backgroundImage=''}
       if(ae){
+        var pa=frac*100;
         ae.classList.add('fill');
-        ae.style.backgroundImage='linear-gradient(270deg,var(--kfill) '+(frac*100).toFixed(1)+'%,var(--kdim) '+(frac*100).toFixed(1)+'%)';
-        arFillEl=ae;
+        ae.style.backgroundImage='linear-gradient(270deg,var(--kfill) '+Math.max(0,pa-6).toFixed(1)+'%,var(--kdim) '+Math.min(100,pa+6).toFixed(1)+'%)';
       }
+      arFillEl=ae;
     }
   }
   if(lit!==litCount){
@@ -366,14 +367,18 @@ function sweep(u,t){
     for(var p2=gA;p2<gB;p2++)if(enWords[p2])enWords[p2].classList.add('grp');
     grpLo=gA;grpHi=gB;
   }
-  // continuous sub-word fill at speech rate through the leading word
-  var li=Math.floor(Math.min(cpos,gB-0.001)),lf=cpos-li,le=(lf>0.04&&lf<0.96&&li>=0)?enWords[li]:null;
-  if(fillEl&&fillEl!==le){fillEl.classList.remove('fill');fillEl.style.backgroundImage='';fillEl=null}
+  // continuous sub-word fill through the leading word. The fill NEVER
+  // toggles at boundaries: 0% renders identical to an unread word and 100%
+  // identical to a read one, so handoffs between words are invisible.
+  var li=Math.max(gA,Math.min(gB-1,Math.floor(cpos))),lf=Math.max(0,Math.min(1,cpos-li));
+  var le=(gB>gA&&enWords[li])?enWords[li]:null;
+  if(fillEl&&fillEl!==le){fillEl.classList.remove('fill');fillEl.style.backgroundImage=''}
   if(le){
+    var pc=lf*100;
     le.classList.add('fill');
-    le.style.backgroundImage='linear-gradient(90deg,var(--kfill) '+(lf*100).toFixed(1)+'%,var(--kdim) '+(lf*100).toFixed(1)+'%)';
-    fillEl=le;
+    le.style.backgroundImage='linear-gradient(90deg,var(--kfill) '+Math.max(0,pc-6).toFixed(1)+'%,var(--kdim) '+Math.min(100,pc+6).toFixed(1)+'%)';
   }
+  fillEl=le;
 }
 function tick(){
   var t=au.currentTime;
