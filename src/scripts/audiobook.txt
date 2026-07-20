@@ -21,8 +21,21 @@ tot.textContent=fmt(DUR);
 /* trust the decoder over the DB — covers rows published with duration 0 */
 au.addEventListener('loadedmetadata',function(){
   if(au.duration&&isFinite(au.duration)&&Math.abs(au.duration-DUR)>1){
-    DUR=au.duration;seek.max=DUR;tot.textContent=fmt(DUR);renderTicks();
+    DUR=au.duration;seek.max=DUR;tot.textContent=fmt(DUR);renderTicks();renderDensity();
   }
+});
+var densRAF=null;
+window.addEventListener('resize',function(){cancelAnimationFrame(densRAF);densRAF=requestAnimationFrame(renderDensity)});
+/* transport keys: space, seek arrows, A(rabic), F(ollow) */
+document.addEventListener('keydown',function(e){
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  var tg=(e.target.tagName||'').toLowerCase();
+  if(tg==='input'||tg==='textarea'||tg==='select'||tg==='button'||e.target.isContentEditable)return;
+  if(e.key===' '){e.preventDefault();au.paused?au.play():au.pause()}
+  else if(e.key==='ArrowLeft'){e.preventDefault();au.currentTime=Math.max(0,au.currentTime-15)}
+  else if(e.key==='ArrowRight'){e.preventDefault();au.currentTime=Math.min(DUR||au.duration||0,au.currentTime+15)}
+  else if(e.key==='a'||e.key==='A'){if(arBtn)arBtn.click()}
+  else if(e.key==='f'||e.key==='F'){if(followBtn&&!followBtn.hidden)followBtn.click()}
 });
 
 /* the element that actually scrolls the transcript */
@@ -36,7 +49,7 @@ function centerActive(){
 }
 
 /* ---- transcript ---- */
-var words=[],units=[],unitEls=[],active=-1,follow=true,arOn=false,alignPairs=null;
+var words=[],units=[],unitEls=[],active=-1,follow=true,arOn=false,alignPairs=null,renderDensity=function(){};
 fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='+(window.__TRV||new Date().toISOString().slice(0,10)))
 .then(function(r){if(!r.ok)throw 0;return r.json()})
 .then(function(doc){
@@ -87,12 +100,66 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='
   });
   tr.innerHTML=html;
   unitEls=[];tr.querySelectorAll('.ab-u').forEach(function(el){unitEls[+el.dataset.i]=el});
+  /* ---- speech-density timeline + hover peek, from word timestamps ---- */
+  renderDensity=function(){
+    if(!words.length||!DUR||!seek)return;
+    var wrap=seek.parentElement;if(!wrap)return;
+    if(getComputedStyle(wrap).position==='static')wrap.style.position='relative';
+    var c=wrap.querySelector('.ab-dens');
+    if(!c){c=document.createElement('canvas');c.className='ab-dens';wrap.insertBefore(c,wrap.firstChild)}
+    var W=wrap.clientWidth||600,H=Math.max(16,Math.min(26,wrap.clientHeight||18));
+    c.width=W*2;c.height=H*2;c.style.height=H+'px';
+    var g=c.getContext('2d');g.scale(2,2);g.clearRect(0,0,W,H);
+    var nb=Math.max(80,Math.min(260,W>>2)),bl=DUR/nb;
+    var acc=new Float32Array(nb),spk=new Int8Array(nb);
+    var multi=doc.turns&&doc.turns.length>1;
+    for(var wi=0;wi<words.length;wi++){
+      var ws=words[wi][1],we=words[wi][2];
+      var b0=Math.max(0,Math.floor(ws/bl)),b1=Math.min(nb-1,Math.floor(we/bl));
+      for(var b=b0;b<=b1;b++){
+        acc[b]+=Math.min(we,(b+1)*bl)-Math.max(ws,b*bl);
+        if(multi)spk[b]=turnSpk(wi);
+      }
+    }
+    var bw=W/nb;
+    for(var b2=0;b2<nb;b2++){
+      var d=Math.min(1,acc[b2]/bl);
+      var h=(0.14+0.86*d)*H;
+      g.fillStyle=multi?'hsla('+(Math.round(spk[b2]*137.508)%360)+',42%,58%,.5)':'rgba(69,179,162,.42)';
+      g.fillRect(b2*bw,(H-h)/2,Math.max(1,bw-1),h);
+    }
+    if(!wrap.querySelector('.ab-peek')){
+      var peek=document.createElement('div');peek.className='ab-peek';wrap.appendChild(peek);
+      wrap.addEventListener('pointermove',function(ev){
+        if(ev.pointerType&&ev.pointerType!=='mouse')return;
+        var r=wrap.getBoundingClientRect(),f=Math.max(0,Math.min(1,(ev.clientX-r.left)/Math.max(1,r.width))),t=f*DUR;
+        var i=findUnit(t),head=fmt(t);
+        if(i>=0&&doc.turns&&doc.turns.length&&doc.speakers){
+          var sn=doc.speakers[turnSpk(units[i].w0)];
+          if(sn)head+=' · '+sn;
+        }
+        var chT='';
+        for(var ci=0;ci<chapters.length;ci++)if(chapters[ci].t<=t)chT=chapters[ci].title;
+        var txt=i>=0?units[i].t:'';
+        peek.innerHTML='<b>'+esc(head)+(chT?' · '+esc(chT):'')+'</b>'+(txt?'<span>'+esc(txt.slice(0,72))+(txt.length>72?'…':'')+'</span>':'');
+        peek.style.left=Math.max(60,Math.min(r.width-60,ev.clientX-r.left))+'px';
+        peek.classList.add('on');
+      });
+      wrap.addEventListener('pointerleave',function(){peek.classList.remove('on')});
+    }
+  };
+  renderDensity();
   tr.addEventListener('click',function(ev){
     var ts=ev.target.closest('.ab-tt');
     if(ts){au.currentTime=(+ts.dataset.t)+0.01;au.play();return}
     var el=ev.target.closest('.ab-u');if(!el)return;
     var i=+el.dataset.i,u=units[i],t=u.a;
     // word-level seek: map the clicked English word back to its Arabic word
+    var aw=ev.target.closest('.ab-aw');
+    if(aw){
+      var box=aw.closest('.ab-ar'),ix=Array.prototype.indexOf.call(box.querySelectorAll('.ab-aw'),aw);
+      if(ix>=0&&words[u.w0+ix]){au.currentTime=words[u.w0+ix][1]+0.01;au.play();return}
+    }
     var wEl=ev.target.closest('.ab-w');
     if(!wEl&&ev.target.closest('.ab-en')){
       splitEn(el); // split now, then resolve which word sat under the pointer
@@ -137,8 +204,8 @@ if(arBtn)arBtn.addEventListener('click',function(){
   if(arOn&&!tr.querySelector('.ab-ar')){
     unitEls.forEach(function(el){
       var u=units[+el.dataset.i],ar=[];
-      for(var k=u.w0;k<=u.w1&&k<words.length;k++)ar.push(words[k][0]);
-      var sp=document.createElement('span');sp.className='ab-ar';sp.dir='rtl';sp.textContent=ar.join(' ');
+      for(var k=u.w0;k<=u.w1&&k<words.length;k++)ar.push('<i class="ab-aw">'+esc(words[k][0])+'</i>');
+      var sp=document.createElement('span');sp.className='ab-ar';sp.dir='rtl';sp.innerHTML=ar.join(' ');
       el.appendChild(sp);
     });
   }
@@ -152,7 +219,7 @@ function findUnit(t){ // raw last-started unit; the silence-gap rule lives in ti
     if(units[mid].a<=t){ans=mid;lo=mid+1}else hi=mid-1}
   return ans;
 }
-var wordPtr=0,enWords=null,litCount=0,anch=null;
+var wordPtr=0,enWords=null,litCount=0,anch=null,arWords=null,arLit=0,nowEl=null;
 /* Transliteration anchors: names and Islamic terms appear in BOTH texts
    (al-Fida' <-> \u0627\u0644\u0641\u062f\u0627\u0621). Matching consonant skeletons pins the
    sweep to reality at those words; between anchors it interpolates. */
@@ -220,7 +287,14 @@ function sweep(u,t){
   while(k<u.w1&&words[k+1]&&words[k+1][1]<=t)k++;
   while(k>u.w0&&words[k]&&words[k][1]>t)k--;
   wordPtr=k;
-  var w=words[k],frac=w?Math.max(0,Math.min(1,(t-w[1])/Math.max(0.05,w[2]-w[1]))):0;
+  // the unit's last word extends its fill window into the trailing pause:
+  // translator additions with no audio time read out over the reciter's
+  // breath instead of flashing at the word's end
+  var w=words[k],wEnd=w?w[2]:0;
+  if(w&&k===u.w1&&active+1<units.length){
+    wEnd=Math.max(wEnd,Math.min(units[active+1].a,wEnd+2.5));
+  }
+  var frac=w?Math.max(0,Math.min(1,(t-w[1])/Math.max(0.05,wEnd-w[1]))):0;
   var pos=k-u.w0+frac,lit;
   if(anch&&anch.length&&typeof anch[0]==='number'){
     // complete word map: sweep through the group across the word's duration
@@ -239,11 +313,30 @@ function sweep(u,t){
     lit=Math.round(Math.max(0,Math.min(1,pos/span))*enWords.length);
   }
   lit=Math.max(0,Math.min(enWords.length,lit));
-  if(lit===litCount)return;
+  // exact source karaoke: Arabic words carry their own timestamps
+  if(arOn){
+    if(!arWords&&unitEls[active]){var arEl=unitEls[active].querySelector('.ab-ar');arWords=arEl?arEl.querySelectorAll('.ab-aw'):null}
+    if(arWords){
+      var la=k-u.w0+(frac>0.5?1:0);
+      if(la!==arLit){
+        for(var q=Math.min(la,arLit);q<Math.max(la,arLit);q++){
+          if(arWords[q])arWords[q].classList.toggle('on',q<la);
+        }
+        arLit=la;
+      }
+    }
+  }
+  if(lit===litCount&&nowEl===enWords[lit-1])return;
   for(var i=Math.min(lit,litCount);i<Math.max(lit,litCount);i++){
     if(enWords[i])enWords[i].classList.toggle('on',i<lit);
   }
   litCount=lit;
+  var lead=lit>0?enWords[lit-1]:null;
+  if(lead!==nowEl){
+    if(nowEl)nowEl.classList.remove('now');
+    nowEl=lead;
+    if(nowEl)nowEl.classList.add('now');
+  }
 }
 function tick(){
   var t=au.currentTime;
@@ -255,8 +348,10 @@ function tick(){
       if(active>=0&&unitEls[active]){
         unitEls[active].classList.remove('on');
         if(enWords)enWords.forEach(function(w){w.classList.remove('on')});
+        if(arWords)arWords.forEach(function(w){w.classList.remove('on')});
       }
-      active=i;enWords=null;litCount=0;anch=null;
+      active=i;enWords=null;litCount=0;anch=null;arWords=null;arLit=0;
+      if(nowEl){nowEl.classList.remove('now');nowEl=null}
       if(i>=0&&unitEls[i]){
         unitEls[i].classList.add('on');wordPtr=units[i].w0;
         enWords=splitEn(unitEls[i]);
