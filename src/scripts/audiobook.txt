@@ -14,7 +14,7 @@ tot.textContent=fmt(DUR);
 
 /* ---- transcript ---- */
 var words=[],units=[],unitEls=[],active=-1,follow=true,followTimer=0,arOn=false;
-fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json')
+fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='+new Date().toISOString().slice(0,10))
 .then(function(r){if(!r.ok)throw 0;return r.json()})
 .then(function(doc){
   words=doc.words||[];
