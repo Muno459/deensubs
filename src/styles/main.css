@@ -911,7 +911,6 @@ h1,h2,h3{color:#000}a{color:#333}
 .ab-p{font-size:1.08rem;line-height:2;color:var(--t2);margin-bottom:1.15em}
 .ab-dim{color:var(--t3)}
 .ab-u{cursor:pointer;border-radius:6px;padding:.08em .15em;margin:-.08em -.05em;transition:color .25s}
-.ab-u:not(.on):hover{color:var(--tx)}
 .ab-u.was{color:var(--tx)}
 .ab-u.on .ab-w.on{color:var(--tx)}
 .ab-ar{display:none;color:var(--t3);font-size:.94em;margin-inline-start:.35em}
@@ -971,7 +970,6 @@ h1,h2,h3{color:#000}a{color:#333}
 .abv-txt .ab-tr{background:none;border:none;box-shadow:none;border-radius:0;padding:0;max-height:none;overflow:visible}
 .abv .ab-p{font-size:1.7cqi;line-height:1.8;font-weight:500;color:rgba(232,230,220,.42);margin-bottom:1.35em;text-shadow:0 1px 10px rgba(0,0,0,.4)}
 .abv .ab-u{transition:color .3s;border-radius:.3em;padding:.04em .12em;margin:-.04em -.12em}
-.abv .ab-u:not(.on):hover{color:rgba(236,234,223,.75)}
 .abv .ab-u.was{color:#fff}
 .abv .ab-u.on .ab-w.on{color:#fff}
 .abv .ab-ar{color:rgba(232,230,220,.35)}
