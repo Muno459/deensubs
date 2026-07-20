@@ -13,6 +13,10 @@ import AB_JS from '../scripts/audiobook.min.txt';
 import { scard } from '../components/video-card.js';
 import { tsvg } from '../components/thumbnail.js';
 
+const primaryLang = (v) => {
+  try { return JSON.parse(v.srt_langs || '[]')[0] || 'en'; } catch { return 'en'; }
+};
+
 export function renderAudiobook({ video, related, base, playlist }) {
   const th = thu(video);
   const dur = video.duration || 0;
@@ -133,6 +137,7 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
         <div class="wi-acts">
           <button class="wa" id="ab-share" title="Share" aria-label="Share this audiobook"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span>Share</span></button>
           <a class="wa" href="/api/media/${e(video.video_key)}" download title="Download audio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download</span></a>
+          <a class="wa" href="/api/media/transcripts/${e(video.slug)}-${e(primaryLang(video))}.txt" download title="Download the transcript (.txt, speaker-labelled)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg><span>Transcript</span></a>
         </div>
       </div>
       <div class="wi-mt">

@@ -35,6 +35,7 @@ RULES:
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
 - Keep as transliterations (do not translate): fatwa, mufti, Sharia, fiqh, usul al-fiqh, ifta, Haramain, madhhab, and similar established terms.
 - Quranic verses and hadith quotations: use established translation wording, wrapped in quotes and *italicized* with single asterisks.
+- Nested quotations use single quotes inside double quotes — never two double quotes in a row.
 - **Bold** (double asterisks) sparingly for a key term being defined or emphasized by the speaker.
 - No other markdown, no commentary, no code fences — only JSONL lines.`;
 
@@ -329,13 +330,17 @@ Rules: flowing book-quality prose with full punctuation, keep honorifics (Allah 
 export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson?: string | null): any {
   const words = cleanWords(allWords);
   const r2 = (n: number) => Math.round(n * 100) / 100;
+  // LLM quote hygiene: collapse runs of double-quote glyphs (a citation
+  // nested directly inside a spoken quotation) into one, preferring curly
+  const dedupeQuotes = (s: string) =>
+    s.replace(/["“”]{2,}/g, (m) => (m.includes('”') ? '”' : m.includes('“') ? '“' : '"'));
   const unitArr: [string, number, number][] = [];
   const paragraphs: [number, number][] = [];
   const ordered = [...cues].sort((a, b) => a.w[0] - b.w[0]);
   let pStart = 0;
   for (let i = 0; i < ordered.length; i++) {
     const c = ordered[i];
-    unitArr.push([c.text, c.w[0], c.w[1]]);
+    unitArr.push([dedupeQuotes(c.text), c.w[0], c.w[1]]);
     const next = ordered[i + 1];
     const gap = next ? words[next.w[0]].start - words[c.w[1]].end : 99;
     const sentenceEnd = /[.!?؟”)]$/.test(c.text.trim());
