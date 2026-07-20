@@ -121,6 +121,7 @@ function renderStage({ video, related, playlist, card, th, dur, chapters, jsonLd
               <span class="abv-chl ab-chl-t" id="ab-chlabel"></span>
               <button class="vb" id="ab-arbtn" title="Show Arabic">ع</button>
               <button class="vb vb-spd" id="ab-speed" title="Playback speed">1×</button>
+              <button class="vb vb-spd" id="ab-sleep" title="Sleep timer">☾</button>
               <button class="vb" id="ab-fs" title="Fullscreen (f)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg></button>
             </div>
           </div>
@@ -217,6 +218,7 @@ function renderClassic({ video, related, th, dur, chapters, jsonLd, audioTag, sc
     </div>
     <div class="ab-btnrow">
       <button class="ab-side" id="ab-speed" title="Playback speed">1×</button>
+      <button class="ab-side" id="ab-sleep" title="Sleep timer">☾</button>
       <button class="ab-skip" id="ab-back" title="Back 15 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="26" height="26"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg></button>
       <button class="ab-playbtn" id="ab-play" aria-label="Play/Pause">
         <svg class="ab-ic-play" viewBox="0 0 24 24" fill="currentColor" width="30" height="30"><path d="M8 5v14l11-7z"/></svg>

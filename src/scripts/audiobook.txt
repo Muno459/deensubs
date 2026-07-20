@@ -362,5 +362,51 @@ if('mediaSession' in navigator){
   navigator.mediaSession.setActionHandler('seekforward',function(){fwd.click()});
   navigator.mediaSession.setActionHandler('play',function(){au.play()});
   navigator.mediaSession.setActionHandler('pause',function(){au.pause()});
+  try{
+    navigator.mediaSession.setActionHandler('seekto',function(d){
+      if(d.fastSeek&&au.fastSeek){au.fastSeek(d.seekTime);return}
+      au.currentTime=d.seekTime;
+    });
+  }catch(e){}
+  // real progress bar + speed on the lock screen
+  var msPos=function(){
+    if(!DUR||!isFinite(DUR))return;
+    try{navigator.mediaSession.setPositionState({duration:DUR,playbackRate:au.playbackRate,position:Math.min(au.currentTime,DUR)})}catch(e){}
+  };
+  au.addEventListener('timeupdate',function(){if(Math.floor(au.currentTime)%5===0)msPos()});
+  au.addEventListener('ratechange',msPos);
+  au.addEventListener('seeked',msPos);
+}
+
+/* ---- sleep timer: moon button cycles Off / 15 / 30 / 45 / 60 min ---- */
+var slBtn=$('ab-sleep');
+if(slBtn){
+  var slSteps=[0,15,30,45,60],slIdx=0,slDeadline=0,slTick=null;
+  var slPill=function(msg){
+    var p=document.createElement('div');p.className='ab-resumed';p.textContent=msg;
+    document.body.appendChild(p);
+    setTimeout(function(){p.classList.add('out');setTimeout(function(){p.remove()},450)},2200);
+  };
+  slBtn.addEventListener('click',function(){
+    slIdx=(slIdx+1)%slSteps.length;
+    clearInterval(slTick);slTick=null;
+    if(!slSteps[slIdx]){
+      slBtn.classList.remove('on');slBtn.textContent='☾';
+      slPill('Sleep timer off');return;
+    }
+    slDeadline=performance.now()+slSteps[slIdx]*60000;
+    slBtn.classList.add('on');
+    slPill('Sleep in '+slSteps[slIdx]+' min');
+    slTick=setInterval(function(){
+      var left=slDeadline-performance.now();
+      if(left<=0){
+        clearInterval(slTick);slTick=null;slIdx=0;
+        slBtn.classList.remove('on');slBtn.textContent='☾';
+        au.pause();slPill('Sleep timer — paused');return;
+      }
+      slBtn.textContent=Math.ceil(left/60000)+'m';
+    },5000);
+    slBtn.textContent=slSteps[slIdx]+'m';
+  });
 }
 })();
