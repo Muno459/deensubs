@@ -39,7 +39,7 @@ export function renderAudiobook({ video, related, base, playlist }) {
     duration: dur ? `PT${Math.floor(dur / 60)}M${dur % 60}S` : undefined,
   }).replace(/</g, '\\u003c');
 
-  const audioTag = `<script>window.__TRV=${Number(video.media_v)||0};${video.scholar_name ? `window.__SCH={n:${jsStr(video.scholar_name)},i:${video.scholar_photo ? jsStr(schImgSm(video.scholar_photo)) : '""'}};` : ''}</script><audio id="ab-audio" src="${cdn(video.video_key)}${video.media_v ? `?v=${video.media_v}` : ''}" preload="metadata"></audio>`;
+  const audioTag = `<script>window.__TRV=${Number(video.media_v)||0};${video.scholar_name ? `window.__SCH={n:'${jsStr(video.scholar_name)}',i:'${video.scholar_photo ? jsStr(schImgSm(video.scholar_photo)) : ''}'};` : ''}</script><audio id="ab-audio" src="${cdn(video.video_key)}${video.media_v ? `?v=${video.media_v}` : ''}" preload="metadata"></audio>`;
   const scriptTag = `<script>${AB_JS
     .replace('__ORIG__', video.orig_key ? e(cdn(video.orig_key) + (video.media_v ? `?v=${video.media_v}` : '')) : '')
     .replace('__SLUG__', e(video.slug))

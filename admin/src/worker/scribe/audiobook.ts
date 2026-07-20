@@ -643,6 +643,7 @@ export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> 
     '- "m" lists EVERY Arabic word of the unit, in order, each copied EXACTLY.\n' +
     '- Attach to each Arabic word the English words a reader should finish as that word is spoken. Concatenating all English fields MUST reproduce the English text exactly — same words, same order, nothing added or dropped. Use "" for an Arabic word that adds no new English words (e.g. merged honorifics).\n' +
     '- When word order differs between the languages, attach the displaced English words to the Arabic word at whose position the READER passes them (keep English order; never reorder English).\n' +
+    '- Inside Quranic quotes or any passage where word-by-word correspondence is unclear, distribute the English words roughly evenly across the Arabic words — the reader must advance steadily, never receive a long run on one word.\n' +
     'Every line MUST start with {"u". No commentary, no code fences.';
   const enWords = (i: number) => units[i][0].replace(/\*+/g, '').split(/\s+/).filter(Boolean);
   const normAr = (w: string) =>
@@ -653,18 +654,50 @@ export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> 
     const [, w0, w1] = units[i];
     const span = w1 - w0 + 1;
     if (!Array.isArray(m) || m.length !== span) return false;
-    const enw = enWords(i);
     const flat: string[] = [];
-    const cum: number[] = [];
+    const flatG: number[] = [];
     for (let j = 0; j < span; j++) {
       const pair = m[j];
       if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string' || typeof pair[1] !== 'string') return false;
       if (normAr(pair[0]) !== normAr(words[w0 + j][0])) return false;
-      for (const t of pair[1].split(/\s+/)) if (t) flat.push(t);
-      cum.push(flat.length);
+      for (const t of pair[1].split(/\s+/)) if (t) { flat.push(t); flatG.push(j); }
     }
-    if (flat.length !== enw.length) return false;
-    for (let j = 0; j < flat.length; j++) if (normEn(flat[j]) !== normEn(enw[j])) return false;
+    // Two-pointer walk instead of naive equality: the model may split tokens
+    // the player keeps joined ("Allah\u2014abundant") or vice versa. Reference
+    // tokenization (the player's whitespace split) always wins; each reference
+    // token lands in the group of the model token that completes it.
+    const ref = enWords(i);
+    const rn = ref.map(normEn);
+    const mn = flat.map(normEn);
+    const endG: number[] = [];
+    let ri = 0, mi = 0;
+    while (ri < rn.length) {
+      if (!rn[ri]) { endG[ri] = mi < flatG.length ? flatG[mi] : span - 1; ri++; continue; }
+      while (mi < mn.length && !mn[mi]) mi++;
+      if (mi >= mn.length) return false;
+      if (rn[ri] === mn[mi]) { endG[ri] = flatG[mi]; ri++; mi++; continue; }
+      if (rn[ri].startsWith(mn[mi])) {
+        let acc = mn[mi], g = flatG[mi]; mi++;
+        while (mi < mn.length && acc.length < rn[ri].length) { acc += mn[mi]; g = flatG[mi]; mi++; }
+        if (acc !== rn[ri]) return false;
+        endG[ri] = g; ri++; continue;
+      }
+      if (mn[mi].startsWith(rn[ri])) {
+        let acc = rn[ri]; const g = flatG[mi];
+        endG[ri] = g; ri++;
+        while (ri < rn.length && acc.length < mn[mi].length) { acc += rn[ri]; endG[ri] = g; ri++; }
+        if (acc !== mn[mi]) return false;
+        mi++; continue;
+      }
+      return false;
+    }
+    while (mi < mn.length && !mn[mi]) mi++;
+    if (mi !== mn.length) return false;
+    const cum: number[] = [];
+    for (let j = 0, c = 0; j < span; j++) {
+      while (c < endG.length && endG[c] <= j) c++;
+      cum.push(c);
+    }
     out[i] = cum;
     return true;
   };
@@ -713,6 +746,38 @@ export async function alignUnits(env: ScribeEnv, doc: any): Promise<number[][]> 
     for (const ch of x) o += MAP[ch] !== undefined ? MAP[ch] : ch;
     return o.replace(/[^a-z]/g, '').replace(/[aeiouwhy]/g, '');
   };
+  // Smoothing, two passes. (1) A giant group flanked by empty ones spreads
+  // across the run. (2) Canonical Quran translations run 4-7x wordier than
+  // the recited Arabic and the surplus piles up at unit edges — 20-word
+  // walls at 20+ words/sec. In those wordy units (EN/AR >= 2.5) the curve
+  // is clamped to within ±4 words of steady time-proportional reading; the
+  // reader sweeps the quote at the reciter's pace. Prose units and their
+  // name anchors are untouched (and the twin repair re-pins names after).
+  for (let i = 0; i < units.length; i++) {
+    const cum = out[i];
+    if (cum.length < 2) continue;
+    const size = (j: number) => cum[j] - (j ? cum[j - 1] : 0);
+    for (let j = 0; j < cum.length; j++) {
+      if (size(j) < 6) continue;
+      let a = j, b = j;
+      while (a > 0 && size(a - 1) === 0) a--;
+      while (b + 1 < cum.length && size(b + 1) === 0) b++;
+      if (a === b) continue;
+      const lo = a ? cum[a - 1] : 0, hi = cum[b], n = b - a + 1;
+      for (let m = 0; m < n - 1; m++) cum[a + m] = lo + Math.round(((m + 1) * (hi - lo)) / n);
+    }
+    const [, w0, w1] = units[i];
+    const enLen = cum[cum.length - 1];
+    if (enLen / cum.length >= 2.5) {
+      const t0 = words[w0][1], t1 = Math.max(t0 + 0.1, words[w1][2]);
+      for (let j = 0; j < cum.length - 1; j++) {
+        const ideal = (enLen * (words[w0 + j][2] - t0)) / (t1 - t0);
+        cum[j] = Math.max(Math.ceil(ideal) - 4, Math.min(Math.floor(ideal) + 4, cum[j]));
+        if (j && cum[j] < cum[j - 1]) cum[j] = cum[j - 1];
+        cum[j] = Math.max(0, Math.min(enLen, cum[j]));
+      }
+    }
+  }
   for (let i = 0; i < units.length; i++) {
     const cum = out[i];
     if (!cum.length) continue;

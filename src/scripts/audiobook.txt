@@ -69,11 +69,12 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='
     if(!units[p[0]]||!units[p[1]])return;
     var w0=units[p[0]].w0,at=words[w0]?words[w0][1]:0;
     var sIdx=turnSpk(w0);
-    var showHead=doc.turns&&doc.turns.length&&sIdx!==prevS;
-    prevS=sIdx;
+    var multi=doc.turns&&doc.turns.length;
+    var showHead=multi?sIdx!==prevS:(prevS===null&&window.__SCH&&window.__SCH.n);
+    prevS=multi?sIdx:0;
     html+='<div class="ab-turn'+(showHead?'':' solo')+'"><div class="ab-thead">';
     if(showHead){
-      var name=(doc.speakers&&doc.speakers[sIdx])||('Speaker '+(sIdx+1));
+      var name=(doc.speakers&&doc.speakers[sIdx])||(!multi&&window.__SCH?window.__SCH.n:'Speaker '+(sIdx+1));
       var hue=Math.round(sIdx*137.508)%360;
       var sch=window.__SCH&&window.__SCH.i&&name.toLowerCase()===window.__SCH.n.toLowerCase();
       html+=(sch?'<img class="ab-av" src="'+esc(window.__SCH.i)+'" alt="" loading="lazy">'
@@ -222,8 +223,10 @@ function sweep(u,t){
   var w=words[k],frac=w?Math.max(0,Math.min(1,(t-w[1])/Math.max(0.05,w[2]-w[1]))):0;
   var pos=k-u.w0+frac,lit;
   if(anch&&anch.length&&typeof anch[0]==='number'){
-    // complete word map: an Arabic word lights its whole English group at once
-    lit=anch[Math.max(0,Math.min(anch.length-1,k-u.w0))];
+    // complete word map: sweep through the group across the word's duration
+    var gk=Math.max(0,Math.min(anch.length-1,k-u.w0)),g0=gk?anch[gk-1]:0;
+    lit=g0+Math.ceil(frac*(anch[gk]-g0));
+    if(anch[gk]>g0&&lit===g0)lit=g0+1;
   }else if(anch&&anch.length){
     var pts=[[0,0]].concat(anch).concat([[span,enWords.length]]);
     var lo=pts[0],hi=pts[pts.length-1];
