@@ -1047,6 +1047,9 @@ app.post('/api/scribe/:id/fetch-video', async (c) => {
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
   if (!job) return c.json({ error: 'Not found' }, 404);
   if (/\.(mp4|webm|mkv|mov)$/i.test(job.source_key || '')) return c.json({ error: 'Job already has video' }, 400);
+  // Local uploads have no URL to fetch from — and this endpoint deletes the
+  // source before re-downloading, which would destroy the only copy.
+  if ((job.url || '').startsWith('upload://')) return c.json({ error: 'This job came from a local upload — there is no video to fetch. Publish it as an audiobook instead.' }, 400);
   await terminateJob(c.env, job);
   if (job.source_key) await c.env.MEDIA_BUCKET.delete(job.source_key).catch(() => {});
   const langs = JSON.parse(job.target_langs || `["${job.target_lang}"]`);

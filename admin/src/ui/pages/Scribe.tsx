@@ -568,23 +568,34 @@ function JobDetail({ job }: { job: any }) {
                 <Icon name="video" className="h-3 w-3" /> Publish as video
               </button>
             ) : (
-              <button
-                disabled={fetchingVideo}
-                onClick={async () => {
-                  setFetchingVideo(true);
-                  try {
-                    await api(`/api/scribe/${job.id}/fetch-video`, { method: 'POST' });
-                    toast.push('Fetching video — publish unlocks when it lands');
-                  } catch (e: any) {
-                    toast.push(e.message, 'error');
-                  }
-                  setFetchingVideo(false);
-                }}
-                title="Downloads the video for this URL (transcript + subtitles reused), then Publish unlocks"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-ink transition-all hover:bg-gold-bright active:scale-[0.97] disabled:opacity-50"
-              >
-                <Icon name="video" className="h-3 w-3" /> {fetchingVideo ? 'Starting...' : 'Fetch video to publish'}
-              </button>
+              <>
+                <button
+                  onClick={() => setPublishOpen(true)}
+                  title="Publishes the audio with the karaoke transcript player — pick scholar, artwork, and title in the wizard"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-ink transition-all hover:bg-gold-bright active:scale-[0.97]"
+                >
+                  <Icon name="play" className="h-3 w-3" /> Publish audiobook
+                </button>
+                {!String(job.url || '').startsWith('upload://') && (
+                  <button
+                    disabled={fetchingVideo}
+                    onClick={async () => {
+                      setFetchingVideo(true);
+                      try {
+                        await api(`/api/scribe/${job.id}/fetch-video`, { method: 'POST' });
+                        toast.push('Fetching video — publish unlocks when it lands');
+                      } catch (e: any) {
+                        toast.push(e.message, 'error');
+                      }
+                      setFetchingVideo(false);
+                    }}
+                    title="Downloads the video for this URL (transcript + subtitles reused), then Publish as video unlocks"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-semibold text-muted transition-all hover:text-cream active:scale-[0.97] disabled:opacity-50"
+                  >
+                    <Icon name="video" className="h-3 w-3" /> {fetchingVideo ? 'Starting...' : 'Fetch video instead'}
+                  </button>
+                )}
+              </>
             )
           )}
           {job.status === 'done' && (
