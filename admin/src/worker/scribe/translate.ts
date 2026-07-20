@@ -115,6 +115,35 @@ function parseSse(text: string): string {
  * answer with an SSE stream even when stream:false is sent, so both shapes
  * are handled.
  */
+/** Audio-in-the-loop: cut this window's slice of the source recording as a
+ * small 16 kHz mono mp3 and shape it as an OpenAI-style input_audio content
+ * part, so Gemini HEARS the passage while translating. Returns null on any
+ * failure — callers always degrade to today's text-only request. */
+export type AudioOpts = { jobId: string; sourceUrl: string };
+export async function windowAudio(env: ScribeEnv, opts: AudioOpts, startSec: number, endSec: number): Promise<any | null> {
+  try {
+    const start = Math.max(0, startSec - 1);
+    const dur = Math.min(480, endSec - start + 2);
+    if (!(dur > 2)) return null;
+    const { containerCall } = await import('./asr');
+    const res = await containerCall(env, 'aclip-' + opts.jobId, '/audioclip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: opts.sourceUrl, start, dur }),
+    });
+    if (!res.ok) return null;
+    const { b64 } = (await res.json()) as any;
+    if (!b64 || b64.length > 4_000_000) return null;
+    return { type: 'input_audio', input_audio: { data: b64, format: 'mp3' } };
+  } catch {
+    return null;
+  }
+}
+
+/** Appended to the system prompt ONLY when the window's audio is attached. */
+export const AUDIO_NOTE =
+  '\n- You are ALSO given the actual audio of this passage (it begins at the first listed word). Listen to it: tone, pauses, emphasis and recitation style should inform both your wording and where you segment. The numbered words remain the authoritative transcript.';
+
 export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000, model?: string): Promise<string> {
   const base = (env.SCRIBE_LLM_URL || '').replace(/\/$/, '');
   const res = await fetch(`${base}/v1/chat/completions`, {
@@ -208,18 +237,23 @@ async function translateWindow(
   env: ScribeEnv,
   targetLang: string,
   win: CleanWord[],
-  prevTail: string
+  prevTail: string,
+  audio?: any | null
 ): Promise<{ w: [number, number]; t: string }[]> {
   const lo = win[0].i;
   const hi = win[win.length - 1].i;
-  const messages = [
-    { role: 'system', content: SYSTEM_PROMPT(targetLang) },
-    { role: 'user', content: windowPrompt(win, prevTail) },
-  ];
+  const userText = windowPrompt(win, prevTail);
 
-  // Ladder: primary twice, then the strong model
+  // Ladder: primary twice, then the strong model. Audio rides only on the
+  // primary (Gemini) attempts — the strong fallback sends the exact
+  // text-only request the pipeline always sent.
   let cues: { w: [number, number]; t: string }[] = [];
   for (const model of [undefined, undefined, STRONG_MODEL]) {
+    const withAudio = !!audio && model === undefined;
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT(targetLang) + (withAudio ? AUDIO_NOTE : '') },
+      { role: 'user', content: withAudio ? [{ type: 'text', text: userText }, audio] : userText },
+    ];
     try {
       cues = parseCues(await llmChat(env, messages, 8000, model), win);
       if (cues.length) break;
@@ -253,7 +287,8 @@ async function translateWindow(
 export async function translateWords(
   env: ScribeEnv,
   allWords: Word[],
-  targetLang: string
+  targetLang: string,
+  audioOpts?: AudioOpts
 ): Promise<Cue[]> {
   const words = cleanWords(allWords);
   if (!words.length) throw new Error('No speech words found in ASR result');
@@ -297,10 +332,13 @@ export async function translateWords(
   for (let i = 0; i < windows.length; i += CONCURRENCY) {
     const batch = windows.slice(i, i + CONCURRENCY);
     const settled = await Promise.all(
-      batch.map((win, j) => {
+      batch.map(async (win, j) => {
         const prev = windows[i + j - 1];
         const prevTail = prev ? prev.slice(-12).map((w) => w.text).join(' ') : '';
-        return translateWindow(env, targetLang, win, prevTail);
+        const audio = audioOpts
+          ? await windowAudio(env, audioOpts, win[0].start, win[win.length - 1].end)
+          : null;
+        return translateWindow(env, targetLang, win, prevTail, audio);
       })
     );
     settled.forEach((cues, j) => (results[i + j] = cues));

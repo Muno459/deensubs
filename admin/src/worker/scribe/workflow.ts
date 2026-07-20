@@ -257,9 +257,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             }
             if (lang === primary) await stampTime(env, jobId, 'translate');
             const data = await loadAsr(env, asr.asrKey);
+            // Audio-in-the-loop: each window's slice of the RAW recording is
+            // attached so the model hears tone, pauses and emphasis while
+            // translating and segmenting (fail-open — any clip failure falls
+            // back to the text-only request).
+            const audioOpts = { jobId, sourceUrl: `https://cdn.deensubs.com/${dl.key}` };
             const cues = isAudiobook
-              ? await translateWordsAudiobook(env, data.words, lang)
-              : await translateWords(env, data.words, lang);
+              ? await translateWordsAudiobook(env, data.words, lang, audioOpts)
+              : await translateWords(env, data.words, lang, audioOpts);
             await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(cues), {
               httpMetadata: { contentType: 'application/json' },
             });

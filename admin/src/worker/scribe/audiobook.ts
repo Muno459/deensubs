@@ -12,7 +12,7 @@
 // shape are its own. translate.ts (video) is never touched by this file.
 
 import type { Cue, ScribeEnv, Word } from './types';
-import { cleanWords, makeWindows, llmChat, type CleanWord } from './translate';
+import { cleanWords, makeWindows, llmChat, windowAudio, type AudioOpts, type CleanWord } from './translate';
 import { findQuranQuotes, citeQuote } from './quran';
 
 export type AudioCue = Cue & { w: [number, number] };
@@ -92,20 +92,29 @@ function holes(units: { w: [number, number] }[], lo: number, hi: number): [numbe
   return out;
 }
 
+/** Appended to the system prompt ONLY when the window's audio is attached. */
+const AUDIO_NOTE_AB =
+  '\n- You are ALSO given the actual audio of this passage (it begins at the first listed word). LISTEN to it: let what you hear — pauses, breath, cadence, recitation vs commentary, speaker changes — decide unit boundaries together with the [GAP]/[SPEAKER] markers, and let tone and emphasis inform your wording. The numbered words remain the authoritative transcript.';
+
 async function translateWindow(
   env: ScribeEnv,
   targetLang: string,
   win: CleanWord[],
-  prevTail: string
+  prevTail: string,
+  audio?: any | null
 ): Promise<{ w: [number, number]; t: string }[]> {
   const lo = win[0].i;
   const hi = win[win.length - 1].i;
-  const messages = [
-    { role: 'system', content: SYSTEM_PROMPT(targetLang) },
-    { role: 'user', content: windowPrompt(win, prevTail) },
-  ];
+  const userText = windowPrompt(win, prevTail);
   let units: { w: [number, number]; t: string }[] = [];
+  // Audio rides only on the primary (Gemini) attempts; the strong fallback
+  // sends the plain text-only request.
   for (const model of [undefined, undefined, STRONG_MODEL]) {
+    const withAudio = !!audio && model === undefined;
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT(targetLang) + (withAudio ? AUDIO_NOTE_AB : '') },
+      { role: 'user', content: withAudio ? [{ type: 'text', text: userText }, audio] : userText },
+    ];
     try {
       units = parseUnits(await llmChat(env, messages, 8000, model), win);
       if (units.length) break;
@@ -155,7 +164,7 @@ async function translateWindow(
 }
 
 /** Audiobook translation: words → ordered prose units with word spans kept. */
-export async function translateWordsAudiobook(env: ScribeEnv, allWords: Word[], targetLang: string): Promise<AudioCue[]> {
+export async function translateWordsAudiobook(env: ScribeEnv, allWords: Word[], targetLang: string, audioOpts?: AudioOpts): Promise<AudioCue[]> {
   const words = cleanWords(allWords);
   if (!words.length) throw new Error('No speech words found in ASR result');
 
@@ -195,10 +204,13 @@ export async function translateWordsAudiobook(env: ScribeEnv, allWords: Word[], 
   for (let i = 0; i < windows.length; i += CONCURRENCY) {
     const batch = windows.slice(i, i + CONCURRENCY);
     const settled = await Promise.all(
-      batch.map((win, j) => {
+      batch.map(async (win, j) => {
         const prev = windows[i + j - 1];
         const prevTail = prev ? prev.slice(-12).map((w) => w.text).join(' ') : '';
-        return translateWindow(env, targetLang, win, prevTail);
+        const audio = audioOpts
+          ? await windowAudio(env, audioOpts, win[0].start, win[win.length - 1].end)
+          : null;
+        return translateWindow(env, targetLang, win, prevTail, audio);
       })
     );
     settled.forEach((units, j) => (results[i + j] = units));

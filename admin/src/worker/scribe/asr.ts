@@ -149,7 +149,7 @@ async function pool<T, R>(items: T[], limit: number, fn: (item: T, i: number) =>
   return results;
 }
 
-async function containerCall(env: ScribeEnv, name: string, path: string, init?: RequestInit): Promise<Response> {
+export async function containerCall(env: ScribeEnv, name: string, path: string, init?: RequestInit): Promise<Response> {
   const { getContainer } = await import('@cloudflare/containers');
   const container = getContainer(env.YTDLP as any, name);
   const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };

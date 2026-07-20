@@ -569,6 +569,32 @@ class Handler(BaseHTTPRequestHandler):
                 jobs[job_id] = {"status": "running", "kind": "clip"}
             threading.Thread(target=run_clip, args=(job_id, payload), daemon=True).start()
             return self._send(200, {"id": job_id})
+        if self.path == "/audioclip":
+            # Synchronous window clip for audio-in-the-loop translation:
+            # cut [start, start+dur] from the source, downmix to 16 kHz mono
+            # mp3 (small enough to inline into an LLM request), return base64.
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                return self._send(400, {"error": "bad JSON"})
+            if not re.match(r"^https?://", payload.get("url", "")):
+                return self._send(400, {"error": "valid url required"})
+            try:
+                start = max(0.0, float(payload.get("start") or 0))
+                dur = min(480.0, max(1.0, float(payload.get("dur") or 0)))
+            except (TypeError, ValueError):
+                return self._send(400, {"error": "start/dur required"})
+            proc = subprocess.run(
+                ["ffmpeg", "-v", "error", "-ss", str(start), "-t", str(dur),
+                 "-i", payload["url"], "-vn", "-ac", "1", "-ar", "16000",
+                 "-b:a", "32k", "-f", "mp3", "pipe:1"],
+                capture_output=True, timeout=180,
+            )
+            if proc.returncode != 0 or not proc.stdout:
+                return self._send(502, {"error": (proc.stderr or b"").decode()[-200:] or "empty clip"})
+            import base64 as _b64
+            return self._send(200, {"b64": _b64.b64encode(proc.stdout).decode(), "bytes": len(proc.stdout)})
         if self.path == "/split":
             try:
                 length = int(self.headers.get("Content-Length", "0"))

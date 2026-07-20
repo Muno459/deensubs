@@ -1152,6 +1152,17 @@ app.get('/api/scribe/stt-get-raw/:tid', async (c) => {
   });
 });
 
+app.post('/api/scribe/audioclip-test', async (c) => {
+  const { url, start, dur } = await c.req.json();
+  const { containerCall } = await import('./scribe/asr');
+  const res = await containerCall(c.env as any, 'aclip-test', '/audioclip', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, start: start || 0, dur: dur || 30 }),
+  });
+  const body: any = await res.json().catch(() => ({}));
+  return c.json({ status: res.status, bytes: body.bytes || 0, b64_len: (body.b64 || '').length, error: body.error || null });
+});
+
 app.get('/api/scribe/stt-transcripts', async (c) => {
   const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text/transcripts?page_size=30', {
     headers: { 'xi-api-key': c.env.ELEVENLABS_API_KEY! },
