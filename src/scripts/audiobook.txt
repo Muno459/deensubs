@@ -228,7 +228,7 @@ function findUnit(t){ // raw last-started unit; the silence-gap rule lives in ti
     if(units[mid].a<=t){ans=mid;lo=mid+1}else hi=mid-1}
   return ans;
 }
-var wordPtr=0,enWords=null,litCount=0,anch=null,arWords=null,arLit=0,grpLo=-1,grpHi=-1,fillEl=null,arFillEl=null;
+var wordPtr=0,enWords=null,litCount=0,anch=null,arWords=null,arLit=0,fillEl=null,arFillEl=null;
 /* Transliteration anchors: names and Islamic terms appear in BOTH texts
    (al-Fida' <-> \u0627\u0644\u0641\u062f\u0627\u0621). Matching consonant skeletons pins the
    sweep to reality at those words; between anchors it interpolates. */
@@ -377,14 +377,6 @@ function sweep(u,t){
   }
   if(gA<0){gA=Math.max(0,lit-1);gB=lit;cpos=lit}
   var li=Math.max(gA,Math.min(gB-1,Math.floor(cpos))),lf=Math.max(0,Math.min(1,cpos-li));
-  // reading pill: only the UNSPOKEN remainder of the current phrase — it
-  // shrinks behind the front, so read words are never double-emphasized
-  var pLo=Math.max(gA,li);
-  if(pLo!==grpLo||gB!==grpHi){
-    for(var p1=grpLo;p1<grpHi;p1++)if(p1>=0&&enWords[p1])enWords[p1].classList.remove('grp');
-    for(var p2=pLo;p2<gB;p2++)if(enWords[p2])enWords[p2].classList.add('grp');
-    grpLo=pLo;grpHi=gB;
-  }
   // continuous sub-word fill through the leading word. The fill NEVER
   // toggles at boundaries: 0% renders identical to an unread word and 100%
   // identical to a read one, so handoffs between words are invisible.
@@ -406,10 +398,10 @@ function tick(){
     if(i!==active){
       if(active>=0&&unitEls[active]){
         unitEls[active].classList.remove('on');
-        if(enWords)enWords.forEach(function(w){w.classList.remove('on','grp')});
+        if(enWords)enWords.forEach(function(w){w.classList.remove('on')});
         if(arWords)arWords.forEach(function(w){w.classList.remove('on')});
       }
-      active=i;enWords=null;litCount=0;anch=null;arWords=null;arLit=0;grpLo=-1;grpHi=-1;
+      active=i;enWords=null;litCount=0;anch=null;arWords=null;arLit=0;
       if(fillEl){fillEl.classList.remove('fill');fillEl.style.backgroundImage='';fillEl=null}
       if(arFillEl){arFillEl.classList.remove('fill');arFillEl.style.backgroundImage='';arFillEl=null}
       if(i>=0&&unitEls[i]){
