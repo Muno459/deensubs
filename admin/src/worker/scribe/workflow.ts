@@ -300,11 +300,24 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             ]);
             if (!cuesObj) throw new Error('cues missing for transcript');
             const cues: any[] = await cuesObj.json();
-            const doc = buildTranscript(data.words, cues as any, (await env.DB.prepare('SELECT chapters FROM scribe_jobs WHERE id = ?').bind(jobId).first<any>())?.chapters);
+            const row = await env.DB.prepare('SELECT chapters, title, channel FROM scribe_jobs WHERE id = ?').bind(jobId).first<any>();
+            const doc: any = buildTranscript(data.words, cues as any, row?.chapters);
+            if (doc.turns) {
+              const { nameSpeakers } = await import('./audiobook');
+              doc.speakers = await nameSpeakers(env, doc.words.map((w: any) => w[0]), doc.turns,
+                { title: row?.title, channel: row?.channel });
+            }
             await env.MEDIA_BUCKET.put(`scribe/${jobId}/transcript.json`, JSON.stringify(doc), {
               httpMetadata: { contentType: 'application/json' },
             });
-            return { units: doc.units.length, words: doc.words.length };
+            // ElevenLabs-style speaker txt exports: the source recording and
+            // the translation, both grouped by diarized turns
+            const { buildSpeakerTxt } = await import('./audiobook');
+            const put = (key: string, body: string) =>
+              env.MEDIA_BUCKET.put(key, body, { httpMetadata: { contentType: 'text/plain; charset=utf-8' } });
+            await put(`scribe/${jobId}/transcript-source.txt`, buildSpeakerTxt(doc, 'source'));
+            await put(`scribe/${jobId}/transcript-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
+            return { units: doc.units.length, words: doc.words.length, speakers: doc.speakers || null };
           });
         }
 

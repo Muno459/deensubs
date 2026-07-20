@@ -34,138 +34,65 @@ function stageIndex(step: string): number {
 }
 
 /** Live companions + proxy control, fed by the presence WebSocket. */
-function CompanionsCard() {
-  const [roster, setRoster] = useState<any[]>([]);
-  const [connected, setConnected] = useState(false);
+/** Compact download-routing dropdown: Auto (companion first, proxy fallback),
+ * a specific proxy exit, or a specific online companion. */
+function RouteSelect() {
   const [proxies, setProxies] = useState<any | null>(null);
+  const [roster, setRoster] = useState<any[]>([]);
   const toast = useToast();
 
-  const loadProxies = async () => {
+  const load = async () => {
     try { setProxies(await api('/api/companion/proxies')); } catch {}
+    try { setRoster((await api('/api/companion/roster')).companions || []); } catch {}
   };
   useEffect(() => {
-    let ws: WebSocket | null = null;
-    let alive = true;
-    let retry: any;
-    const connect = () => {
-      if (!alive) return;
-      ws = new WebSocket(`wss://${location.host}/ws/companion?role=watch`);
-      ws.onopen = () => setConnected(true);
-      ws.onmessage = (ev) => {
-        try {
-          const m = JSON.parse(ev.data);
-          if (m.type === 'roster') setRoster(m.companions || []);
-        } catch {}
-      };
-      ws.onclose = () => { setConnected(false); if (alive) retry = setTimeout(connect, 5000); };
-      ws.onerror = () => ws?.close();
-    };
-    connect();
-    loadProxies();
-    const t = setInterval(loadProxies, 20000);
-    return () => { alive = false; clearTimeout(retry); clearInterval(t); ws?.close(); };
+    load();
+    const t = setInterval(load, 25000);
+    return () => clearInterval(t);
   }, []);
 
-  const selectProxy = async (index: any) => {
+  const value = proxies
+    ? proxies.target === 'proxy'
+      ? (String(proxies.selected) === 'auto' ? 'proxy:auto' : `proxy:${proxies.selected}`)
+      : proxies.target
+        ? `comp:${proxies.target}`
+        : 'auto'
+    : 'auto';
+
+  const change = async (v: string) => {
     try {
-      await api('/api/companion/proxies/select', { method: 'POST', body: JSON.stringify({ index }) });
-      loadProxies();
+      if (v === 'auto') {
+        await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target: '' }) });
+      } else if (v.startsWith('proxy:')) {
+        await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target: 'proxy' }) });
+        await api('/api/companion/proxies/select', {
+          method: 'POST',
+          body: JSON.stringify({ index: v === 'proxy:auto' ? 'auto' : parseInt(v.slice(6)) }),
+        });
+      } else if (v.startsWith('comp:')) {
+        await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target: v.slice(5) }) });
+      }
+      load();
     } catch (e: any) { toast.push(e.message, 'error'); }
   };
 
-  const selectTarget = async (target: string) => {
-    try {
-      await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target }) });
-      loadProxies();
-    } catch (e: any) { toast.push(e.message, 'error'); }
-  };
-
-  const capChip = (c: string) =>
-    c.startsWith('enhance') ? `enhance ${c.includes('cuda') ? '⚡GPU' : c.includes('mps') ? '⚡Metal' : 'CPU'}` : c;
-
+  const dlComps = roster.filter((c) => c.caps?.some((x: string) => x.startsWith('download')));
   return (
-    <div className="rounded-xl border border-hairline bg-panel/60 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
-          <h3 className="text-[13px] font-semibold text-cream">Companions</h3>
-          <span className="text-[11px] text-muted">{roster.length ? `${roster.length} online` : 'none online — downloads use the proxy'}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-faint">Downloads via</span>
-          {[{ v: '', label: 'Auto' }, { v: 'proxy', label: 'Proxy only' },
-            ...roster.filter((c) => c.caps?.some((x: string) => x.startsWith('download'))).map((c) => ({ v: c.name, label: c.name }))]
-            .map((o) => {
-              const sel = String(proxies?.target || '') === o.v;
-              return (
-                <button
-                  key={o.v || 'auto'}
-                  disabled={sel}
-                  title={o.v === '' ? 'any online companion first, proxy container as fallback' : o.v === 'proxy' ? 'never offer downloads to companions' : `route downloads only to ${o.label}`}
-                  onClick={() => selectTarget(o.v)}
-                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                    sel ? 'border-[#45b3a2]/50 bg-[#45b3a2]/10 text-[#7fe0d2]'
-                    : 'border-hairline bg-soft text-muted hover:text-cream'
-                  }`}
-                >
-                  {o.label}
-                </button>
-              );
-            })}
-        </div>
-        {proxies && proxies.proxies?.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-faint">Proxy</span>
-            {[{ index: 'auto', label: 'auto' }, ...proxies.proxies].map((p: any) => {
-              const sel = String(proxies.selected) === String(p.index);
-              return (
-                <button
-                  key={p.index}
-                  disabled={proxies.busy || sel}
-                  title={proxies.busy ? `busy downloading ${proxies.busy_job}` : p.label}
-                  onClick={() => selectProxy(p.index)}
-                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                    sel ? 'border-gold/50 bg-gold/10 text-gold-bright'
-                    : proxies.busy ? 'cursor-not-allowed border-hairline bg-soft text-muted/40'
-                    : 'border-hairline bg-soft text-muted hover:text-cream'
-                  }`}
-                >
-                  {p.index === 'auto' ? 'Auto' : p.label}
-                  {proxies.busy && sel ? ' · busy' : ''}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-      {roster.length > 0 && (
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {roster.map((c) => (
-            <div key={c.name} className="rounded-lg border border-hairline bg-soft/60 px-3 py-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[12.5px] font-semibold text-cream">{c.name}</span>
-                <span className="text-[10px] text-faint">{c.caps.map(capChip).join(' · ')}</span>
-              </div>
-              {c.tasks?.length ? (
-                <div className="mt-1.5 space-y-1">
-                  {c.tasks.map((t: any, i: number) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <span className="w-16 shrink-0 text-[10px] uppercase tracking-wider text-muted">{t.kind}</span>
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-hover">
-                        <div className="h-full rounded-full bg-gold transition-all" style={{ width: `${t.pct}%` }} />
-                      </div>
-                      <span className="w-24 shrink-0 truncate text-right text-[10px] text-muted">{t.label}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-1 text-[11px] text-faint">idle</p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <select
+      className={inputCls + ' w-52 py-2.5'}
+      value={value}
+      onChange={(e) => change(e.target.value)}
+      title="Where downloads run — Auto uses an online companion first and falls back to the proxy container"
+    >
+      <option value="auto">Downloads: Auto</option>
+      <option value="proxy:auto">Proxy · auto exit</option>
+      {(proxies?.proxies || []).map((p: any) => (
+        <option key={p.index} value={`proxy:${p.index}`}>Proxy · {p.label}</option>
+      ))}
+      {dlComps.map((c) => (
+        <option key={c.name} value={`comp:${c.name}`}>Companion · {c.name}</option>
+      ))}
+    </select>
   );
 }
 
@@ -1224,7 +1151,6 @@ export default function Scribe() {
             if (fs.length) uploadLocal(fs);
           }}
         >
-        <CompanionsCard />
         <GlowCard className="relative overflow-hidden p-6">
           {dragOver && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] border-2 border-dashed border-[#45b3a2] bg-[#45b3a2]/10">
@@ -1259,6 +1185,7 @@ export default function Scribe() {
             <select className={inputCls + ' w-32 py-2.5'} value={lang} onChange={(e) => setLang(e.target.value)}>
               {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
             </select>
+            <RouteSelect />
             <Button onClick={submit} disabled={submitting || enumerating || !url.trim()} className="px-5">
               {enumerating ? 'Listing...' : submitting ? 'Starting...' : looksLikePlaylist ? 'List videos' : 'Transcribe'}
             </Button>

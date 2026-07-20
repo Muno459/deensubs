@@ -39,18 +39,39 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='
   words=doc.words||[];
   units=(doc.units||[]).map(function(u){
     var w0=u[1],w1=u[2];
-    return {t:u[0],w0:w0,w1:w1,a:words[w0]?words[w0][1]:0,b:words[w1]?words[w1][2]:0};
+    return {t:u[0].replace(/\*+/g,''),raw:u[0],w0:w0,w1:w1,a:words[w0]?words[w0][1]:0,b:words[w1]?words[w1][2]:0};
   });
+  // one unit span; fully-emphasized units keep their style through karaoke
+  function uSpan(i){
+    var raw=units[i].raw,cls='ab-u';
+    if(/^\*[^*].*\*$/.test(raw.trim()))cls+=' ab-em';
+    else if(/^\*\*.*\*\*$/.test(raw.trim()))cls+=' ab-strong';
+    return '<span class="'+cls+'" data-i="'+i+'"><span class="ab-en">'+md(raw)+'</span></span> ';
+  }
   var html='';
-  (doc.paragraphs&&doc.paragraphs.length?doc.paragraphs:[[0,units.length-1]]).forEach(function(p){
-    html+='<p class="ab-p">';
-    for(var i=p[0];i<=p[1]&&i<units.length;i++){
-      html+='<span class="ab-u" data-i="'+i+'"><span class="ab-en">'+esc(units[i].t)+'</span></span> ';
-    }
-    html+='</p>';
-  });
+  if(doc.turns&&doc.turns.length){
+    // diarized layout: one block per speaker turn (avatar · name · time)
+    doc.turns.forEach(function(t){
+      var w0=t[0],w1=t[1],s=t[2];
+      var name=(doc.speakers&&doc.speakers[s])||('Speaker '+(s+1));
+      var hue=Math.round(s*137.508)%360;
+      var at=words[w0]?words[w0][1]:0;
+      html+='<div class="ab-turn"><div class="ab-tside"><span class="ab-av" style="--h:'+hue+'"></span>'+
+        '<span class="ab-spk">'+esc(name)+'</span><span class="ab-tt">'+fmt(at)+'</span></div><div class="ab-tbody">';
+      for(var i=0;i<units.length;i++){
+        if(units[i].w0>=w0&&units[i].w0<=w1)html+=uSpan(i);
+      }
+      html+='</div></div>';
+    });
+  }else{
+    (doc.paragraphs&&doc.paragraphs.length?doc.paragraphs:[[0,units.length-1]]).forEach(function(p){
+      html+='<p class="ab-p">';
+      for(var i=p[0];i<=p[1]&&i<units.length;i++)html+=uSpan(i);
+      html+='</p>';
+    });
+  }
   tr.innerHTML=html;
-  unitEls=tr.querySelectorAll('.ab-u');
+  unitEls=[];tr.querySelectorAll('.ab-u').forEach(function(el){unitEls[+el.dataset.i]=el});
   tr.addEventListener('click',function(ev){
     var el=ev.target.closest('.ab-u');if(!el)return;
     var u=units[+el.dataset.i];
@@ -59,6 +80,10 @@ fetch((window.__CDN||'https://cdn.deensubs.com')+'/transcripts/'+SLUG+'.json?v='
 })
 .catch(function(){tr.innerHTML='<p class="ab-p ab-dim">Transcript unavailable.</p>'});
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')}
+function md(s){
+  // basic inline markdown: **bold**, *italic* — everything else escaped
+  return esc(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\*([^*]+)\*/g,'<i>$1</i>');
+}
 
 /* Arabic toggle: built lazily from the shared word array */
 if(arBtn)arBtn.addEventListener('click',function(){

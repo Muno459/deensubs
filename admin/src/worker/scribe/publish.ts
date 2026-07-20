@@ -166,9 +166,13 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     await copyObject(env, `scribe/${jobId}/${lang}.srt`, `subs/${slug}.${lang}.srt`).catch(() => {});
   }
 
-  // 1b. Audiobook: the karaoke transcript gets a canonical slug-stable copy
+  // 1b. Audiobook: the karaoke transcript gets a canonical slug-stable copy,
+  // and the speaker-turn txt exports ride along when they exist
   if (isAudiobook) {
     await copyObject(env, `scribe/${jobId}/transcript.json`, `transcripts/${slug}.json`);
+    const primary = langs[0] || 'en';
+    await copyObject(env, `scribe/${jobId}/transcript-source.txt`, `transcripts/${slug}-source.txt`).catch(() => {});
+    await copyObject(env, `scribe/${jobId}/transcript-${primary}.txt`, `transcripts/${slug}-${primary}.txt`).catch(() => {});
   }
 
   // 2. Thumbnail + responsive WebP variants, generated upfront. Source is

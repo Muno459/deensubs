@@ -993,3 +993,16 @@ h1,h2,h3{color:#000}a{color:#333}
 /* Speech Enhanced badge (Sidon-restored audio) */
 .ab-se{color:#b79bf5!important;margin-inline-start:.6em}
 .ab-se-off{color:var(--t3)!important}
+/* diarized speaker turns (ElevenLabs-style blocks) */
+.ab-turn{display:grid;grid-template-columns:148px 1fr;gap:0 18px;margin:0 0 20px}
+.ab-tside{display:flex;align-items:center;gap:8px;align-self:start;padding-top:2px;min-width:0}
+.ab-av{width:18px;height:18px;border-radius:50%;flex-shrink:0;
+background:radial-gradient(circle at 32% 30%,hsl(var(--h) 48% 62%),hsl(calc(var(--h) + 40) 42% 38%))}
+.ab-spk{font-size:.82em;font-weight:650;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ab-tt{font-size:.74em;color:var(--t3);font-variant-numeric:tabular-nums;margin-inline-start:auto}
+.ab-tbody{border-inline-start:1px solid var(--s3);padding-inline-start:16px}
+@media(max-width:640px){.ab-turn{grid-template-columns:1fr;gap:6px 0}
+.ab-tside{padding-top:0}.ab-tbody{border:none;padding-inline-start:0}}
+.ab-em .ab-en{font-style:italic}
+.ab-strong .ab-en{font-weight:650}
+.ab-en b{font-weight:650}.ab-en i{font-style:italic}

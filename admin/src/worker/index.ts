@@ -1273,6 +1273,44 @@ app.post('/api/scribe/:id/thumbs', async (c) => {
   }
 });
 
+// Rebuild the karaoke transcript from stored asr.json + cues (no credits
+// spent) — picks up new document features (speaker turns) for old jobs and
+// refreshes the published copy when the job is live.
+app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
+  const jobId = c.req.param('id');
+  const job: any = await c.env.DB.prepare('SELECT chapters, title, channel, target_langs, full_video FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+  if (!job) return c.json({ error: 'job not found' }, 404);
+  if (job.full_video) return c.json({ error: 'not an audiobook job' }, 400);
+  const asrObj = await c.env.MEDIA_BUCKET.get(`scribe/${jobId}/asr.json`);
+  const cuesObj = await c.env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
+  if (!asrObj || !cuesObj) return c.json({ error: 'asr.json or cues.json missing' }, 404);
+  const asr: any = await asrObj.json();
+  const cues: any = await cuesObj.json();
+  const { buildTranscript, buildSpeakerTxt, nameSpeakers } = await import('./scribe/audiobook');
+  const doc: any = buildTranscript(asr.words || [], cues, job.chapters);
+  if (doc.turns) {
+    doc.speakers = await nameSpeakers(c.env as any, doc.words.map((w: any) => w[0]), doc.turns,
+      { title: job.title, channel: job.channel });
+  }
+  let lang = 'en';
+  try { lang = JSON.parse(job.target_langs || '[]')[0] || 'en'; } catch {}
+  const body = JSON.stringify(doc);
+  const putJson = (key: string) =>
+    c.env.MEDIA_BUCKET.put(key, body, { httpMetadata: { contentType: 'application/json' } });
+  const putTxt = (key: string, text: string) =>
+    c.env.MEDIA_BUCKET.put(key, text, { httpMetadata: { contentType: 'text/plain; charset=utf-8' } });
+  await putJson(`scribe/${jobId}/transcript.json`);
+  await putTxt(`scribe/${jobId}/transcript-source.txt`, buildSpeakerTxt(doc, 'source'));
+  await putTxt(`scribe/${jobId}/transcript-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
+  const vid: any = await c.env.DB.prepare("SELECT slug FROM videos WHERE video_key LIKE ?").bind(`scribe/${jobId}/%`).first();
+  if (vid?.slug) {
+    await putJson(`transcripts/${vid.slug}.json`);
+    await putTxt(`transcripts/${vid.slug}-source.txt`, buildSpeakerTxt(doc, 'source'));
+    await putTxt(`transcripts/${vid.slug}-${lang}.txt`, buildSpeakerTxt(doc, 'translated'));
+  }
+  return c.json({ ok: true, turns: doc.turns?.length || 0, speakers: doc.speakers || null, slug: vid?.slug || null });
+});
+
 app.post('/api/scribe/:id/publish', async (c) => {
   try {
     const opts = await c.req.json();

@@ -34,8 +34,9 @@ RULES:
 - Clean speech artifacts: drop stutters, false starts, and filler sounds (their word indices still belong to the unit covering that span).
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
 - Keep as transliterations (do not translate): fatwa, mufti, Sharia, fiqh, usul al-fiqh, ifta, Haramain, madhhab, and similar established terms.
-- Quranic verses: use established translation wording, wrapped in quotes.
-- No markdown, no commentary, no code fences — only JSONL lines.`;
+- Quranic verses and hadith quotations: use established translation wording, wrapped in quotes and *italicized* with single asterisks.
+- **Bold** (double asterisks) sparingly for a key term being defined or emphasized by the speaker.
+- No other markdown, no commentary, no code fences — only JSONL lines.`;
 
 // No timestamps in the prompt: unit timing comes from the word spans on our
 // side, and GAP markers carry the segmentation signal — the numbers were
@@ -349,11 +350,105 @@ export function buildTranscript(allWords: Word[], cues: AudioCue[], chaptersJson
     const ch = JSON.parse(chaptersJson || '[]');
     chapters = (Array.isArray(ch) ? ch : []).map((c: any) => [Math.round(c.start ?? c.t ?? 0), String(c.title || '')]);
   } catch {}
+
+  // Diarized speaker turns as word-index spans [w0, w1, speakerIdx]. Only
+  // emitted when the recording really has multiple voices — single-speaker
+  // lectures keep the plain reading layout. Single-word flicker (a lone word
+  // attributed to another speaker between two same-speaker runs) is folded
+  // back into its surroundings.
+  const spk = words.map((w) => w.speaker || '');
+  for (let i = 1; i < spk.length - 1; i++) {
+    if (spk[i] !== spk[i - 1] && spk[i - 1] === spk[i + 1]) spk[i] = spk[i - 1];
+  }
+  const speakerIds = [...new Set(spk.filter(Boolean))];
+  let turns: [number, number, number][] = [];
+  if (speakerIds.length > 1) {
+    let t0 = 0;
+    for (let i = 1; i <= spk.length; i++) {
+      if (i === spk.length || spk[i] !== spk[t0]) {
+        turns.push([t0, i - 1, speakerIds.indexOf(spk[t0])]);
+        t0 = i;
+      }
+    }
+  }
+
   return {
     v: 1,
     words: words.map((w) => [w.text, r2(w.start), r2(w.end)]),
     units: unitArr,
     paragraphs,
     chapters,
+    ...(turns.length ? { turns } : {}),
   };
+}
+
+/** LLM display labels for diarized voices, judged from what each voice
+ * actually says. Real names only when evident from the words themselves;
+ * otherwise honest role labels. Falls back to "Speaker N". */
+export async function nameSpeakers(
+  env: ScribeEnv,
+  wordTexts: string[],
+  turns: [number, number, number][],
+  context: { title?: string | null; channel?: string | null }
+): Promise<string[]> {
+  const n = 1 + Math.max(...turns.map((t) => t[2]));
+  const fallback = Array.from({ length: n }, (_, i) => `Speaker ${i + 1}`);
+  try {
+    const samples: string[][] = Array.from({ length: n }, () => []);
+    for (const [w0, w1, s] of turns) {
+      if (samples[s].join(' ').length > 900) continue;
+      samples[s].push(wordTexts.slice(w0, Math.min(w1 + 1, w0 + 60)).join(' '));
+    }
+    const body = samples
+      .map((sa, i) => `VOICE ${i}:\n${sa.slice(0, 6).map((t) => `- ${t}`).join('\n')}`)
+      .join('\n\n');
+    const raw = await llmChat(env, [
+      {
+        role: 'system',
+        content:
+          'You label diarized voices in an Islamic audio recording. For each voice, give a short English display label. Use a real name or title ONLY if it is evident from the quoted words (someone introduces themselves or is addressed by name); otherwise use an honest role label like "Sheikh (main speaker)", "Questioner", "Student", "Host", "Translator". Never invent names. Reply with ONLY a JSON object: {"names": ["label for voice 0", ...]} — one label per voice, in order.',
+      },
+      {
+        role: 'user',
+        content: `Recording: ${context.title || 'untitled'}${context.channel ? ` — ${context.channel}` : ''}\n\n${body}`,
+      },
+    ], 400);
+    const m = raw.match(/\{[\s\S]*\}/);
+    const names = m ? JSON.parse(m[0]).names : null;
+    if (Array.isArray(names) && names.length === n && names.every((x: any) => typeof x === 'string' && x.trim())) {
+      return names.map((x: string) => x.trim().slice(0, 60));
+    }
+  } catch {}
+  return fallback;
+}
+
+/** ElevenLabs-style speaker transcript txt:
+ *   HH:MM:SS,mmm --> HH:MM:SS,mmm [Label]
+ *   turn text
+ * `kind` picks the source words or the translated units as the text. */
+export function buildSpeakerTxt(doc: any, kind: 'source' | 'translated'): string {
+  const st = (s: number) => {
+    const ms = Math.max(0, Math.round(s * 1000));
+    const pad = (v: number, w = 2) => String(v).padStart(w, '0');
+    return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)},${pad(ms % 1000, 3)}`;
+  };
+  const words: [string, number, number][] = doc.words;
+  const units: [string, number, number][] = doc.units;
+  const turns: [number, number, number][] =
+    doc.turns || (doc.paragraphs || []).map(([p0, p1]: [number, number]) => [units[p0][1], units[p1][2], 0]);
+  const label = (s: number) => doc.speakers?.[s] || `Speaker ${s}`;
+  const textFor = (w0: number, w1: number) =>
+    kind === 'source'
+      ? words.slice(w0, w1 + 1).map((w) => w[0]).join(' ')
+      : units
+          .filter((u) => u[1] >= w0 && u[1] <= w1)
+          .map((u) => u[0].replace(/\*+/g, ''))
+          .join(' ');
+  const blocks: string[] = [];
+  for (const [w0, w1, s] of turns) {
+    const text = textFor(w0, w1).trim();
+    if (!text) continue;
+    blocks.push(`${st(words[w0][1])} --> ${st(words[w1][2])} [${label(s)}]\n${text}\n`);
+  }
+  return blocks.join('\n');
 }
