@@ -215,6 +215,70 @@ function QualityCard({ job }: { job: any }) {
   );
 }
 
+// Audiobook thumbnail: the scholar's stage card with the episode title drawn
+// into its empty right zone (vertically centered, wrapped, size adapts to
+// length). Composed in-browser on canvas — the site's font and card image both
+// serve with open CORS — then uploaded like a custom thumb so publish makes
+// the usual responsive variants.
+let thumbFontLoad: Promise<void> | null = null;
+function loadThumbFont(): Promise<void> {
+  if (!thumbFontLoad) {
+    thumbFontLoad = (async () => {
+      const f = new FontFace('OutfitThumb', "url(https://deensubs.com/fonts/outfit-latin.woff2)", { weight: '100 900' });
+      await f.load();
+      document.fonts.add(f);
+    })().catch(() => {});
+  }
+  return thumbFontLoad;
+}
+
+async function composeCardThumb(schSlug: string, title: string): Promise<{ dataUrl: string; blob: Blob } | null> {
+  try {
+    await loadThumbFont();
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = `https://deensubs.com/img/v13/scholars/cards/${schSlug}.jpg`;
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+    const W = 1920, H = 1080, X = 800, MAXW = 1040;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0, W, H);
+    const wrap = (s: number) => {
+      ctx.font = `600 ${s}px OutfitThumb, sans-serif`;
+      const out: string[] = [];
+      let cur = '';
+      for (const w of title.trim().split(/\s+/)) {
+        const t = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(t).width > MAXW && cur) { out.push(cur); cur = w; } else cur = t;
+      }
+      if (cur) out.push(cur);
+      return out;
+    };
+    let size = 84, lines: string[] = [];
+    for (const s of [84, 76, 68, 60, 54, 48, 42]) {
+      size = s;
+      lines = wrap(s);
+      if (lines.length <= (s >= 68 ? 3 : 4)) break;
+    }
+    const lh = size * 1.28;
+    let y = H / 2 - ((lines.length - 1) * lh) / 2;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#eceadf';
+    ctx.shadowColor = 'rgba(0,0,0,.45)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 2;
+    ctx.font = `600 ${size}px OutfitThumb, sans-serif`;
+    for (const ln of lines) { ctx.fillText(ln, X, y); y += lh; }
+    const blob = await new Promise<Blob | null>((res) => cv.toBlob(res, 'image/jpeg', 0.92));
+    if (!blob) return null;
+    return { dataUrl: cv.toDataURL('image/jpeg', 0.85), blob };
+  } catch {
+    return null;
+  }
+}
+
 function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose: () => void }) {
   const meta = useApi<any>(open ? '/api/meta' : null);
   const [form, setForm] = useState<any>(null);
@@ -223,6 +287,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
   const [chosenKey, setChosenKey] = useState<string | null>(null);
   const thumbFileRef = useRef<HTMLInputElement>(null);
   const [candErr, setCandErr] = useState('');
+  const [cardThumb, setCardThumb] = useState<{ dataUrl: string; blob: Blob } | null>(null);
   const [chosenTs, setChosenTs] = useState<number | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [err, setErr] = useState('');
@@ -278,6 +343,18 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
       .catch(() => {});
     return () => { live = false; };
   }, [open, job.id]);
+
+  // Audiobook thumb preview: re-compose the card + title whenever either changes
+  const schCardSlug = !job.full_video ? (meta.data?.scholars || []).find((s: any) => s.id === form?.scholar_id)?.slug : null;
+  useEffect(() => {
+    setCardThumb(null);
+    if (!open || !schCardSlug || !form?.title) return;
+    let live = true;
+    const t = setTimeout(() => {
+      composeCardThumb(schCardSlug, form.title).then((r) => { if (live) setCardThumb(r); });
+    }, 400);
+    return () => { live = false; clearTimeout(t); };
+  }, [open, schCardSlug, form?.title]);
 
   if (!open || !form) return null;
 
@@ -373,10 +450,10 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 return (
                   <button key={schSlug} onClick={() => { setChosenKey(null); setChosenTs(null); }}
                     className={`relative overflow-hidden rounded-lg border-2 transition-all ${chosenKey === null ? 'border-gold' : 'border-transparent opacity-70 hover:opacity-100'}`}>
-                    <img src={`https://cdn.deensubs.com/scholars/cards/${schSlug}.jpg`} alt=""
+                    <img src={cardThumb?.dataUrl || `https://cdn.deensubs.com/scholars/cards/${schSlug}.jpg`} alt=""
                       className="aspect-video w-full object-cover"
                       onError={(e) => { const b = e.currentTarget.closest('button') as HTMLElement | null; if (b) b.style.display = 'none'; }} />
-                    <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[10px] text-cream">Scholar card · auto</span>
+                    <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[10px] text-cream">{cardThumb ? 'Card + title · auto' : 'Scholar card · auto'}</span>
                   </button>
                 );
               })()}
@@ -408,7 +485,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
               )}
             </div>
             {!!job.full_video && cands?.length === 0 && <p className="mt-1 text-[11px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}.</p>}
-            {!job.full_video && <p className="mt-1 text-[11px] text-faint">Audio-only job: the selected scholar's stage card is attached automatically; upload or paste an image to override.</p>}
+            {!job.full_video && <p className="mt-1 text-[11px] text-faint">Audio-only job: the scholar's stage card with the title baked into its right zone is attached automatically; upload or paste an image to override.</p>}
             <p className="mt-1.5 text-[11px] text-faint">Responsive WebP variants (320/480/640) are generated on publish and mirrored to KV.</p>
           </div>
 
@@ -426,9 +503,20 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 setPublishing(true);
                 setErr('');
                 try {
+                  // Audiobook without a manual image: bake the title onto the
+                  // scholar card and publish that (falls back to the plain
+                  // card server-side if this fails)
+                  let thumbKey: string | undefined = chosenKey ?? undefined;
+                  if (!job.full_video && !thumbKey && cardThumb) {
+                    const up = await fetch(`/api/upload?prefix=${encodeURIComponent(`scribe/${job.id}/`)}&name=card-title`, {
+                      method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: cardThumb.blob, credentials: 'include',
+                    });
+                    const uj: any = await up.json().catch(() => null);
+                    if (up.ok && uj?.key) thumbKey = uj.key;
+                  }
                   const r = await api(`/api/scribe/${job.id}/publish`, {
                     method: 'POST',
-                    body: JSON.stringify({ ...form, thumb_ts: chosenKey ? undefined : chosenTs ?? undefined, thumb_key: chosenKey ?? undefined }),
+                    body: JSON.stringify({ ...form, thumb_ts: thumbKey ? undefined : chosenTs ?? undefined, thumb_key: thumbKey }),
                   });
                   setDone(r);
                   toast.push(`Published /watch/${r.slug}`);
