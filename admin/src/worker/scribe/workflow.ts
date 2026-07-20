@@ -113,7 +113,9 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         duration: dl.durationSec || 0,
         yt_id: ytId,
         orig_description: row?.orig_description || (dl as any).description || null,
-        ...((dl as any).fourK && fullVideo ? { k4_status: 'capable' } : {}),
+        // every fresh video download gets a definitive 4K verdict — 'none' too,
+        // so nothing ever needs probing again (cached resumes keep their flag)
+        ...(fullVideo && !(dl as any).cached ? { k4_status: (dl as any).fourK ? 'capable' : 'none' } : {}),
       });
       // Channel avatar → R2 (shared per channel, fetched once), best-effort
       if ((dl as any).channelId && !row?.channel_image_key) {
