@@ -246,26 +246,35 @@ function buildAnchors(u,parts){
   return A;
 }
 function splitEn(el){
-  // lazily split a unit's English into word spans (kept afterwards),
-  // walking the tree so <b>/<i> markup survives the split
+  // Word spans MUST tokenize exactly like the server (raw text split on
+  // whitespace, asterisks stripped) or every cursor/click index shifts after
+  // markup that touches punctuation ("books\u2014*Zad al-Ma'ad*"). So: split the
+  // RAW unit text and render the markdown state inside each token.
   var en=el.querySelector('.ab-en');
   if(!en)return null;
   if(!en.dataset.split){
-    (function wrap(node){
-      for(var c=node.firstChild;c;){
-        var nx=c.nextSibling;
-        if(c.nodeType===3){
-          var parts=c.textContent.split(/(\s+)/),frag=document.createDocumentFragment();
-          for(var j=0;j<parts.length;j++){
-            if(!parts[j])continue;
-            if(/^\s+$/.test(parts[j]))frag.appendChild(document.createTextNode(parts[j]));
-            else{var sp=document.createElement('span');sp.className='ab-w';sp.textContent=parts[j];frag.appendChild(sp)}
-          }
-          node.replaceChild(frag,c);
-        }else if(c.nodeType===1&&!/\bab-(w|ar)\b/.test(c.className))wrap(c);
-        c=nx;
+    var raw=units[+el.dataset.i].raw,toks=raw.split(/\s+/),out=[],b=false,it=false;
+    for(var j=0;j<toks.length;j++){
+      var tk=toks[j];
+      if(!tk)continue;
+      if(!tk.replace(/\*+/g,'')){ // pure-marker token: toggles state, no word
+        for(var c0=0;c0<tk.length;c0++){
+          if(tk[c0+1]==='*'){b=!b;c0++}else it=!it;
+        }
+        continue;
       }
-    })(en);
+      var h=(b?'<b>':'')+(it?'<i>':'');
+      for(var c=0;c<tk.length;c++){
+        if(tk[c]==='*'){
+          if(tk[c+1]==='*'){b=!b;h+=b?'<b>':'</b>';c++}
+          else{it=!it;h+=it?'<i>':'</i>'}
+        }else h+=esc(tk[c]);
+      }
+      if(it)h+='</i>';
+      if(b)h+='</b>';
+      out.push('<span class="ab-w">'+h+'</span>');
+    }
+    en.innerHTML=out.join(' ');
     en.dataset.split='1';
   }
   return en.querySelectorAll('.ab-w');
