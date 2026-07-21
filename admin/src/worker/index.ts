@@ -690,18 +690,38 @@ app.post('/api/scribe/batch', async (c) => {
     basePos = Math.max((pub?.p ?? -1) + 1, (queued?.p ?? -1) + 1);
   }
 
+  // Channel re-imports must not re-run whole lectures: anything whose
+  // YouTube id already has a PUBLISHED site video is skipped outright
+  const pubRows: any = await c.env.DB.prepare(
+    "SELECT j.url FROM scribe_jobs j JOIN videos v ON v.video_key LIKE 'scribe/' || j.id || '/%' WHERE j.url LIKE '%youtu%'"
+  ).all();
+  const pubIds = new Set<string>();
+  for (const r of pubRows.results as any[]) {
+    const v = ytId(r.url || '');
+    if (v) pubIds.add(v);
+  }
   const ids: string[] = [];
+  let skippedPublished = 0;
   for (const url of urls) {
     if (!/^https?:\/\//.test(url)) continue;
+    const vid = ytId(url);
+    if (vid && pubIds.has(vid)) { skippedPublished++; continue; }
     ids.push(await createScribeJob(c.env, url, langs, !!full_video, {}, c.get('user')?.id,
       playlistId != null ? { id: playlistId, pos: basePos + ids.length } : undefined));
   }
-  return c.json({ created: ids.length, ids, playlist_id: playlistId });
+  return c.json({ created: ids.length, ids, playlist_id: playlistId, skipped_published: skippedPublished });
 });
 
 app.post('/api/scribe', async (c) => {
-  const { url, target_lang, target_langs, full_video, title, channel, thumb_url } = await c.req.json();
+  const { url, target_lang, target_langs, full_video, title, channel, thumb_url, force } = await c.req.json();
   if (!url || !/^https?:\/\//.test(url)) return c.json({ error: 'A valid http(s) URL is required' }, 400);
+  const vid0 = ytId(url);
+  if (vid0 && !force) {
+    const pub: any = await c.env.DB.prepare(
+      "SELECT v.slug, v.title FROM scribe_jobs j JOIN videos v ON v.video_key LIKE 'scribe/' || j.id || '/%' WHERE j.url LIKE ? LIMIT 1"
+    ).bind(`%${vid0}%`).first();
+    if (pub) return c.json({ error: `Already published as /watch/${pub.slug} — pass force to re-run`, published: pub }, 409);
+  }
   const langs = Array.isArray(target_langs) && target_langs.length ? target_langs : [target_lang || 'en'];
   const targetLang = langs[0];
   let id = '';
@@ -1365,6 +1385,71 @@ app.post('/api/scribe/:id/retry', async (c) => {
   await c.env.SCRIBE_WORKFLOW.create({ id: newId, params: { jobId: newId, url: job.url, targetLang: job.target_lang } });
   const fresh = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(newId).first();
   return c.json({ job: fresh });
+});
+
+// ---- Thumbnail language review (Arabic artwork -> English replacements) ----
+app.post('/api/thumbs/scan', async (c) => {
+  const { detectArabicThumb } = await import('./thumbs');
+  const rows: any = await c.env.DB.prepare(
+    "SELECT id, thumb_key FROM videos WHERE thumb_key IS NOT NULL AND thumb_key != '' AND thumb_lang IS NULL ORDER BY created_at DESC LIMIT 6"
+  ).all();
+  let scanned = 0, flagged = 0;
+  await Promise.all((rows.results as any[]).map(async (v) => {
+    const det = await detectArabicThumb(c.env, v.thumb_key);
+    const lang = det === null ? 'err' : det.arabic ? 'ar' : 'ok';
+    if (lang === 'ar') flagged++;
+    scanned++;
+    await c.env.DB.prepare('UPDATE videos SET thumb_lang = ? WHERE id = ?').bind(lang, v.id).run();
+  }));
+  const rem: any = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM videos WHERE thumb_key IS NOT NULL AND thumb_key != '' AND thumb_lang IS NULL"
+  ).first();
+  return c.json({ scanned, flagged, remaining: rem?.n ?? 0 });
+});
+
+app.get('/api/thumbs/review', async (c) => {
+  const [items, counts] = await Promise.all([
+    c.env.DB.prepare("SELECT id, title, slug, thumb_key, media, created_at FROM videos WHERE thumb_lang = 'ar' ORDER BY created_at DESC").all(),
+    c.env.DB.prepare(`SELECT
+      SUM(CASE WHEN thumb_lang = 'ar' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN thumb_lang IS NULL AND thumb_key IS NOT NULL AND thumb_key != '' THEN 1 ELSE 0 END) AS unscanned,
+      SUM(CASE WHEN thumb_lang = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+      SUM(CASE WHEN thumb_lang = 'skipped' THEN 1 ELSE 0 END) AS skipped,
+      SUM(CASE WHEN thumb_lang = 'err' THEN 1 ELSE 0 END) AS errors
+      FROM videos`).first(),
+  ]);
+  return c.json({ items: items.results, counts });
+});
+
+app.post('/api/thumbs/:id/flag', async (c) => {
+  const { status } = await c.req.json();
+  if (![null, 'accepted', 'skipped', 'ar'].includes(status)) return c.json({ error: 'bad status' }, 400);
+  await c.env.DB.prepare('UPDATE videos SET thumb_lang = ? WHERE id = ?').bind(status, c.req.param('id')).run();
+  return c.json({ ok: true });
+});
+
+app.post('/api/thumbs/:id/replace', async (c) => {
+  const v: any = await c.env.DB.prepare('SELECT id, slug FROM videos WHERE id = ?').bind(c.req.param('id')).first();
+  if (!v) return c.json({ error: 'video not found' }, 404);
+  const ct = c.req.header('content-type') || '';
+  if (!/^image\/(jpeg|png|webp)$/.test(ct)) return c.json({ error: 'jpeg/png/webp only' }, 400);
+  const bytes = await c.req.arrayBuffer();
+  if (!bytes.byteLength || bytes.byteLength > 8 * 1024 * 1024) return c.json({ error: 'empty or over 8MB' }, 400);
+  const ext = ct.split('/')[1].replace('jpeg', 'jpg');
+  const key = `thumbs/${v.slug}-en-${Date.now().toString(36)}.${ext}`;
+  await c.env.MEDIA_BUCKET.put(key, bytes, { httpMetadata: { contentType: ct } });
+  await bakeThumbVariants(c.env as any, key); // responsive WebPs upfront, never deferred
+  await c.env.DB.prepare("UPDATE videos SET thumb_key = ?, thumb_lang = 'ok', media_v = COALESCE(media_v, 0) + 1 WHERE id = ?").bind(key, v.id).run();
+  afterVideoSave(c, {});
+  return c.json({ ok: true, key });
+});
+
+app.post('/api/thumbs/detect', async (c) => {
+  const { key } = await c.req.json();
+  if (!key) return c.json({ error: 'key required' }, 400);
+  const { detectArabicThumb } = await import('./thumbs');
+  const det = await detectArabicThumb(c.env, key);
+  return c.json(det || { arabic: false, text: '', unknown: true });
 });
 
 // ---- Scribe publish flow (job → site video, elite path) ----

@@ -421,6 +421,18 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
     return () => { live = false; clearTimeout(t); };
   }, [open, schCardSlug, form?.title]);
 
+  const [arThumb, setArThumb] = useState<{ arabic: boolean; text: string } | null>(null);
+  useEffect(() => {
+    setArThumb(null);
+    const key = chosenKey || customThumb;
+    if (!open || !key) return;
+    let live = true;
+    api('/api/thumbs/detect', { method: 'POST', body: JSON.stringify({ key }) })
+      .then((r) => { if (live) setArThumb(r); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [open, chosenKey, customThumb]);
+
   const fmtT = (sec: number) => { const v = Math.max(0, Math.round(sec || 0)); const h = Math.floor(v / 3600), m = Math.floor((v % 3600) / 60), x = v % 60; return (h ? `${h}:${String(m).padStart(2, '0')}` : String(m)) + ':' + String(x).padStart(2, '0'); };
   const parseT = (v: string) => { const parts = v.split(':').map((x) => parseInt(x, 10)); return parts.some((x) => isNaN(x)) ? null : parts.reduce((a, x) => a * 60 + x, 0); };
   const updCh = (i: number, patch: any) => setForm((f: any) => ({ ...f, chapters: f.chapters.map((c: any, j: number) => (j === i ? { ...c, ...patch } : c)) }));
@@ -510,6 +522,19 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
               } catch (er: any) { toast.push(er.message, 'error'); }
             }}
           >
+            {arThumb?.arabic && (
+              <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+                <span className="mt-0.5">⚠</span>
+                <span>
+                  This thumbnail contains <b>Arabic text</b>{arThumb.text ? <> (“{arThumb.text.slice(0, 60)}”)</> : null} — upload or paste an
+                  English version before publishing.
+                  {chosenKey && (
+                    <a href={`https://cdn.deensubs.com/${chosenKey}`} download target="_blank" rel="noreferrer"
+                      className="ml-1 underline underline-offset-2 hover:text-amber-100">Download original</a>
+                  )}
+                </span>
+              </div>
+            )}
             <div className="mb-1.5 flex items-center justify-between">
               <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Thumbnail</p>
               <button type="button" onClick={() => thumbFileRef.current?.click()} className="text-[11px] text-muted hover:text-cream">
