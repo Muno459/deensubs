@@ -700,6 +700,15 @@ app.post('/api/scribe/batch', async (c) => {
     const v = ytId(r.url || '');
     if (v) pubIds.add(v);
   }
+  // and anything with a LIVE job already in flight or finished — re-imports
+  // must top up what is missing, not duplicate what is running
+  const liveRows: any = await c.env.DB.prepare(
+    "SELECT url FROM scribe_jobs WHERE status IN ('running','queued','done') AND url LIKE '%youtu%'"
+  ).all();
+  for (const r of liveRows.results as any[]) {
+    const v = ytId(r.url || '');
+    if (v) pubIds.add(v);
+  }
   const ids: string[] = [];
   let skippedPublished = 0;
   for (const url of urls) {

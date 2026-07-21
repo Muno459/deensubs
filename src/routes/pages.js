@@ -22,7 +22,7 @@ const pages = new Hono();
 import { setCDN, cdn } from '../lib/helpers.js';
 
 const VC = VIDEO_COLS;
-const VJ = VIDEO_JOIN;
+const VJ = VIDEO_SCHOLAR_JOIN;
 
 // Set CDN origin + execution context for stale-while-revalidate
 pages.use('*', async (c, next) => {

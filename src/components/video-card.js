@@ -1,4 +1,4 @@
-import { e, fv, fl, ft, thu, thuSrcset, isNew, cdn } from '../lib/helpers.js';
+import { e, fv, fl, ft, thu, thuSrcset, isNew, cdn, schImgSm } from '../lib/helpers.js';
 import { tsvg } from './thumbnail.js';
 
 // Standard video card
@@ -21,8 +21,8 @@ export function vcard(v, opts) {
 </div>
 <div class="card-bd">
   <h3>${e(v.title)}</h3>
+  ${v.scholar_name ? `<div class="card-sch-row">${v.scholar_photo ? `<img src="${e(schImgSm(v.scholar_photo))}" alt="" width="18" height="18" loading="lazy">` : ''}<span>${e(v.scholar_name)}</span></div>` : (v.source ? `<div class="card-sch-row"><span>${e(v.source)}</span></div>` : '')}
   <div class="card-mt">
-    ${v.source ? `<span>${e(v.source)}</span>` : ''}
     <span>${fv(v.views)}</span>
     ${v.likes ? `<span>${fl(v.likes)} likes</span>` : ''}
   </div>
@@ -44,7 +44,7 @@ export function scard(v) {
   ${v.duration ? `<span class="dur dur-s">${ft(v.duration)}</span>` : ''}
   <span class="dur dur-s dur-med">${v.media === 'audio' ? 'Audio' : 'Video'}</span>
 </div>
-<div class="sc-i"><h4>${e(v.title)}</h4><span>${v.source ? e(v.source) : ''}</span><span>${fv(v.views)}</span></div></a>`;
+<div class="sc-i"><h4>${e(v.title)}</h4><span>${v.scholar_name ? e(v.scholar_name) : (v.source ? e(v.source) : '')}</span><span>${fv(v.views)}</span></div></a>`;
 }
 
 // Section helper

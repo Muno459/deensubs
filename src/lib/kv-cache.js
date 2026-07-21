@@ -90,8 +90,8 @@ export async function getHomeBundle(env) {
     // batch() sends all queries in ONE round trip to D1 (not 4 separate ones)
     const [cats, videos, popular, scholars] = await db.batch([
       db.prepare('SELECT * FROM categories ORDER BY name'),
-      db.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.created_at DESC LIMIT 30`),
-      db.prepare(`SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.views DESC LIMIT 8`),
+      db.prepare(`SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} ORDER BY v.created_at DESC LIMIT 30`),
+      db.prepare(`SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} ORDER BY v.views DESC LIMIT 8`),
       db.prepare('SELECT s.*, (SELECT COUNT(*) FROM videos v WHERE v.scholar_id = s.id AND v.enabled = 1) as video_count, (SELECT SUM(views) FROM videos v WHERE v.scholar_id = s.id AND v.enabled = 1) as total_views FROM scholars s ORDER BY s.name'),
     ]);
     return { categories: cats.results, videos: videos.results, popular: popular.results, scholars: scholars.results };
@@ -116,7 +116,7 @@ export async function getScholars(env) {
 export async function getHomeVideos(env) {
   return kvGet(env, 'home:videos', async () => {
     return (await readDB(env).prepare(
-      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.created_at DESC LIMIT 30`
+      `SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} ORDER BY v.created_at DESC LIMIT 30`
     ).all()).results;
   }, STALE_SHORT);
 }
@@ -124,7 +124,7 @@ export async function getHomeVideos(env) {
 export async function getPopularVideos(env) {
   return kvGet(env, 'home:popular', async () => {
     return (await readDB(env).prepare(
-      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.views DESC LIMIT 8`
+      `SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} ORDER BY v.views DESC LIMIT 8`
     ).all()).results;
   }, STALE_SHORT);
 }
@@ -154,7 +154,7 @@ export async function getSearchSuggestions(env, q) {
 export async function getRSSVideos(env) {
   return kvGet(env, 'rss:videos', async () => {
     return (await readDB(env).prepare(
-      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} ORDER BY v.created_at DESC LIMIT 50`
+      `SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} ORDER BY v.created_at DESC LIMIT 50`
     ).all()).results;
   }, STALE_LONG);
 }
@@ -178,7 +178,7 @@ export async function getCategoryVideos(env, slug, sort) {
   const orderBy = sort === 'popular' ? 'v.views DESC' : 'v.created_at DESC';
   return kvGet(env, `cat:${slug}:${sort || 'newest'}`, async () => {
     return (await readDB(env).prepare(
-      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} AND c.slug = ? ORDER BY ${orderBy}`
+      `SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} AND c.slug = ? ORDER BY ${orderBy}`
     ).bind(slug).all()).results;
   }, STALE_SHORT);
 }
@@ -194,7 +194,7 @@ export async function getCategory(env, slug) {
 export async function getScholarVideos(env, scholarId) {
   return kvGet(env, 'scholar-vids:' + scholarId, async () => {
     return (await readDB(env).prepare(
-      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} AND v.scholar_id = ? ORDER BY v.created_at DESC`
+      `SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} AND v.scholar_id = ? ORDER BY v.created_at DESC`
     ).bind(scholarId).all()).results;
   }, STALE_SHORT);
 }
@@ -210,7 +210,7 @@ export async function getScholar(env, slug) {
 export async function getRelatedVideos(env, videoId, categoryId) {
   return kvGet(env, `related:${videoId}`, async () => {
     return (await readDB(env).prepare(
-      `SELECT ${VIDEO_COLS} ${VIDEO_JOIN} AND v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 12`
+      `SELECT ${VIDEO_WITH_SCHOLAR} ${VIDEO_SCHOLAR_JOIN} AND v.id != ? ORDER BY CASE WHEN v.category_id = ? THEN 0 ELSE 1 END, v.created_at DESC LIMIT 12`
     ).bind(videoId, categoryId).all()).results;
   }, STALE_MEDIUM);
 }

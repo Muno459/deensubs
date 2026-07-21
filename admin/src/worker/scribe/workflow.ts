@@ -35,8 +35,20 @@ async function stampTime(env: ScribeEnv, jobId: string, key: string, force = tru
   ).bind(force ? 1 : 0, '$.' + key, JSON.stringify({ [key]: new Date().toISOString() }), jobId).run().catch(() => {});
 }
 
+const STAGE_RANK: Record<string, number> = { download: 1, asr: 2, enhance: 3, translate: 3, metadata: 4, done: 5 };
+
 async function markStage(env: ScribeEnv, jobId: string, stage: string, extra: Record<string, any> = {}) {
   await stampTime(env, jobId, stage, false);
+  // Forward-only: workflow replays (every deploy) re-execute the un-journaled
+  // code between steps, and a naive write briefly reset mid-transcription jobs
+  // back to "download" — a stale-step snapshot once deleted live jobs. The
+  // step column may advance but never regress.
+  const cur: any = await env.DB.prepare('SELECT step FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+  const back = (STAGE_RANK[stage] || 0) < (STAGE_RANK[cur?.step || ''] || 0);
+  if (back) {
+    if (Object.keys(extra).length) await updateJob(env.DB, jobId, { error: null, ...extra });
+    return;
+  }
   await updateJob(env.DB, jobId, { step: stage, error: null, ...extra });
 }
 
