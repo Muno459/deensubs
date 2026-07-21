@@ -22,7 +22,7 @@ export async function detectArabicThumb(
       {
         role: 'system',
         content:
-          'You inspect a video thumbnail. Reply with ONLY JSON: {"arabic": true|false, "text": "..."} — arabic is true only if the image contains visible Arabic-script text (titles, captions, logos, watermarks all count); text carries the Arabic you can read, empty string if none. No markdown.',
+          'You inspect a video thumbnail. Reply with ONLY JSON: {"arabic": true|false, "text": "..."} — arabic is true only if the image contains visible Arabic-script text (titles, captions, logos, watermarks all count); text carries a SHORT sample of the Arabic (max 10 words, no quotation marks inside). No markdown.',
       },
       {
         role: 'user',
@@ -33,9 +33,15 @@ export async function detectArabicThumb(
       },
     ], 400);
     const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const o = JSON.parse(m[0]);
-    return { arabic: !!o.arabic, text: String(o.text || '').slice(0, 300) };
+    if (m) {
+      try {
+        const o = JSON.parse(m[0]);
+        return { arabic: !!o.arabic, text: String(o.text || '').slice(0, 300) };
+      } catch { /* dense Arabic with quotes breaks the JSON — fall through */ }
+    }
+    const bm = raw.match(/"arabic"\s*:\s*(true|false)/i);
+    if (bm) return { arabic: bm[1].toLowerCase() === 'true', text: '' };
+    return null;
   } catch {
     return null;
   }
