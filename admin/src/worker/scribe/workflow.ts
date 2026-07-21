@@ -119,10 +119,19 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         return !!(row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key)));
       }));
       if (slotGated) {
+        // Re-check for the file on EVERY poll: a companion may upload it while
+        // we queue, and 200 waiters funneling through a serial slot just to
+        // discover a no-op starves the whole pipeline. (Step results are
+        // journaled: prior boolean falses read as neither token and simply
+        // fall through to the next poll.)
         for (let w = 0; ; w++) {
-          const got = await step.do(`download-slot-${w}`, async () => acquireDownloadSlot(env, jobId));
-          if (got) break;
-          if (w >= 180) throw new Error('download slot never freed after 3h — check the queue');
+          const st: any = await step.do(`download-slot-${w}`, async () => {
+            const row: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+            if (row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key))) return 'have-file';
+            return (await acquireDownloadSlot(env, jobId)) ? 'got-slot' : 'wait';
+          });
+          if (st === 'have-file' || st === 'got-slot' || st === true) break;
+          if (w >= 360) throw new Error('download slot never freed after 6h — check the queue');
           await step.sleep(`download-slot-wait-${w}`, '60 seconds');
         }
       }
