@@ -900,6 +900,11 @@ app.post('/api/companion/download/complete', async (c) => {
     m.four_k ? 'capable' : 'none',
     job_id
   ).run();
+  // wake the waiting workflow instantly instead of leaving it to its poll
+  try {
+    const inst = await (c.env as any).SCRIBE_WORKFLOW.get(job_id);
+    await inst.sendEvent({ type: 'download-complete', payload: {} });
+  } catch { /* instance finished or errored; the poll fallback covers it */ }
   return c.json({ ok: true });
 });
 
@@ -908,6 +913,11 @@ app.post('/api/companion/download/release', async (c) => {
   await c.env.DB.prepare(
     "UPDATE scribe_jobs SET dl_status = ?, dl_claimed_by = NULL, dl_claimed_at = NULL WHERE id = ? AND dl_status = 'claimed'"
   ).bind(failed ? 'failed' : 'wanted', job_id).run();
+  // failures propagate immediately too: the waiter re-reads state and reacts
+  try {
+    const inst = await (c.env as any).SCRIBE_WORKFLOW.get(job_id);
+    await inst.sendEvent({ type: 'download-complete', payload: { failed: !!failed } });
+  } catch {}
   return c.json({ ok: true });
 });
 

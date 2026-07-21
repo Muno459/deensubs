@@ -106,7 +106,11 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               });
               break;
             }
-            await step.sleep(`companion-download-wait-${w}`, '30 seconds');
+            try {
+              // real-time: the companion's complete/release callbacks fire this
+              // event; the timeout is only the fallback for a vanished worker
+              await (step as any).waitForEvent(`companion-download-ev-${w}`, { type: 'download-complete', timeout: '30 seconds' });
+            } catch { /* timeout: re-check state */ }
           }
         }
       }
@@ -132,7 +136,9 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           });
           if (st === 'have-file' || st === 'got-slot' || st === true) break;
           if (w >= 360) throw new Error('download slot never freed after 6h — check the queue');
-          await step.sleep(`download-slot-wait-${w}`, '60 seconds');
+          try {
+            await (step as any).waitForEvent(`download-slot-ev-${w}`, { type: 'download-complete', timeout: '60 seconds' });
+          } catch { /* timeout: poll the slot again */ }
         }
       }
       // Retries are patient on purpose: a big playlist batch can exhaust the
