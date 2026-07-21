@@ -42,6 +42,31 @@ function sampleCues(cues: any[], n = 30): string {
 
 export async function aiFill(env: any, kind: string, payload: any): Promise<any> {
   switch (kind) {
+    case 'playlist-suggest': {
+      const vids: any = await env.DB.prepare(
+        `SELECT v.id, v.title, v.duration, s.name AS scholar,
+                (SELECT COUNT(*) FROM playlist_videos pv WHERE pv.video_id = v.id) AS in_pl
+         FROM videos v LEFT JOIN scholars s ON s.id = v.scholar_id ORDER BY v.created_at`
+      ).all();
+      const lines = (vids.results as any[])
+        .map((v) => `${v.id} | ${Math.round((v.duration || 0) / 60)}min | ${v.scholar || '?'} | ${v.title}${v.in_pl ? ' [already in a playlist]' : ''}`)
+        .join('\n');
+      return ask(env,
+        'You curate an Islamic lecture library. Group the catalog into NEW playlists: coherent series (same book, commentary arc, usually one scholar) or strong thematic collections. Prefer videos not already in a playlist; never mix unrelated one-offs just to fill. Return {"playlists": [{"title": "...", "description": "one sentence", "video_ids": [ids in watch order]}]} with 2-8 playlists, each 3+ videos, ONLY ids from the list. Playlist titles must not include the scholar name.',
+        `Catalog (id | length | scholar | title):\n${lines}\n\nReturn the JSON.`, 3200);
+    }
+    case 'playlist-split': {
+      const pl: any = await env.DB.prepare('SELECT id, title FROM playlists WHERE id = ?').bind(payload.playlist_id).first();
+      if (!pl) throw new Error('playlist not found');
+      const vids: any = await env.DB.prepare(
+        `SELECT v.id, v.title FROM playlist_videos pv JOIN videos v ON v.id = pv.video_id
+         WHERE pv.playlist_id = ? ORDER BY pv.position ASC`
+      ).bind(pl.id).all();
+      const lines = (vids.results as any[]).map((v, i) => `${i + 1}. ${v.id} | ${v.title}`).join('\n');
+      return ask(env,
+        'Segment ONE long playlist into several smaller stand-alone playlists (flat, never nested): sequential arcs of a series or coherent sub-topics. Every video lands in exactly one segment; original order is preserved inside each. Return {"playlists": [{"title": "...", "description": "one sentence", "video_ids": [...]}]} with 2-6 segments of 2+ videos, ONLY ids from the list.',
+        `Playlist "${pl.title}" in order (position. id | title):\n${lines}\n\nReturn the JSON.`, 2600);
+    }
     case 'publish': {
       const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(payload.jobId).first();
       if (!job) throw new Error('Job not found');

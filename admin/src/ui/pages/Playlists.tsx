@@ -185,12 +185,69 @@ function PlaylistDetail({ playlist, onBack, onChanged }: { playlist: any; onBack
   );
 }
 
+function AiPlaylistReview({ suggestions, onClose, onDone }: { suggestions: any[]; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<any[]>(suggestions.map((s) => ({ ...s, picked: true })));
+  const [applying, setApplying] = useState(false);
+  const picked = rows.filter((r) => r.picked && r.title.trim() && r.video_ids?.length);
+  return (
+    <Modal open onClose={onClose} title="AI playlist proposals" wide>
+      <div className="space-y-2.5">
+        {rows.map((r, i) => (
+          <div key={i} className={`rounded-xl border p-3 transition-colors ${r.picked ? 'border-gold/30 bg-gold/5' : 'border-hairline opacity-60'}`}>
+            <div className="flex items-center gap-2.5">
+              <input type="checkbox" checked={r.picked}
+                onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, picked: e.target.checked } : x)))} />
+              <input className={inputCls + ' flex-1'} value={r.title}
+                onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
+              <Badge tone="dim">{r.video_ids?.length || 0} videos</Badge>
+            </div>
+            {r.description && <p className="mt-1.5 pl-7 text-[12px] text-muted">{r.description}</p>}
+          </div>
+        ))}
+        {!rows.length && <p className="py-6 text-center text-[13px] text-muted">The AI found nothing coherent to propose.</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={applying || !picked.length}
+            onClick={async () => {
+              setApplying(true);
+              try {
+                const r = await api('/api/playlists/ai-apply', {
+                  method: 'POST',
+                  body: JSON.stringify({ playlists: picked.map(({ title, description, video_ids }) => ({ title, description, video_ids })) }),
+                });
+                toast.push(`Created ${r.created.length} playlist${r.created.length === 1 ? '' : 's'}`);
+                onDone();
+              } catch (e: any) { toast.push(e.message, 'error'); }
+              setApplying(false);
+            }}>
+            {applying ? 'Creating…' : `Create ${picked.length} playlist${picked.length === 1 ? '' : 's'}`}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export default function Playlists() {
   const { data, loading, error, refetch } = useApi<any>('/api/playlists');
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState<any | null>(null);
   const [deleting, setDeleting] = useState<any | null>(null);
+  const [review, setReview] = useState<any[] | null>(null);
+  const [aiBusy, setAiBusy] = useState<string | null>(null);
   const toast = useToast();
+
+  const runAi = async (kind: string, payload: any, label: string) => {
+    setAiBusy(label);
+    try {
+      const r = await api('/api/ai/fill', { method: 'POST', body: JSON.stringify({ kind, ...(payload || {}) }) });
+      const list = Array.isArray(r?.playlists) ? r.playlists : [];
+      if (!list.length) toast.push('No proposals came back', 'error');
+      else setReview(list);
+    } catch (e: any) { toast.push(e.message, 'error'); }
+    setAiBusy(null);
+  };
 
   if (open) return <PlaylistDetail playlist={open} onBack={() => setOpen(null)} onChanged={refetch} />;
   if (loading) return <PageLoader />;
@@ -202,10 +259,17 @@ export default function Playlists() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-[13px] text-muted">{playlists.length} playlists</p>
-        <Button onClick={() => setCreating(true)} className="flex items-center gap-1.5">
-          <Icon name="plus" className="h-4 w-4" /> New playlist
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" disabled={!!aiBusy} onClick={() => runAi('playlist-suggest', undefined, 'suggest')} className="flex items-center gap-1.5">
+            <Icon name="sparkles" className="h-4 w-4" /> {aiBusy === 'suggest' ? 'Thinking…' : 'Suggest playlists'}
+          </Button>
+          <Button onClick={() => setCreating(true)} className="flex items-center gap-1.5">
+            <Icon name="plus" className="h-4 w-4" /> New playlist
+          </Button>
+        </div>
       </div>
+
+      {review && <AiPlaylistReview suggestions={review} onClose={() => setReview(null)} onDone={() => { setReview(null); refetch(); }} />}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {playlists.map((p: any, i: number) => (
@@ -222,7 +286,15 @@ export default function Playlists() {
                 {p.description && <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-muted">{p.description}</p>}
                 <p className="mt-2 text-[11px] text-faint">{fmtDate(p.created_at)} · /{p.slug}</p>
               </button>
-              <div className="mt-2 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="mt-2 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <button
+                  onClick={() => runAi('playlist-split', { playlist_id: p.id }, `split-${p.id}`)}
+                  disabled={!!aiBusy}
+                  className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted hover:bg-hover hover:text-gold-bright disabled:opacity-50"
+                  title="AI: segment this playlist into several smaller ones (originals kept)"
+                >
+                  <Icon name="sparkles" className="h-3 w-3" /> {aiBusy === `split-${p.id}` ? 'Splitting…' : 'AI split'}
+                </button>
                 <button
                   onClick={() => setDeleting(p)}
                   className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-red-500/10 hover:text-red-400"

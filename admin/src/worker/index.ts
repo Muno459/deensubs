@@ -1651,6 +1651,35 @@ app.post('/api/playlists', async (c) => {
   return c.json({ playlist });
 });
 
+// Create the AI-proposed playlists the admin approved in the review modal
+app.post('/api/playlists/ai-apply', async (c) => {
+  const { playlists } = await c.req.json();
+  if (!Array.isArray(playlists) || !playlists.length) return c.json({ error: 'playlists required' }, 400);
+  const valid = new Set<number>(
+    ((await c.env.DB.prepare('SELECT id FROM videos').all()).results as any[]).map((r) => r.id)
+  );
+  const created: any[] = [];
+  for (const p of playlists.slice(0, 10)) {
+    if (!p?.title || !Array.isArray(p.video_ids)) continue;
+    const ids = p.video_ids.filter((v: any) => valid.has(v)).slice(0, 500);
+    if (!ids.length) continue;
+    const base = String(p.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'playlist';
+    let slug = base;
+    for (let n = 2; await c.env.DB.prepare('SELECT 1 FROM playlists WHERE slug = ?').bind(slug).first(); n++) slug = `${base}-${n}`;
+    await c.env.DB.prepare('INSERT INTO playlists (title, slug, description) VALUES (?,?,?)')
+      .bind(String(p.title).slice(0, 120), slug, p.description ? String(p.description).slice(0, 500) : null).run();
+    const row: any = await c.env.DB.prepare('SELECT id FROM playlists WHERE slug = ?').bind(slug).first();
+    let pos = 0;
+    for (const vid of ids) {
+      await c.env.DB.prepare('INSERT OR IGNORE INTO playlist_videos (playlist_id, video_id, position) VALUES (?,?,?)')
+        .bind(row.id, vid, pos++).run();
+    }
+    created.push({ id: row.id, slug, title: p.title, count: pos });
+  }
+  c.executionCtx.waitUntil(purgePlaylistCache(c.env));
+  return c.json({ created });
+});
+
 app.get('/api/playlists/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
   const [playlist, videos] = await Promise.all([
