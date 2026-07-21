@@ -40,7 +40,7 @@ export async function generateMetadata(
 {"title": "...", "title_ar": "...", "description": "...", "slug": "..."}
 
 Rules:
-- title: natural English, specific to the actual content (60-90 chars). Name the topic and, if identifiable from the transcript, the speaker. No clickbait, no quotes around it.
+- title: natural English, specific to the actual content (60-90 chars). Name the topic; NEVER include the speaker's or sheikh's name in the title (the scholar is shown separately on the site). No clickbait, no quotes around it.
 - title_ar: faithful Arabic title.
 - description: 2-3 sentences (200-400 chars) summarizing what is actually discussed — concrete points, not generic praise.
 - slug: lowercase-hyphenated from the English title, max 60 chars, a-z0-9- only.
@@ -132,7 +132,7 @@ export async function generateMetaAndChapters(
 {"title": "...", "title_ar": "...", "description": "...", "slug": "..."${wantChapters ? ', "chapters": [{"t": startSeconds, "title": "Short chapter title"}]' : ''}}
 
 Rules:
-- title: natural English, specific to the actual content (60-90 chars). Name the topic and, if identifiable from the transcript, the speaker. No clickbait, no quotes around it.
+- title: natural English, specific to the actual content (60-90 chars). Name the topic; NEVER include the speaker's or sheikh's name in the title (the scholar is shown separately on the site). No clickbait, no quotes around it.
 - title_ar: faithful Arabic title.
 - description: 2-3 sentences (200-400 chars) summarizing what is actually discussed, concrete points, not generic praise.
 - slug: lowercase-hyphenated from the English title, max 60 chars, a-z0-9- only.

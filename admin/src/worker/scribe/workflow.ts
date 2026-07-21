@@ -506,7 +506,9 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             }
             break;
           }
-          await step.sleep(`enhance-wait-${w}`, '60 seconds');
+          try {
+            await (step as any).waitForEvent(`enhance-ev-${w}`, { type: 'enhance-complete', timeout: '60 seconds' });
+          } catch { /* timeout: re-check state */ }
         }
       }
 

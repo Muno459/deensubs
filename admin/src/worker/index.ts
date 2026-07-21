@@ -983,6 +983,11 @@ app.post('/api/companion/enhance/complete', async (c) => {
       .bind(key, orig, vid.id).run();
     afterVideoSave(c, {});
   }
+  try {
+    const inst = await (c.env as any).SCRIBE_WORKFLOW.get(job_id);
+    await inst.sendEvent({ type: 'enhance-complete', payload: {} });
+  } catch { /* instance done or errored; the poll fallback covers it */ }
+
   return c.json({ ok: true });
 });
 
@@ -991,6 +996,11 @@ app.post('/api/companion/enhance/release', async (c) => {
   await c.env.DB.prepare(
     "UPDATE scribe_jobs SET se_status = ?, se_claimed_by = NULL, se_claimed_at = NULL WHERE id = ? AND se_status = 'claimed'"
   ).bind(failed ? 'failed' : 'wanted', job_id).run();
+  try {
+    const inst = await (c.env as any).SCRIBE_WORKFLOW.get(job_id);
+    await inst.sendEvent({ type: 'enhance-complete', payload: { failed: true } });
+  } catch {}
+
   return c.json({ ok: true });
 });
 
