@@ -736,7 +736,7 @@ app.post('/api/scribe', async (c) => {
 
 app.get('/api/scribe', async (c) => {
   const jobs = await c.env.DB.prepare(
-    'SELECT j.*, p.title as playlist_title, p.slug as playlist_slug FROM scribe_jobs j LEFT JOIN playlists p ON p.id = j.playlist_id ORDER BY j.created_at DESC LIMIT 50'
+    'SELECT j.*, p.title as playlist_title, p.slug as playlist_slug FROM scribe_jobs j LEFT JOIN playlists p ON p.id = j.playlist_id ORDER BY j.created_at DESC LIMIT 400'
   ).all();
   return c.json({ jobs: jobs.results });
 });
@@ -855,7 +855,14 @@ app.post('/api/companion/download/claim', async (c) => {
   // anything else = only that companion instance gets download work.
   const target: any = await c.env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
   const t = String(target?.value || '');
-  if (t === 'proxy' || (t && t !== worker)) return c.json({ job: null });
+  if (t === 'proxy') return c.json({ job: null });
+  if (t && t !== worker) {
+    // the pin is a preference: it holds only while the pinned companion is
+    // actually online — an offline target must not starve the queue
+    const { onlineCompanions } = await import('./companion');
+    const online = await onlineCompanions(c.env as any);
+    if (online.some((x: any) => x.name === t)) return c.json({ job: null });
+  }
   const job: any = await c.env.DB.prepare(
     `UPDATE scribe_jobs SET dl_status='claimed', dl_claimed_by=?, dl_claimed_at=unixepoch()
      WHERE id = (SELECT id FROM scribe_jobs
@@ -1385,6 +1392,36 @@ app.post('/api/scribe/:id/retry', async (c) => {
   await c.env.SCRIBE_WORKFLOW.create({ id: newId, params: { jobId: newId, url: job.url, targetLang: job.target_lang } });
   const fresh = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(newId).first();
   return c.json({ job: fresh });
+});
+
+// Convert a finished VIDEO job into an audiobook: a fresh audio job re-runs
+// the audiobook translation/transcript pipeline, but the stored ElevenLabs
+// transcription rides along; the ASR step short-circuits on an existing
+// asr.json, so conversion costs zero transcription credits.
+app.post('/api/scribe/:id/to-audiobook', async (c) => {
+  const id = c.req.param('id');
+  const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
+  if (!job) return c.json({ error: 'job not found' }, 404);
+  if (!job.full_video) return c.json({ error: 'already an audio job' }, 400);
+  const asrObj = await c.env.MEDIA_BUCKET.get(`scribe/${id}/asr.json`);
+  if (!asrObj) return c.json({ error: 'no stored transcription for this job yet' }, 400);
+  const asrBytes = await asrObj.arrayBuffer();
+  let langs = ['en'];
+  try {
+    const l = JSON.parse(job.target_langs || '[]');
+    if (Array.isArray(l) && l.length) langs = l;
+  } catch {}
+  let newId = '';
+  try {
+    newId = await createScribeJob(c.env, job.url, langs, false,
+      { title: job.title, channel: job.channel, thumb_url: job.thumb_url }, c.get('user')?.id);
+  } catch (err: any) {
+    return c.json({ error: 'failed to start audiobook job: ' + err.message }, 500);
+  }
+  await c.env.MEDIA_BUCKET.put(`scribe/${newId}/asr.json`, asrBytes, {
+    httpMetadata: { contentType: 'application/json' },
+  });
+  return c.json({ ok: true, id: newId });
 });
 
 // ---- Thumbnail language review (Arabic artwork -> English replacements) ----

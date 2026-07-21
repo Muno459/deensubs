@@ -653,6 +653,28 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
   );
 }
 
+function ConvertToAudiobook({ job }: { job: any }) {
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  return (
+    <button
+      disabled={busy}
+      title="New audio job: reuses the stored ElevenLabs transcription (no ASR credits), re-runs the audiobook translation + karaoke transcript"
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const r = await api(`/api/scribe/${job.id}/to-audiobook`, { method: 'POST' });
+          toast.push(`Audiobook job started (${r.id}), reusing the stored transcription`);
+        } catch (e: any) { toast.push(e.message, 'error'); }
+        setBusy(false);
+      }}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97] disabled:opacity-50"
+    >
+      {busy ? <Spinner className="h-3 w-3" /> : <Icon name="headphones" className="h-3 w-3" />} Convert to audiobook
+    </button>
+  );
+}
+
 function JobDetail({ job }: { job: any }) {
   const [tab, setTab] = useState<'overview' | 'preview'>('overview');
   const [srt, setSrt] = useState<string | null>(null);
@@ -764,6 +786,7 @@ function JobDetail({ job }: { job: any }) {
               <Icon name="edit" className="h-3 w-3" /> Edit subtitles
             </button>
           )}
+          {job.status === 'done' && isVideoSource && <ConvertToAudiobook job={job} />}
           {job.status === 'done' && job.published_slug && (
             <a href={`https://deensubs.com/watch/${job.published_slug}`} target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 transition-all hover:bg-emerald-500/20 active:scale-[0.97]">
@@ -1337,10 +1360,10 @@ export default function Scribe() {
           <div className="ml-auto flex items-center gap-1.5">
             {(['all', 'running', 'done', 'published', 'error'] as const).map((f) => (
               <button key={f} onClick={() => setStatusFilter(f)}
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                   statusFilter === f ? 'border-gold/40 bg-gold/10 text-gold-bright' : 'border-hairline text-faint hover:text-muted'
                 }`}>
-                {f}
+                {({ all: 'All', running: 'Running', done: 'Ready to publish', published: 'Published', error: 'Errors' } as any)[f]}
               </button>
             ))}
             <input

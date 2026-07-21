@@ -48,7 +48,8 @@ async function addTokens(env: ScribeEnv, jobId: string, tokens: number, cost = 0
 
 export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> {
   async run(event: WorkflowEvent<ScribeParams>, step: WorkflowStep) {
-    const { jobId, url, fullVideo } = event.payload;
+    const { jobId, url } = event.payload;
+    let fullVideo = !!event.payload.fullVideo;
     const langs = event.payload.targetLangs?.length ? event.payload.targetLangs : [event.payload.targetLang];
     const primary = langs[0];
     const env = this.env;
@@ -72,7 +73,10 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           const { onlineCompanions, hasCap } = await import('../companion');
           const online = await onlineCompanions(env);
           if (t) {
-            if (!online.some((x) => x.name === t && x.caps.some((cp: string) => cp.startsWith('download')))) return false;
+            // pinned target offline -> fall back to ANY online download-capable
+            // companion (a pin is a preference, not a reason to stall the queue)
+            const pinned = online.some((x) => x.name === t && x.caps.some((cp: string) => cp.startsWith('download')));
+            if (!pinned && !hasCap(online, 'download')) return false;
           } else if (!hasCap(online, 'download')) return false;
           await env.DB.prepare(
             "UPDATE scribe_jobs SET dl_status = 'wanted' WHERE id = ? AND source_key IS NULL AND (dl_status IS NULL OR dl_status = '' OR dl_status = 'failed')"
@@ -91,7 +95,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
                 if (t === 'proxy') return 'abandon';
                 const { onlineCompanions, hasCap } = await import('../companion');
                 const online = await onlineCompanions(env);
-                if (t ? !online.some((x) => x.name === t) : !hasCap(online, 'download')) return 'abandon';
+                if (!hasCap(online, 'download')) return 'abandon';
               }
               return 'wait';
             });
@@ -183,6 +187,29 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           }
           if (await env.MEDIA_BUCKET.head(chKey)) await updateJob(env.DB, jobId, { channel_image_key: chKey });
         } catch {}
+      }
+
+      // 1b2. Audiobooks wearing a video container: many uploads are a static
+      // artwork or an audio visualizer for the whole runtime. Detect it from
+      // frames sampled across the video BEFORE translation, flip the job to
+      // the audiobook pipeline, and let everything downstream (enhancement
+      // offer, prose translation, karaoke transcript) follow.
+      if (fullVideo) {
+        const still = await step.do('detect-static-audiobook',
+          { retries: { limit: 1, delay: '30 seconds' }, timeout: '8 minutes' }, async () => {
+          try {
+            const { generateThumbCandidates } = await import('./publish');
+            const frames = await generateThumbCandidates(env as any, jobId);
+            if (frames.length < 2) return false;
+            const { detectStaticVideo } = await import('../thumbs');
+            const st = await detectStaticVideo(env, frames.map((f) => f.key));
+            if (st) await updateJob(env.DB, jobId, { full_video: 0 });
+            return !!st;
+          } catch {
+            return false;
+          }
+        });
+        if (still) fullVideo = false;
       }
 
       // 1c. Speech enhancement offer (audiobooks). ASR transcribes the RAW

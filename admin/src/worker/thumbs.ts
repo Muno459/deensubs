@@ -4,6 +4,38 @@ import { llmChat } from './scribe/translate';
 
 const CDN = 'https://cdn.deensubs.com';
 
+async function imagePart(key: string): Promise<any | null> {
+  const res = await fetch(`${CDN}/${encodeURI(key)}`);
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer();
+  if (!buf.byteLength || buf.byteLength > 3_000_000) return null;
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { type: 'image_url', image_url: { url: `data:${res.headers.get('content-type') || 'image/jpeg'};base64,${btoa(bin)}` } };
+}
+
+/** Frames sampled across one video: is it an audiobook wearing a video
+    container (static artwork / audio visualizer)? */
+export async function detectStaticVideo(env: any, frameKeys: string[]): Promise<boolean | null> {
+  try {
+    const parts: any[] = [{
+      type: 'text',
+      text: 'These frames are sampled from DIFFERENT points across one video (early, middle, late). Is this really an audio recording in a video container: essentially the same static artwork throughout, or an audio-visualizer (waveform/spectrum bars) over a fixed background? Footage of people, slides that change, or moving scenes is NOT static. Reply ONLY JSON: {"static": true|false}',
+    }];
+    for (const k of frameKeys.slice(0, 3)) {
+      const p = await imagePart(k);
+      if (p) parts.push(p);
+    }
+    if (parts.length < 3) return null;
+    const raw = await llmChat(env, [{ role: 'user', content: parts as any }], 200);
+    const m = raw.match(/"static"\s*:\s*(true|false)/i);
+    return m ? m[1].toLowerCase() === 'true' : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function detectArabicThumb(
   env: any,
   key: string
