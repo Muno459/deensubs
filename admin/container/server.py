@@ -2,9 +2,10 @@
 """yt-dlp helper service for the DeenSubs Scribe pipeline.
 
 Runs inside a Cloudflare Container, reached only through the Worker's
-Durable Object binding (never exposed publicly). Downloads are attempted
-directly first, then retried through each configured SOCKS proxy.
-Audio is extracted to opus via ffmpeg to keep transfers small.
+Durable Object binding (never exposed publicly). yt-dlp (android_vr client)
+extracts direct URLs from the datacenter IP; the bytes are pulled by a fast
+parallel-range downloader (~250-290 MB/s) and muxed with ffmpeg. Extraction
+falls back to the configured proxies only if the direct IP can't extract.
 yt-dlp self-updates to the latest release on boot and every 12h.
 
 Endpoints (all require Authorization: Bearer $TOKEN):
@@ -21,6 +22,7 @@ Config via environment (see /etc/ytdlp-svc/env):
   YTDLP_DIR      download dir (default /var/lib/ytdlp-svc)
 """
 
+import concurrent.futures
 import json
 import os
 import re
@@ -28,6 +30,8 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -64,126 +68,204 @@ def maybe_self_update() -> None:
         pass  # never block downloads on update failures
 
 
+# ---- fast parallel-range downloader --------------------------------------
+# googlevideo throttles each connection after an initial burst, so a single
+# GET crawls (~1 MB/s). Many SMALL concurrent byte-ranges each finish inside
+# the burst window -> ~250-290 MB/s on a standard-2 instance (measured).
+# chunk=4MB, concurrency=48 is the sweet spot; higher concurrency trips
+# googlevideo's 401 abuse response.
+VR_UA = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12; Quest 3)"
+DL_CONCURRENCY = 48
+DL_CHUNK = 4 << 20
+
+
+def _opener(proxy):
+    if proxy:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.build_opener()
+
+
+def _content_length(url, proxy):
+    req = urllib.request.Request(url, headers={"Range": "bytes=0-1", "User-Agent": VR_UA})
+    with _opener(proxy).open(req, timeout=20) as r:
+        cr = r.headers.get("Content-Range", "")
+        return int(cr.split("/")[-1]) if "/" in cr else 0
+
+
+def _fetch_range(opener, url, start, end):
+    # retry with backoff; back off harder on 401/403/429 (googlevideo rate/abuse)
+    for attempt in range(6):
+        try:
+            req = urllib.request.Request(url, headers={"Range": f"bytes={start}-{end}", "User-Agent": VR_UA})
+            with opener.open(req, timeout=60) as r:
+                buf = bytearray()
+                while True:
+                    b = r.read(1 << 20)
+                    if not b:
+                        break
+                    buf += b
+                return bytes(buf)
+        except Exception as exc:  # noqa: BLE001
+            if attempt == 5:
+                raise
+            code = getattr(exc, "code", None)
+            base = 0.6 if code in (401, 403, 429) else 0.3
+            time.sleep(base * (2 ** attempt))
+    raise RuntimeError("unreachable")
+
+
+def parallel_download(url, dest, clen, proxy, on_pct=None):
+    """Download `url` into `dest` via concurrent byte-ranges (thread-safe
+    positional writes). Raises if any range can't be fetched."""
+    if clen <= 0:
+        clen = _content_length(url, proxy)
+    if clen <= 0:
+        raise RuntimeError("unknown content length")
+    opener = _opener(proxy)
+    ranges = []
+    off = 0
+    while off < clen:
+        end = min(off + DL_CHUNK - 1, clen - 1)
+        ranges.append((off, end))
+        off = end + 1
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    try:
+        os.ftruncate(fd, clen)
+        done = 0
+        lock = threading.Lock()
+
+        def work(rng):
+            nonlocal done
+            data = _fetch_range(opener, url, rng[0], rng[1])
+            os.pwrite(fd, data, rng[0])
+            if on_pct:
+                with lock:
+                    done += len(data)
+                    on_pct(done / clen * 100.0)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=DL_CONCURRENCY) as ex:
+            for fut in concurrent.futures.as_completed([ex.submit(work, r) for r in ranges]):
+                fut.result()
+    finally:
+        os.close(fd)
+
+
+def _fmt_clen(f):
+    return int(f.get("filesize") or f.get("filesize_approx") or 0)
+
+
+def _pick_formats(info, video):
+    """Choose formats from an android_vr -J info dict, matching the old yt-dlp
+    selection: h264 <=1080p video + m4a audio, or best m4a audio."""
+    fmts = [f for f in info.get("formats", []) if f.get("url")]
+    audio = [f for f in fmts if f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none")]
+    m4a = [f for f in audio if f.get("ext") == "m4a" or "mp4a" in str(f.get("acodec", ""))]
+    best_audio = max(m4a or audio, key=lambda f: f.get("abr") or f.get("tbr") or 0, default=None)
+    if not video:
+        return {"audio": best_audio}
+    vids = [f for f in fmts if f.get("vcodec") not in (None, "none") and f.get("acodec") in (None, "none")]
+    avc = [f for f in vids if str(f.get("vcodec", "")).startswith("avc1") and (f.get("height") or 0) <= 1080]
+    best_video = max(avc, key=lambda f: ((f.get("height") or 0), (f.get("tbr") or 0)), default=None)
+    if best_video and best_audio:
+        return {"video": best_video, "audio": best_audio}
+    prog = [f for f in fmts if f.get("vcodec") not in (None, "none") and f.get("acodec") not in (None, "none")]
+    return {"progressive": max(prog, key=lambda f: (f.get("height") or 0), default=None)}
+
+
+def _ffmpeg(args):
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *args], capture_output=True, text=True, timeout=1800)
+    if r.returncode != 0:
+        raise RuntimeError("ffmpeg: " + (r.stderr or "").strip()[-300:])
+
+
 def run_download(job_id: str, url: str, cookies: str | None = None, video: bool = False, pinned_proxy: str | None = None, use_aria2: bool = True, player_client: str | None = None) -> None:
+    """Extract the direct android_vr URL with yt-dlp, then pull the bytes with
+    the fast parallel-range downloader and mux with ffmpeg. Extraction works
+    from the datacenter IP directly (no proxy, no bot-wall); the proxy list is
+    kept as a fallback for anything the direct IP can't extract."""
     maybe_self_update()
-    out_tmpl = os.path.join(DIR, f"{job_id}.%(ext)s")
     cookies_file = None
     if cookies:
         cookies_file = os.path.join(DIR, f"{job_id}.cookies.txt")
         with open(cookies_file, "w") as fh:
             fh.write(cookies)
-    attempts = PROXIES + [None]  # proxy first: YouTube throttles datacenter IPs
+    attempts = PROXIES + [None]  # direct is the primary path; proxies are fallback
     if pinned_proxy:
-        attempts = [pinned_proxy, None]  # admin chose a specific proxy
+        attempts = [pinned_proxy, None]
     last_err = "no attempts"
     for proxy in attempts:
-        if video:
-            # h264 first (universal browser decode; ext=mp4 alone can grab AV1),
-            # faststart so moov leads and CDN playback/seek starts instantly
-            fmt = ["-f", "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*[height<=1080]+ba/b",
-                   "--merge-output-format", "mp4",
-                   "--remux-video", "mp4",
-                   "--ppa", "Merger:-movflags +faststart",
-                   "--ppa", "VideoRemuxer:-movflags +faststart"]
-        else:
-            # Native audio stream, no re-encode: ffmpeg conversion of long
-            # lectures crawls on fractional vCPUs and ElevenLabs accepts
-            # m4a/webm/opus directly.
-            fmt = ["-f", "bestaudio[ext=m4a]/bestaudio/best"]
-        cmd = [
-            "yt-dlp",
-            "--no-playlist",
-            "--socket-timeout", "30",
-            "--retries", "3",
-            "-N", "4",
-            # googlevideo throttles per CONNECTION (~playback speed); aria2c
-            # splits every file across 16 byte-range connections, each with its
-            # own throttle allowance. This is what made datacenter downloads
-            # crawl at realtime - not a bot wall.
-            *(["--extractor-args", f"youtube:player_client={player_client}"] if player_client else []),
-            *(["--downloader", "aria2c",
-               "--downloader-args", "aria2c:-x16 -s16 -k1M --console-log-level=warn --summary-interval=0"]
-              if use_aria2 else []),
-            "--newline",
-            "--progress-template", "download:PROG %(progress._percent_str)s",
-            *fmt,
-            "-o", out_tmpl,
-            "--print-json",
-            url,
-        ]
-        if cookies_file:
-            cmd[1:1] = ["--cookies", cookies_file]
-        if proxy:
-            cmd[1:1] = ["--proxy", proxy]
         label = proxy or "direct"
-        with jobs_lock:
-            jobs[job_id]["attempts"] = jobs[job_id].get("attempts", []) + [label]
-            jobs[job_id]["pct"] = 0.0
         try:
-            info = {}
-            tail: list = []
-            # stderr merged into stdout: separate pipes deadlock once the
-            # stderr buffer fills during ffmpeg post-processing.
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            deadline = time.time() + 1800
-            threading.Timer(1800, lambda: proc.poll() is None and proc.kill()).start()
-            for line in proc.stdout:  # type: ignore[union-attr]
-                if time.time() > deadline:
-                    proc.kill()
-                    raise subprocess.TimeoutExpired(cmd, 1800)
-                line = line.strip()
-                if line.startswith("PROG "):
-                    try:
-                        pct = float(line.split()[-1].rstrip("%"))
-                        with jobs_lock:
-                            jobs[job_id]["pct"] = pct
-                    except ValueError:
-                        pass
-                elif line.startswith("{"):
-                    try:
-                        info = json.loads(line)
-                    except json.JSONDecodeError:
-                        pass
-                elif line:
-                    tail.append(line)
-                    if len(tail) > 12:
-                        tail.pop(0)
-                if line:
+            with jobs_lock:
+                jobs[job_id]["attempts"] = jobs[job_id].get("attempts", []) + [label]
+                jobs[job_id]["pct"] = 0.0
+            # 1. extract direct URLs + metadata via the android_vr client
+            # use_aria2 kept for caller compatibility; parallel byte-ranges replace it.
+            client = player_client or "android_vr"
+            cmd = ["yt-dlp", "-J", "--skip-download", "--no-playlist", "--no-warnings",
+                   "--extractor-args", f"youtube:player_client={client}", "--socket-timeout", "20"]
+            if cookies_file:
+                cmd += ["--cookies", cookies_file]
+            if proxy:
+                cmd += ["--proxy", proxy]
+            cmd.append(url)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if proc.returncode != 0 or not proc.stdout.strip():
+                last_err = (proc.stderr or "").strip()[-400:] or f"extract exit {proc.returncode}"
+                continue
+            info = json.loads(proc.stdout)
+            sel = _pick_formats(info, video)
+
+            def dl_pct(base, span):
+                def cb(p):
                     with jobs_lock:
-                        jobs[job_id]["last"] = line[:200]
-            stderr = "\n".join(tail)
-            proc.wait(timeout=120)
-            if proc.returncode == 0:
-                produced = None
-                for name in os.listdir(DIR):
-                    if name.startswith(job_id + ".") and not name.endswith(".cookies.txt"):
-                        produced = os.path.join(DIR, name)
-                        break
-                if not produced:
-                    last_err = "yt-dlp succeeded but no output file found"
+                        jobs[job_id]["pct"] = base + p * span / 100.0
+                return cb
+
+            if not video:
+                a = sel.get("audio")
+                if not a:
+                    last_err = "no audio format"
                     continue
-                if cookies_file and os.path.exists(cookies_file):
-                    os.remove(cookies_file)
-                with jobs_lock:
-                    jobs[job_id].update(
-                        status="done",
-                        pct=100.0,
-                        file=produced,
-                        ext=produced.rsplit(".", 1)[-1],
-                        # any format above 1080p -> the source can be upgraded
-                        # to 4K later by the local encoder queue
-                        four_k=any((f.get("height") or 0) > 1080 for f in (info.get("formats") or [])),
-                        title=info.get("title", ""),
-                        channel=info.get("uploader", "") or info.get("channel", ""),
-                        thumbnail=info.get("thumbnail", ""),
-                        duration=info.get("duration", 0),
-                        description=(info.get("description") or "")[:5000],
-                        channel_id=info.get("channel_id", ""),
-                        vid=info.get("id", ""),
-                        via=label,
-                    )
-                return
-            last_err = (stderr or "").strip()[-400:] or f"exit {proc.returncode}"
+                produced = os.path.join(DIR, f"{job_id}.{a.get('ext') or 'm4a'}")
+                parallel_download(a["url"], produced, _fmt_clen(a), proxy, dl_pct(0, 95))
+            elif sel.get("progressive"):
+                p = sel["progressive"]
+                raw = os.path.join(DIR, f"{job_id}.raw.mp4")
+                parallel_download(p["url"], raw, _fmt_clen(p), proxy, dl_pct(0, 85))
+                produced = os.path.join(DIR, f"{job_id}.mp4")
+                _ffmpeg(["-i", raw, "-c", "copy", "-movflags", "+faststart", produced])
+                os.remove(raw)
+            else:
+                v, a = sel.get("video"), sel.get("audio")
+                if not (v and a):
+                    last_err = "no suitable video+audio formats"
+                    continue
+                vpath = os.path.join(DIR, f"{job_id}.v.mp4")
+                apath = os.path.join(DIR, f"{job_id}.a.m4a")
+                parallel_download(v["url"], vpath, _fmt_clen(v), proxy, dl_pct(0, 55))
+                parallel_download(a["url"], apath, _fmt_clen(a), proxy, dl_pct(55, 30))
+                produced = os.path.join(DIR, f"{job_id}.mp4")
+                _ffmpeg(["-i", vpath, "-i", apath, "-c", "copy", "-movflags", "+faststart", produced])
+                os.remove(vpath)
+                os.remove(apath)
+
+            if cookies_file and os.path.exists(cookies_file):
+                os.remove(cookies_file)
+            with jobs_lock:
+                jobs[job_id].update(
+                    status="done", pct=100.0, file=produced, ext=produced.rsplit(".", 1)[-1],
+                    four_k=any((f.get("height") or 0) > 1080 for f in (info.get("formats") or [])),
+                    title=info.get("title", ""),
+                    channel=info.get("uploader", "") or info.get("channel", ""),
+                    thumbnail=info.get("thumbnail", ""),
+                    duration=info.get("duration", 0),
+                    description=(info.get("description") or "")[:5000],
+                    channel_id=info.get("channel_id", ""),
+                    vid=info.get("id", ""),
+                    via=label,
+                )
+            return
         except subprocess.TimeoutExpired:
             last_err = f"timeout via {label}"
         except Exception as exc:  # noqa: BLE001
