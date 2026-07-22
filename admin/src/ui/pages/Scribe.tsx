@@ -33,68 +33,8 @@ function stageIndex(step: string): number {
   return i < 0 ? 0 : i;
 }
 
-/** Live companions + proxy control, fed by the presence WebSocket. */
-/** Compact download-routing dropdown: Auto (companion first, proxy fallback),
- * a specific proxy exit, or a specific online companion. */
-function RouteSelect() {
-  const [proxies, setProxies] = useState<any | null>(null);
-  const [roster, setRoster] = useState<any[]>([]);
-  const toast = useToast();
-
-  const load = async () => {
-    try { setProxies(await api('/api/companion/proxies')); } catch {}
-    try { setRoster((await api('/api/companion/roster')).companions || []); } catch {}
-  };
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 25000);
-    return () => clearInterval(t);
-  }, []);
-
-  const value = proxies
-    ? proxies.target === 'proxy'
-      ? (String(proxies.selected) === 'auto' ? 'proxy:auto' : `proxy:${proxies.selected}`)
-      : proxies.target
-        ? `comp:${proxies.target}`
-        : 'auto'
-    : 'auto';
-
-  const change = async (v: string) => {
-    try {
-      if (v === 'auto') {
-        await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target: '' }) });
-      } else if (v.startsWith('proxy:')) {
-        await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target: 'proxy' }) });
-        await api('/api/companion/proxies/select', {
-          method: 'POST',
-          body: JSON.stringify({ index: v === 'proxy:auto' ? 'auto' : parseInt(v.slice(6)) }),
-        });
-      } else if (v.startsWith('comp:')) {
-        await api('/api/companion/target', { method: 'POST', body: JSON.stringify({ target: v.slice(5) }) });
-      }
-      load();
-    } catch (e: any) { toast.push(e.message, 'error'); }
-  };
-
-  const dlComps = roster.filter((c) => c.caps?.some((x: string) => x.startsWith('download')));
-  return (
-    <select
-      className={inputCls + ' w-52 py-2.5'}
-      value={value}
-      onChange={(e) => change(e.target.value)}
-      title="Where downloads run — Auto uses an online companion first and falls back to the proxy container"
-    >
-      <option value="auto">Downloads: Auto</option>
-      <option value="proxy:auto">Proxy · auto exit</option>
-      {(proxies?.proxies || []).map((p: any) => (
-        <option key={p.index} value={`proxy:${p.index}`}>Proxy · {p.label}</option>
-      ))}
-      {dlComps.map((c) => (
-        <option key={c.name} value={`comp:${c.name}`}>Companion · {c.name}</option>
-      ))}
-    </select>
-  );
-}
+// Download routing (proxy / companion) retired: all downloads run on Browser
+// Rendering. The old RouteSelect dropdown and cookie panel have been removed.
 
 function parseTimes(raw: string | null): Record<string, number> {
   try {
@@ -918,75 +858,6 @@ function JobDetail({ job }: { job: any }) {
   );
 }
 
-function CookiesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const status = useApi<any>(open ? '/api/scribe/cookies' : null);
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-
-  return (
-    <Modal open={open} onClose={onClose} title="yt-dlp cookies" wide>
-      <p className="text-[12.5px] leading-relaxed text-muted">
-        YouTube increasingly requires a signed-in session. Export your cookies with a "Get cookies.txt" browser
-        extension while signed into YouTube, paste the file contents below, and every yt-dlp download will use them.
-        yt-dlp itself self-updates to the latest release before runs.
-      </p>
-      <div className="mt-3 flex items-center gap-2">
-        {status.data?.set ? (
-          <Badge tone="green">active · {status.data.lines} cookies · updated {fmtAgo(status.data.updated)}</Badge>
-        ) : (
-          <Badge tone="dim">no cookies stored</Badge>
-        )}
-      </div>
-      <textarea
-        rows={8}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={'# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t...'}
-        spellCheck={false}
-        className="mt-3 w-full resize-y rounded-xl border border-hairline bg-inset p-3 font-mono text-[11px] leading-relaxed text-cream outline-none focus:border-gold/40"
-      />
-      {msg && <p className="mt-2 text-[12px] text-gold-bright">{msg}</p>}
-      <div className="mt-4 flex justify-between">
-        <Button
-          variant="danger"
-          disabled={busy || !status.data?.set}
-          onClick={async () => {
-            setBusy(true);
-            await api('/api/scribe/cookies', { method: 'DELETE' });
-            setMsg('Cookies cleared.');
-            status.refetch();
-            setBusy(false);
-          }}
-        >
-          Clear stored cookies
-        </Button>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-          <Button
-            disabled={busy || !text.trim()}
-            onClick={async () => {
-              setBusy(true);
-              setMsg('');
-              try {
-                const r = await api('/api/scribe/cookies', { method: 'PUT', body: JSON.stringify({ cookies: text }) });
-                setMsg(`Saved ${r.lines} cookies.`);
-                setText('');
-                status.refetch();
-              } catch (e: any) {
-                setMsg('Failed: ' + e.message);
-              }
-              setBusy(false);
-            }}
-          >
-            {busy ? 'Saving...' : 'Save cookies'}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 export default function Scribe() {
   const { data, loading, error, refetch } = useApi<any>('/api/scribe');
   const [url, setUrl] = useState('');
@@ -1002,7 +873,6 @@ export default function Scribe() {
   const [submitErr, setSubmitErr] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
-  const [cookiesOpen, setCookiesOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'done' | 'published' | 'error'>('all');
   const [q, setQ] = useState('');
@@ -1244,12 +1114,6 @@ export default function Scribe() {
                 full transcript. Or drag &amp; drop a local video / mp3 anywhere on this card.
               </p>
             </div>
-            <button
-              onClick={() => setCookiesOpen(true)}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:text-cream"
-            >
-              <Icon name="wrench" className="h-3.5 w-3.5" /> Cookies
-            </button>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <input
@@ -1262,7 +1126,6 @@ export default function Scribe() {
             <select className={inputCls + ' w-32 py-2.5'} value={lang} onChange={(e) => setLang(e.target.value)}>
               {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
             </select>
-            <RouteSelect />
             <Button onClick={submit} disabled={submitting || enumerating || !url.trim()} className="px-5">
               {enumerating ? 'Listing...' : submitting ? 'Starting...' : looksLikePlaylist ? 'List videos' : 'Transcribe'}
             </Button>
@@ -1300,8 +1163,8 @@ export default function Scribe() {
                   {probe?.duration > 0 && <span className="tabular-nums">{fmtDuration(probe.duration)}</span>}
                   {probe?.est_cost != null && <span className="tabular-nums text-gold-bright">≈${probe.est_cost.toFixed(2)}</span>}
                   {probe?.bytes > 0 && <span className="tabular-nums">{(probe.bytes / 1048576).toFixed(0)} MB</span>}
-                  {probe?.path && <Badge tone="dim" className="font-mono text-[9px]">{probe.path === 'yt-dlp' ? 'yt-dlp + proxy' : 'edge download'}</Badge>}
-                  {probe && !probe.duration && probe.path === 'yt-dlp' && <span className="text-faint">probing duration...</span>}
+                  {probe?.path && <Badge tone="dim" className="font-mono text-[9px]">{probe.path === 'browser' ? 'browser rendering' : 'edge download'}</Badge>}
+                  {probe && !probe.duration && probe.path === 'browser' && <span className="text-faint">probing duration...</span>}
                 </div>
                 {probe?.duplicate && (
                   <p className="mt-1 text-[11px] text-amber-400">
@@ -1569,7 +1432,6 @@ export default function Scribe() {
 
       {editorJob && <SubtitleEditor job={editorJob} onClose={() => { setEditorJob(null); refetch(); }} />}
 
-      <CookiesModal open={cookiesOpen} onClose={() => setCookiesOpen(false)} />
 
       <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete job">
         <p className="text-[13px] leading-relaxed text-cream/80">

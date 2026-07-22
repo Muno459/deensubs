@@ -2,7 +2,7 @@
 // Heavy artifacts live in R2; stage timestamps + cost telemetry in D1.
 
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
-import { download, needsYtdlp, acquireDownloadSlot, releaseDownloadSlot } from './download';
+import { download, needsBrowser, acquireDownloadSlot, releaseDownloadSlot } from './download';
 import { runAsr, loadAsr } from './asr';
 import { translateWords, qaPass, takeUsage, takeCost } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
@@ -70,67 +70,13 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // 1. Download → R2
       await updateJob(env.DB, jobId, { status: 'running' });
       await markStage(env, jobId, 'download');
-      // Companion offload: if a DeenSubs Companion with download capability
-      // is online, the job is offered to it FIRST — companions download on
-      // home connections with their own browser cookies, in parallel, and
-      // never touch the shared proxies. Falls back to the proxy container
-      // when nobody claims it.
-      if (needsYtdlp(url)) {
-        const offered = await step.do('companion-download-offer', async () => {
-          const row: any = await env.DB.prepare('SELECT source_key, dl_status FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-          if (row?.source_key || row?.dl_status === 'done') return false;
-          const target: any = await env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
-          const t = String(target?.value || '');
-          if (t === 'proxy') return false; // admin routed downloads to the container
-          const { onlineCompanions, hasCap } = await import('../companion');
-          const online = await onlineCompanions(env);
-          if (t) {
-            // pinned target offline -> fall back to ANY online download-capable
-            // companion (a pin is a preference, not a reason to stall the queue)
-            const pinned = online.some((x) => x.name === t && x.caps.some((cp: string) => cp.startsWith('download')));
-            if (!pinned && !hasCap(online, 'download')) return false;
-          } else if (!hasCap(online, 'download')) return false;
-          await env.DB.prepare(
-            "UPDATE scribe_jobs SET dl_status = 'wanted' WHERE id = ? AND source_key IS NULL AND (dl_status IS NULL OR dl_status = '' OR dl_status = 'failed')"
-          ).bind(jobId).run();
-          return true;
-        });
-        if (offered) {
-          for (let w = 0; w < 60; w++) { // up to ~30 min of companion patience
-            const st: string = await step.do(`companion-download-check-${w}`, async () => {
-              const r: any = await env.DB.prepare('SELECT dl_status, source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-              if (r?.source_key && r?.dl_status === 'done') return 'done';
-              if (r?.dl_status === 'failed') return 'abandon';
-              if (r?.dl_status === 'wanted') {
-                const target: any = await env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
-                const t = String(target?.value || '');
-                if (t === 'proxy') return 'abandon';
-                const { onlineCompanions, hasCap } = await import('../companion');
-                const online = await onlineCompanions(env);
-                if (!hasCap(online, 'download')) return 'abandon';
-              }
-              return 'wait';
-            });
-            if (st === 'done') break;
-            if (st === 'abandon') {
-              await step.do('companion-download-cancel', async () => {
-                await env.DB.prepare("UPDATE scribe_jobs SET dl_status = NULL WHERE id = ? AND dl_status IN ('wanted','failed')").bind(jobId).run();
-              });
-              break;
-            }
-            try {
-              // real-time: the companion's complete/release callbacks fire this
-              // event; the timeout is only the fallback for a vanished worker
-              await (step as any).waitForEvent(`companion-download-ev-${w}`, { type: 'download-complete', timeout: '30 seconds' });
-            } catch { /* timeout: re-check state */ }
-          }
-        }
-      }
-      // yt-dlp downloads share the SOCKS proxies — exactly ONE job may be in
-      // the download phase at a time. Queue as many videos as you like; the
-      // rest wait here (cheap workflow sleeps) for the slot. Cached resumes
-      // skip the queue entirely.
-      const slotGated = needsYtdlp(url) && !(await step.do('download-cached-check', async () => {
+      // Downloads run via Browser Rendering (a headless Chrome on a CF IP mints
+      // the direct URLs; the Worker range-streams them to R2). The companion
+      // download offload and the yt-dlp proxy container have been retired.
+      // Browser Rendering has a concurrency cap, so exactly ONE job downloads at
+      // a time — queue as many as you like; the rest wait here (cheap workflow
+      // sleeps). Cached resumes skip the queue entirely.
+      const slotGated = needsBrowser(url) && !(await step.do('download-cached-check', async () => {
         const row: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
         return !!(row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key)));
       }));

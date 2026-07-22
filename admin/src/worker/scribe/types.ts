@@ -3,7 +3,8 @@
 export type ScribeEnv = {
   DB: D1Database;
   MEDIA_BUCKET: R2Bucket;
-  YTDLP: DurableObjectNamespace; // yt-dlp container binding
+  MYBROWSER: Fetcher; // Cloudflare Browser Rendering (primary YouTube download)
+  YTDLP: DurableObjectNamespace; // container: mux fallback + grade/clips/thumbs (NOT download)
   ELEVENLABS_API_KEY?: string;
   SCRIBE_LLM_URL?: string;
   SCRIBE_LLM_KEY?: string;
@@ -39,7 +40,10 @@ export type AsrResult = {
 
 export type DownloadResult = {
   key: string;
-  method: 'direct' | 'yt-dlp';
+  method: 'direct' | 'yt-dlp' | 'browser';
+  /** Full-video only: separate video+audio keys handed to the encoder to mux. */
+  videoKey?: string;
+  audioKey?: string;
   contentType: string;
   bytes: number;
   title?: string;

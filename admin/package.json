@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.7",
+    "@cloudflare/puppeteer": "^1.0.4",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "dompurify": "^3.2.4",

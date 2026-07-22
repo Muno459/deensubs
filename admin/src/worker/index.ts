@@ -474,34 +474,9 @@ function genJobId(): string {
   return id;
 }
 
-// yt-dlp cookies (cookies.txt) — stored in R2, sent to the VPS per download
-// Per-admin cookies: each admin's session cookies are private to them.
-// (Legacy shared file scribe/config/cookies.txt remains as a fallback.)
-const cookiesKeyFor = (userId: number | undefined) => `scribe/config/cookies-${userId || 0}.txt`;
-
-app.get('/api/scribe/cookies', async (c) => {
-  const obj = await c.env.MEDIA_BUCKET.get(cookiesKeyFor(c.get('user')?.id));
-  if (!obj) return c.json({ set: false });
-  const text = await obj.text();
-  const lines = text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
-  return c.json({ set: lines > 0, lines, updated: obj.uploaded, bytes: text.length });
-});
-
-app.put('/api/scribe/cookies', async (c) => {
-  const { cookies } = await c.req.json();
-  if (typeof cookies !== 'string' || !cookies.trim()) return c.json({ error: 'cookies text required' }, 400);
-  if (cookies.length > 512 * 1024) return c.json({ error: 'cookies file too large' }, 400);
-  await c.env.MEDIA_BUCKET.put(cookiesKeyFor(c.get('user')?.id), cookies, {
-    httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-  });
-  const lines = cookies.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
-  return c.json({ ok: true, lines });
-});
-
-app.delete('/api/scribe/cookies', async (c) => {
-  await c.env.MEDIA_BUCKET.delete(cookiesKeyFor(c.get('user')?.id));
-  return c.json({ ok: true });
-});
+// Cookies retired: downloads use Browser Rendering (a real headless Chrome on a
+// Cloudflare IP passes YouTube's bot check with no cookies/proxies). The
+// /api/scribe/cookies endpoints and the dashboard panel have been removed.
 
 type JobIdentity = { title?: string; channel?: string; thumb_url?: string };
 type JobPlaylist = { id: number; pos: number };
@@ -537,8 +512,7 @@ app.post('/api/scribe/probe', async (c) => {
   const out: any = { url };
 
   const vid = ytId(url);
-  out.path = vid || /(youtube\.com|youtu\.be|twitter\.com|x\.com|facebook\.com|instagram\.com|tiktok\.com|vimeo\.com)\//i.test(url)
-    ? 'yt-dlp' : 'direct';
+  out.path = vid || /(youtube\.com|youtu\.be)\//i.test(url) ? 'browser' : 'direct';
 
   // Duplicate check (by yt id when available, else exact URL)
   const dup: any = vid
@@ -559,7 +533,8 @@ app.post('/api/scribe/probe', async (c) => {
         out.thumb_url = d.thumbnail_url;
       }
     } catch {}
-    if (!out.thumb_url) out.thumb_url = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+    // Always prefer the highest-resolution thumbnail available.
+    out.thumb_url = `https://i.ytimg.com/vi/${vid}/maxresdefault.jpg`;
   } else if (out.path === 'direct') {
     // Cheap HEAD for size/type
     try {
@@ -569,30 +544,24 @@ app.post('/api/scribe/probe', async (c) => {
     } catch {}
   }
 
-  // Deep probe (duration → cost) via the container, on request
-  if (deep) {
+  // Deep probe (duration → cost) via Browser Rendering, on request. This mints
+  // the real ANDROID_VR player response — exact duration + highest thumbnail +
+  // 4K capability — with no cookies, no proxies, no container.
+  if (deep && vid) {
     try {
-      const { getContainer } = await import('@cloudflare/containers');
-      const container = getContainer(c.env.YTDLP as any, 'enum');
-      const cookiesObj = (await c.env.MEDIA_BUCKET.get(cookiesKeyFor(c.get('user')?.id))) || (await c.env.MEDIA_BUCKET.get('scribe/config/cookies.txt'));
-      const res = await container.fetch(new Request('http://ytdlp/probe', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + (c.env.YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, cookies: cookiesObj ? await cookiesObj.text() : null }),
-      }));
-      if (res.ok) {
-        const d: any = await res.json();
-        if (!d.error) {
-          out.title = out.title || d.title;
-          out.channel = out.channel || d.channel;
-          out.thumb_url = out.thumb_url || d.thumbnail;
-          out.duration = d.duration;
-          if (d.duration) {
-            out.est_cost = Math.round(((d.duration / 3600) * 0.4 + (d.duration * 450 / 1e6) * 0.4) * 100) / 100;
-          }
-        }
+      const { browserMint } = await import('./scribe/ytbrowser');
+      const m = await browserMint(c.env as any, vid);
+      out.title = out.title || m.title;
+      out.channel = out.channel || m.channel;
+      if (m.thumbUrl) out.thumb_url = m.thumbUrl;
+      out.duration = m.durationSec;
+      out.four_k = m.fourK;
+      if (m.durationSec) {
+        out.est_cost = Math.round(((m.durationSec / 3600) * 0.4 + (m.durationSec * 450 / 1e6) * 0.4) * 100) / 100;
       }
-    } catch {}
+    } catch (e: any) {
+      out.probe_error = String(e?.message || e).slice(0, 120);
+    }
   }
   return c.json(out);
 });
@@ -617,24 +586,27 @@ app.post('/api/scribe/prewarm', async (c) => {
   return c.json({ ok: true });
 });
 
-// Enumerate a playlist/channel without downloading (container, seconds)
+// Enumerate a playlist without downloading — Browser Rendering (one session,
+// InnerTube browse). No container, no cookies.
 app.post('/api/scribe/enumerate', async (c) => {
   const { url } = await c.req.json();
   if (!url || !/^https?:\/\//.test(url)) return c.json({ error: 'A valid http(s) URL is required' }, 400);
-  const { getContainer } = await import('@cloudflare/containers');
-  const container = getContainer(c.env.YTDLP as any, 'enum');
-  const cookiesObj = (await c.env.MEDIA_BUCKET.get(cookiesKeyFor(c.get('user')?.id))) || (await c.env.MEDIA_BUCKET.get('scribe/config/cookies.txt'));
-  const cookies = cookiesObj ? await cookiesObj.text() : null;
-  const res = await container.fetch(new Request('http://ytdlp/playlist', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + (c.env.YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, cookies }),
-  }));
-  if (!res.ok) return c.json({ error: `enumeration failed: HTTP ${res.status}` }, 502);
-  const data: any = await res.json();
-  // The `list=` id lets a batch map back to one site playlist across re-imports
-  data.yt_playlist_id = (url.match(/[?&]list=([\w-]+)/) || [])[1] || null;
-  return c.json(data);
+  const listId = (url.match(/[?&]list=([\w-]+)/) || [])[1] || null;
+  if (!listId) return c.json({ error: 'no playlist (list=) id found in the URL' }, 400);
+  try {
+    const { resolvePlaylist } = await import('./scribe/ytbrowser');
+    const pl = await resolvePlaylist(c.env as any, listId);
+    const entries = pl.entries.map((e) => ({
+      id: e.id,
+      title: e.title,
+      duration: 0, // exact duration is resolved at download time (per-video mint)
+      url: `https://www.youtube.com/watch?v=${e.id}`,
+      uploader: '',
+    }));
+    return c.json({ title: pl.title || 'Playlist', count: entries.length, entries: entries.slice(0, 500), yt_playlist_id: listId });
+  } catch (e: any) {
+    return c.json({ error: `enumeration failed: ${String(e?.message || e).slice(0, 120)}` }, 502);
+  }
 });
 
 /** Site playlist for a scribe batch: reuse by YouTube playlist id, else create. */
@@ -858,28 +830,10 @@ app.get('/api/companion/roster', async (c) => {
 });
 
 app.post('/api/companion/download/claim', async (c) => {
-  const body: any = await c.req.json().catch(() => ({}));
-  const worker = String(body.worker || 'companion').slice(0, 40);
-  // Admin-chosen routing: '' = any companion, 'proxy' = container only,
-  // anything else = only that companion instance gets download work.
-  const target: any = await c.env.DB.prepare("SELECT value FROM config WHERE name = 'download_target'").first().catch(() => null);
-  const t = String(target?.value || '');
-  if (t === 'proxy') return c.json({ job: null });
-  if (t && t !== worker) {
-    // the pin is a preference: it holds only while the pinned companion is
-    // actually online — an offline target must not starve the queue
-    const { onlineCompanions } = await import('./companion');
-    const online = await onlineCompanions(c.env as any);
-    if (online.some((x: any) => x.name === t)) return c.json({ job: null });
-  }
-  const job: any = await c.env.DB.prepare(
-    `UPDATE scribe_jobs SET dl_status='claimed', dl_claimed_by=?, dl_claimed_at=unixepoch()
-     WHERE id = (SELECT id FROM scribe_jobs
-       WHERE dl_status = 'wanted' OR (dl_status = 'claimed' AND dl_claimed_at < unixepoch() - 1800)
-       ORDER BY created_at LIMIT 1)
-     RETURNING id, url, full_video, title`
-  ).bind(worker).first();
-  return c.json({ job: job || null });
+  // Companion downloads are RETIRED — all downloading now runs via Browser
+  // Rendering on Cloudflare. Never hand a download job to a companion (even an
+  // old build that still polls this): the companion only enhances/encodes now.
+  return c.json({ job: null, retired: true });
 });
 
 app.post('/api/companion/download/complete', async (c) => {
