@@ -162,9 +162,10 @@ export async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: s
   return { key, bytes, contentType: ct };
 }
 
-/** Fallback: the container runs yt-dlp + aria2c from its own IP (no proxies,
-    no browser). Extraction works fine from the datacenter; aria2c's 16
-    byte-range connections defeat googlevideo's per-connection throttle. */
+/** Primary path: the container runs yt-dlp from its own datacenter IP (no
+    proxies, no browser). android_vr extraction works direct; the bytes are
+    pulled with parallel 4 MB byte-ranges (~290 MB/s, c=48) that finish inside
+    googlevideo's per-connection burst window, then muxed with ffmpeg. */
 export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
   if (!env.YTDLP) throw new Error('container binding not configured');
   const { getContainer } = await import('@cloudflare/containers');
@@ -325,13 +326,15 @@ export async function releaseDownloadSlot(env: ScribeEnv, jobId: string): Promis
 }
 
 export async function download(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
-  // YouTube → Browser Rendering (primary); container yt-dlp + aria2c is the
-  // self-sufficient fallback (BR quota, client changes). Others → edge fetch.
+  // YouTube → container yt-dlp (primary): android_vr extract + parallel
+  // byte-ranges (~290 MB/s), extracts AND muxes on its own datacenter IP, no
+  // browser, no proxies. Browser Rendering is the fallback (client changes,
+  // rare extraction failures). Others → edge fetch.
   if (needsBrowser(url)) {
     try {
-      return await browserDownload(env, jobId, url, fullVideo);
-    } catch (e: any) {
       return await ytdlpViaContainer(env, jobId, url, fullVideo);
+    } catch (e: any) {
+      return await browserDownload(env, jobId, url, fullVideo);
     }
   }
   return directDownload(env, jobId, url);

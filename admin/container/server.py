@@ -277,7 +277,9 @@ def run_download(job_id: str, url: str, cookies: str | None = None, video: bool 
 
 
 def probe_video(url: str, cookies: str | None) -> dict:
-    """Fast metadata probe (no download): title, channel, duration, thumbnail."""
+    """Fast metadata probe (no download): title, channel, duration, thumbnail,
+    four_k. Uses the android_vr client (works direct from the datacenter IP) and
+    -J so it returns in ~1-3s, far quicker than a Browser Rendering probe."""
     cookies_file = None
     if cookies:
         cookies_file = os.path.join(DIR, f"probe-{uuid.uuid4()}.cookies.txt")
@@ -287,7 +289,8 @@ def probe_video(url: str, cookies: str | None) -> dict:
         attempts = PROXIES + [None]
         last_err = "no attempts"
         for proxy in attempts:
-            cmd = ["yt-dlp", "-J", "--no-playlist", "--skip-download", "--socket-timeout", "15", url]
+            cmd = ["yt-dlp", "-J", "--no-playlist", "--skip-download", "--no-warnings",
+                   "--extractor-args", "youtube:player_client=android_vr", "--socket-timeout", "15", url]
             if cookies_file:
                 cmd[1:1] = ["--cookies", cookies_file]
             if proxy:
@@ -301,6 +304,7 @@ def probe_video(url: str, cookies: str | None) -> dict:
                         "channel": d.get("uploader", "") or d.get("channel", ""),
                         "duration": d.get("duration") or 0,
                         "thumbnail": d.get("thumbnail", ""),
+                        "four_k": any((f.get("height") or 0) > 1080 for f in (d.get("formats") or [])),
                     }
                 last_err = (proc.stderr or "").strip()[-200:]
             except subprocess.TimeoutExpired:

@@ -567,23 +567,41 @@ app.post('/api/scribe/probe', async (c) => {
     } catch {}
   }
 
-  // Deep probe (duration → cost) via Browser Rendering, on request. This mints
-  // the real ANDROID_VR player response — exact duration + highest thumbnail +
-  // 4K capability — with no cookies, no proxies, no container.
+  // Deep probe (duration → cost): the container's yt-dlp (android_vr) probes
+  // direct from the datacenter IP in ~1-3s — far faster than Browser Rendering.
+  // The 'enum' instance is prewarmed while the user types. Browser Rendering is
+  // the fallback if the container can't extract.
   if (deep && vid) {
+    const est = (secs: number) => Math.round(((secs / 3600) * 0.4 + (secs * 450 / 1e6) * 0.4) * 100) / 100;
     try {
-      const { browserMintCached } = await import('./scribe/ytbrowser');
-      const m = await browserMintCached(c.env as any, vid);
+      const { getContainer } = await import('@cloudflare/containers');
+      const container = getContainer(c.env.YTDLP as any, 'enum');
+      const r = await container.fetch(new Request('http://ytdlp/probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (c.env.YTDLP_TOKEN || 'internal') },
+        body: JSON.stringify({ url }),
+      }));
+      const m: any = await r.json().catch(() => ({}));
+      if (!m || !m.duration) throw new Error(m?.error || 'no duration from container');
       out.title = out.title || m.title;
       out.channel = out.channel || m.channel;
-      if (m.thumbUrl) out.thumb_url = m.thumbUrl;
-      out.duration = m.durationSec;
-      out.four_k = m.fourK;
-      if (m.durationSec) {
-        out.est_cost = Math.round(((m.durationSec / 3600) * 0.4 + (m.durationSec * 450 / 1e6) * 0.4) * 100) / 100;
+      if (m.thumbnail) out.thumb_url = m.thumbnail;
+      out.duration = m.duration;
+      out.four_k = m.four_k;
+      out.est_cost = est(m.duration);
+    } catch (containerErr: any) {
+      try {
+        const { browserMintCached } = await import('./scribe/ytbrowser');
+        const m = await browserMintCached(c.env as any, vid);
+        out.title = out.title || m.title;
+        out.channel = out.channel || m.channel;
+        if (m.thumbUrl) out.thumb_url = m.thumbUrl;
+        out.duration = m.durationSec;
+        out.four_k = m.fourK;
+        if (m.durationSec) out.est_cost = est(m.durationSec);
+      } catch (e: any) {
+        out.probe_error = String(e?.message || e).slice(0, 120);
       }
-    } catch (e: any) {
-      out.probe_error = String(e?.message || e).slice(0, 120);
     }
   }
   return c.json(out);
