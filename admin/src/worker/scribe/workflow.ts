@@ -76,7 +76,10 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // Browser Rendering has a concurrency cap, so exactly ONE job downloads at
       // a time — queue as many as you like; the rest wait here (cheap workflow
       // sleeps). Cached resumes skip the queue entirely.
-      const slotGated = needsBrowser(url) && !(await step.do('download-cached-check', async () => {
+      // Browser Rendering downloads need no serialization — the slot existed
+      // to protect shared SOCKS proxies, which no longer participate. Playlist
+      // imports now download fully in parallel.
+      const slotGated = false && needsBrowser(url) && !(await step.do('download-cached-check', async () => {
         const row: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
         return !!(row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key)));
       }));

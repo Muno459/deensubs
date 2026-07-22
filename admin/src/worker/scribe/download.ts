@@ -207,12 +207,16 @@ async function browserDownload(env: ScribeEnv, jobId: string, url: string, fullV
   }
   const videoKey = `scribe/${jobId}/video.${v.mime.includes('webm') ? 'webm' : 'mp4'}`;
   const audioKey = `scribe/${jobId}/audio.${a.mime.includes('webm') || a.mime.includes('opus') ? 'webm' : 'm4a'}`;
-  const vTotal = v.clen ?? (await yt.discoverLength(v.url));
-  const aTotal = a.clen ?? (await yt.discoverLength(a.url));
+  const [vTotal, aTotal] = await Promise.all([
+    v.clen ?? yt.discoverLength(v.url),
+    a.clen ?? yt.discoverLength(a.url),
+  ]);
   const grand = vTotal + aTotal;
-  let vDone = 0;
-  await streamFmt(v, videoKey, grand ? (b) => { vDone = b; writePct((b / grand) * 100); } : undefined);
-  const av = await streamFmt(a, audioKey, grand ? (b) => writePct(((vDone + b) / grand) * 100) : undefined);
+  let vDone = 0, aDone = 0;
+  const [, av] = await Promise.all([
+    streamFmt(v, videoKey, grand ? (b) => { vDone = b; writePct(((vDone + aDone) / grand) * 100); } : undefined),
+    streamFmt(a, audioKey, grand ? (b) => { aDone = b; writePct(((vDone + aDone) / grand) * 100); } : undefined),
+  ]);
   const merged = await muxViaContainer(env, jobId, videoKey, audioKey);
   // tidy the intermediate streams
   env.MEDIA_BUCKET.delete(videoKey).catch(() => {});

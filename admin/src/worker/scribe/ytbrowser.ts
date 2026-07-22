@@ -140,7 +140,7 @@ async function fetchRange(url: string, start: number, end: number): Promise<Uint
 }
 
 /** Ordered ReadableStream over parallel byte-range fetches (sliding window). */
-export function rangeStream(url: string, totalLen: number, chunk = 4 * 1024 * 1024, concurrency = 16): ReadableStream<Uint8Array> {
+export function rangeStream(url: string, totalLen: number, chunk = 8 * 1024 * 1024, concurrency = 24): ReadableStream<Uint8Array> {
   const nChunks = Math.ceil(totalLen / chunk);
   const inflight = new Map<number, Promise<Uint8Array>>();
   let nextToFetch = 0, nextToEmit = 0;
