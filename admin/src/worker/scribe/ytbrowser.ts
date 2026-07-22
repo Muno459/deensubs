@@ -56,6 +56,22 @@ function bestThumb(thumbs: any[], videoId: string): string {
 }
 
 /** Drive Browser Rendering to mint ANDROID_VR direct URLs + metadata for a video. */
+/** browserMint with a short KV cache: the composer's deep probe already
+    minted this video's URLs seconds before Transcribe is pressed — reusing
+    them skips an entire headless-browser session on download. */
+export async function browserMintCached(env: any, videoId: string): Promise<YtMint> {
+  const key = 'ytmint:' + videoId;
+  try {
+    const hit: any = await env.CACHE?.get(key, 'json');
+    if (hit && hit.status === 'OK') return hit;
+  } catch {}
+  const m = await browserMint(env, videoId);
+  if (m && (m as any).status === 'OK') {
+    try { await env.CACHE?.put(key, JSON.stringify(m), { expirationTtl: 1800 }); } catch {}
+  }
+  return m;
+}
+
 export async function browserMint(env: any, videoId: string): Promise<YtMint> {
   const browser = await puppeteer.launch(env.MYBROWSER);
   try {

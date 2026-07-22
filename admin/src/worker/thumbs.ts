@@ -28,7 +28,7 @@ export async function detectStaticVideo(env: any, frameKeys: string[]): Promise<
       if (p) parts.push(p);
     }
     if (parts.length < 3) return null;
-    const raw = await llmChat(env, [{ role: 'user', content: parts as any }], 200);
+    const raw = await llmChat(env, [{ role: 'user', content: parts as any }], 200, 'ag/gemini-3.6-flash-low');
     const m = raw.match(/"static"\s*:\s*(true|false)/i);
     return m ? m[1].toLowerCase() === 'true' : null;
   } catch {
@@ -63,7 +63,7 @@ export async function detectArabicThumb(
           { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
         ] as any,
       },
-    ], 400);
+    ], 400, 'ag/gemini-3.6-flash-low');
     const m = raw.match(/\{[\s\S]*\}/);
     if (m) {
       try {

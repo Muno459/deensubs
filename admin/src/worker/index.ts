@@ -549,8 +549,8 @@ app.post('/api/scribe/probe', async (c) => {
   // 4K capability — with no cookies, no proxies, no container.
   if (deep && vid) {
     try {
-      const { browserMint } = await import('./scribe/ytbrowser');
-      const m = await browserMint(c.env as any, vid);
+      const { browserMintCached } = await import('./scribe/ytbrowser');
+      const m = await browserMintCached(c.env as any, vid);
       out.title = out.title || m.title;
       out.channel = out.channel || m.channel;
       if (m.thumbUrl) out.thumb_url = m.thumbUrl;
@@ -722,6 +722,19 @@ app.get('/api/scribe', async (c) => {
   return c.json({ jobs: jobs.results });
 });
 
+// Pipeline health: cron heartbeat, stuck jobs, recent auto-resumes.
+// Registered BEFORE /api/scribe/:id, which was shadowing this path (404).
+app.get('/api/scribe/sweep-status', async (c) => {
+  const [hb, stuckRaw, logs] = await Promise.all([
+    c.env.CACHE.get('sweep:heartbeat'),
+    c.env.CACHE.get('ops:stuck'),
+    c.env.DB.prepare("SELECT target, details, created_at FROM admin_logs WHERE action = 'auto_resume' ORDER BY created_at DESC LIMIT 5").all().catch(() => ({ results: [] })),
+  ]);
+  let stuck: any[] = [];
+  try { stuck = JSON.parse(stuckRaw || '[]'); } catch {}
+  return c.json({ heartbeat: hb, stuck, recent_auto_resumes: (logs as any).results });
+});
+
 app.get('/api/scribe/:id', async (c) => {
   const job = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(c.req.param('id')).first();
   if (!job) return c.json({ error: 'Not found' }, 404);
@@ -817,7 +830,6 @@ app.post('/api/upload', async (c) => {
   return c.json({ key });
 });
 
-// Sweep observability: when did the auto-resume cron last fire?
 // ---- Companion coordination ----------------------------------------------
 // Live presence + work offloading for DeenSubs Companion apps. Downloads and
 // speech enhancement claim like the 4K queue; presence flows over WebSockets
@@ -1275,11 +1287,6 @@ app.post('/api/scribe/:id/import-asr', async (c) => {
   return c.json({ ok: true, asrKey, words: allWords.length, durationSec: Math.round(acc) });
 });
 
-app.get('/api/scribe/sweep-status', async (c) => {
-  const hb = await c.env.CACHE.get('sweep:heartbeat');
-  const recent = await c.env.DB.prepare("SELECT target, details, created_at FROM admin_logs WHERE action = 'auto_resume' ORDER BY id DESC LIMIT 5").all().catch(() => ({ results: [] }));
-  return c.json({ lastHeartbeat: hb, resumes: recent.results });
-});
 
 // Quality report (mechanical metrics + semantic audit); POST re-runs it
 app.get('/api/scribe/:id/quality', async (c) => {
@@ -2076,7 +2083,7 @@ async function autoResumeSweep(env: Env) {
   await env.CACHE.put('sweep:heartbeat', new Date().toISOString()).catch(() => {});
   const dead = await env.DB.prepare(
     `SELECT * FROM scribe_jobs WHERE updated_at > datetime('now', '-1 day') AND (
-       (status = 'error' AND (error LIKE '%Durable Object reset%' OR error LIKE '%code was updated%'))
+       (status = 'error' AND (error LIKE '%Durable Object reset%' OR error LIKE '%code was updated%' OR error LIKE '%WorkflowInternalError%' OR error LIKE '%internal workflows error%'))
        OR (status = 'queued' AND wf_instance IS NOT NULL AND updated_at < datetime('now', '-15 minutes'))
      ) LIMIT 3`
   ).all();
@@ -2163,6 +2170,25 @@ function parseSrtCues(text: string): { start: number; end: number; text: string;
 
 // Daily retention: drop scribe artifacts for jobs older than 30 days.
 // Published copies live under canonical keys, so this only clears staging.
+async function stuckDetectorSweep(env: Env) {
+  const stuck: any[] = [];
+  const stale: any = await env.DB.prepare(
+    "SELECT id, title, step, updated_at FROM scribe_jobs WHERE status = 'running' AND updated_at < datetime('now', '-3 hours') ORDER BY updated_at ASC LIMIT 10"
+  ).all().catch(() => ({ results: [] }));
+  for (const j of stale.results as any[]) {
+    stuck.push({ kind: 'no-progress-3h', id: j.id, title: (j.title || '').slice(0, 60), step: j.step, since: j.updated_at });
+  }
+  const wanted: any = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM scribe_jobs WHERE se_status = 'wanted' AND updated_at < datetime('now', '-2 hours')"
+  ).first().catch(() => null);
+  if (wanted?.n) {
+    const { onlineCompanions, hasCap } = await import('./companion');
+    const online = await onlineCompanions(env as any).catch(() => []);
+    if (!hasCap(online, 'enhance')) stuck.push({ kind: 'enhance-wanted-no-companion', count: wanted.n });
+  }
+  await env.CACHE.put('ops:stuck', JSON.stringify(stuck), { expirationTtl: 1800 }).catch(() => {});
+}
+
 async function retentionSweep(env: Env) {
   const old = await env.DB.prepare(
     "SELECT id FROM scribe_jobs WHERE created_at < datetime('now', '-30 days') AND status IN ('done','error')"
@@ -2182,6 +2208,7 @@ export default {
   fetch: app.fetch,
   scheduled: (event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(autoResumeSweep(env));
+    ctx.waitUntil(stuckDetectorSweep(env).catch(() => {}));
     ctx.waitUntil(chaptersBackfillSweep(env).catch(() => {}));
     // Retention only on the daily 03:30 tick
     const d = new Date(event.scheduledTime);

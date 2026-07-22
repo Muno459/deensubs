@@ -144,7 +144,7 @@ async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: string, 
 
   let info: any = null;
   for (let i = 0; i < 240; i++) {
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise((r) => setTimeout(r, 1500));
     const st = await call(`/jobs/${id}`).catch(() => null);
     if (!st || !st.ok) continue;
     info = await st.json();
@@ -168,7 +168,7 @@ async function browserDownload(env: ScribeEnv, jobId: string, url: string, fullV
   const { videoId } = yt.parseYouTube(url);
   if (!videoId) throw new Error('could not parse a YouTube video id from the URL');
 
-  const m = await yt.browserMint(env, videoId);
+  const m = await yt.browserMintCached(env, videoId);
   const writePct = pctWriter(env, jobId);
 
   const streamFmt = async (f: YtFormat, key: string, onPct?: (b: number) => void): Promise<{ bytes: number; ct: string }> => {

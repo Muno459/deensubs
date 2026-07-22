@@ -861,6 +861,7 @@ function JobDetail({ job }: { job: any }) {
 
 export default function Scribe() {
   const { data, loading, error, refetch } = useApi<any>('/api/scribe');
+  const health = useApi<any>('/api/scribe/sweep-status');
   const [url, setUrl] = useState('');
   const [lang, setLang] = useState('en');
   const [extraLangs, setExtraLangs] = useState<string[]>([]);
@@ -1214,6 +1215,19 @@ export default function Scribe() {
       </BlurFade>
 
       {error && <ErrorNote message={error} onRetry={refetch} />}
+      {!!health.data?.stuck?.length && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-[12px] text-amber-200">
+          <b>Pipeline health:</b>{' '}
+          {health.data.stuck.map((x: any, i: number) => (
+            <span key={i}>
+              {i > 0 && ' · '}
+              {x.kind === 'no-progress-3h'
+                ? `${x.id} stalled at ${x.step} since ${x.since}`
+                : `${x.count} enhance offer${x.count === 1 ? '' : 's'} waiting with no enhance-capable companion online`}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Stats strip + filters */}
       {jobs.length > 0 && (
