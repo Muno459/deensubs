@@ -1108,18 +1108,16 @@ export default function Scribe() {
             <div>
               <h2 className="text-[15px] font-semibold tracking-tight text-cream">Add a video</h2>
               <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-muted">
-                YouTube downloads run on Cloudflare Browser Rendering: a real headless Chrome on a
-                Cloudflare IP mints ANDROID_VR stream URLs and the Worker range-streams them straight into
-                R2 at ~100 MB/s — no yt-dlp, no cookies, no proxies. Direct links download at the edge.
-                ElevenLabs Scribe v2 transcribes, Gemini translates on word-index timing, and metadata is
-                written from the full transcript. Or drag &amp; drop a local video / mp3 anywhere on this card.
+                Cloudflare downloads the video directly at the edge. ElevenLabs Scribe v2 transcribes,
+                Gemini translates on word-index timing, and metadata is written from the full transcript.
+                Or drag &amp; drop a local video / mp3 anywhere on this card.
               </p>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <input
               className={inputCls + ' min-w-64 flex-1 py-2.5 font-mono text-[12.5px]'}
-              placeholder="https://youtube.com, x.com, tiktok.com, facebook.com — any yt-dlp site   or a direct .mp4 / .mp3 URL"
+              placeholder="https://youtube.com, x.com, tiktok.com, facebook.com   or a direct .mp4 / .mp3 URL"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submit()}
