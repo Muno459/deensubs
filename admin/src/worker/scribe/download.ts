@@ -10,6 +10,7 @@
 // ffmpeg, and we stream the result into R2 the same way.
 
 import type { DownloadResult, ScribeEnv } from './types';
+import type { YtFormat } from './ytbrowser';
 
 const PART_SIZE = 10 * 1024 * 1024; // R2 multipart minimum is 5MB per part
 
@@ -121,99 +122,107 @@ async function directDownload(env: ScribeEnv, jobId: string, url: string): Promi
   return { key, method: 'direct', contentType: ct, bytes };
 }
 
-/** Cookies (cookies.txt) saved from the dashboard, stored in R2 — private
- * per admin (keyed by the job creator), with the legacy shared file as fallback. */
-export const COOKIES_KEY = 'scribe/config/cookies.txt';
+const CDN_BASE = 'https://cdn.deensubs.com';
 
-async function loadCookies(env: ScribeEnv, jobId?: string): Promise<string | null> {
-  if (jobId) {
-    const row: any = await env.DB.prepare('SELECT created_by FROM scribe_jobs WHERE id = ?').bind(jobId).first().catch(() => null);
-    if (row?.created_by != null) {
-      const own = await env.MEDIA_BUCKET.get(`scribe/config/cookies-${row.created_by}.txt`);
-      if (own) {
-        const text = await own.text();
-        if (text.trim()) return text;
-      }
-    }
-  }
-  const obj = await env.MEDIA_BUCKET.get(COOKIES_KEY);
-  if (!obj) return null;
-  const text = await obj.text();
-  return text.trim() ? text : null;
-}
-
-/** Plan B: yt-dlp inside a Cloudflare Container (one instance per job). */
-async function ytdlpDownload(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
-  if (!env.YTDLP) throw new Error('yt-dlp container binding not configured');
+/** Mux a video-only + audio-only pair (already in R2, served via CDN) into one
+ *  MP4 using the container's ffmpeg — it fetches from R2/CDN (fast, no throttle),
+ *  never from googlevideo. Streams the merged result back into R2. */
+async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: string, audioKey: string): Promise<{ key: string; bytes: number; contentType: string }> {
+  if (!env.YTDLP) throw new Error('mux container binding not configured');
   const { getContainer } = await import('@cloudflare/containers');
   const container = getContainer(env.YTDLP as any, jobId);
   const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };
   const call = (path: string, init?: RequestInit) =>
     container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
 
-  const cookies = await loadCookies(env, jobId);
-  const start = await call('/download', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url, cookies, video: fullVideo,
-      proxy: await (await import('../companion')).selectedProxy(env),
-    }),
+  const start = await call('/mux', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video_url: `${CDN_BASE}/${videoKey}`, audio_url: `${CDN_BASE}/${audioKey}` }),
   });
-  if (!start.ok) throw new Error(`yt-dlp container start failed: HTTP ${start.status} ${await start.text().catch(() => '')}`);
+  if (!start.ok) throw new Error(`mux start failed: HTTP ${start.status} ${await start.text().catch(() => '')}`);
   const { id } = (await start.json()) as { id: string };
 
-  // Poll until finished (up to 20 minutes), persisting live progress.
-  // Transient poll failures are tolerated (a deploy rollout can briefly
-  // 500 the instance); a lost in-memory job means the container was
-  // replaced mid-download — fail with a clear, retryable message.
-  const writePct = pctWriter(env, jobId);
   let info: any = null;
-  let misses = 0;
   for (let i = 0; i < 240; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const st = await call(`/jobs/${id}`).catch(() => null);
-    if (!st || !st.ok) {
-      if (st?.status === 404) throw new Error('container restarted mid-download (likely a deploy) — retry the job');
-      if (++misses >= 6) throw new Error(`yt-dlp poll failed ${misses}x in a row (HTTP ${st?.status ?? 'network'})`);
-      continue;
-    }
-    misses = 0;
+    if (!st || !st.ok) continue;
     info = await st.json();
-    if (typeof info.pct === 'number' && info.pct > 0) writePct(info.pct);
     if (info.status === 'done') break;
-    if (info.status === 'error') throw new Error('yt-dlp failed: ' + (info.error || 'unknown'));
+    if (info.status === 'error') throw new Error('mux failed: ' + (info.error || 'unknown'));
   }
-  if (!info || info.status !== 'done') throw new Error('yt-dlp timed out after 20 minutes');
+  if (!info || info.status !== 'done') throw new Error('mux timed out');
 
   const file = await call(`/files/${id}`);
-  if (!file.ok || !file.body) throw new Error(`yt-dlp file fetch failed: HTTP ${file.status}`);
-  const ct = file.headers.get('content-type') || 'audio/ogg';
-  const key = `scribe/${jobId}/source.${info.ext || (fullVideo ? 'mp4' : 'opus')}`;
+  if (!file.ok || !file.body) throw new Error(`mux file fetch failed: HTTP ${file.status}`);
+  const ct = file.headers.get('content-type') || 'video/mp4';
+  const key = `scribe/${jobId}/source.mp4`;
   const bytes = await streamToR2(env.MEDIA_BUCKET, key, file.body, ct);
-
-  // Best-effort cleanup inside the container (it also self-cleans + sleeps)
   call(`/files/${id}`, { method: 'DELETE' }).catch(() => {});
-
-  return {
-    key,
-    method: 'yt-dlp',
-    contentType: ct,
-    bytes,
-    title: info.title,
-    channel: info.channel,
-    thumbUrl: info.thumbnail,
-    durationSec: info.duration,
-    description: info.description || '',
-    channelId: info.channel_id || '',
-    ytId: info.vid || '',
-    fourK: !!info.four_k,
-  };
+  return { key, bytes, contentType: ct };
 }
 
-/** Sites where a direct Worker fetch can never yield media — skip straight to yt-dlp. */
-export function needsYtdlp(url: string): boolean {
-  return /(youtube\.com|youtu\.be|twitter\.com|x\.com|facebook\.com|instagram\.com|tiktok\.com|twitch\.tv|vimeo\.com|dailymotion\.com)\//i.test(url);
+/** Primary path: mint direct URLs with Browser Rendering, range-stream to R2. */
+async function browserDownload(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
+  const yt = await import('./ytbrowser');
+  const { videoId } = yt.parseYouTube(url);
+  if (!videoId) throw new Error('could not parse a YouTube video id from the URL');
+
+  const m = await yt.browserMint(env, videoId);
+  const writePct = pctWriter(env, jobId);
+
+  const streamFmt = async (f: YtFormat, key: string, onPct?: (b: number) => void): Promise<{ bytes: number; ct: string }> => {
+    const clen = f.clen ?? (await yt.discoverLength(f.url));
+    if (!clen) throw new Error(`itag ${f.itag}: no content length`);
+    const ct = (f.mime || '').split(';')[0] || 'application/octet-stream';
+    const bytes = await streamToR2(env.MEDIA_BUCKET, key, yt.rangeStream(f.url, clen), ct, onPct);
+    if (bytes < 10_000) throw new Error(`itag ${f.itag}: too small (${bytes} bytes)`);
+    return { bytes, ct };
+  };
+
+  const meta = {
+    title: m.title, channel: m.channel, channelId: m.channelId, ytId: m.videoId,
+    description: m.description, thumbUrl: m.thumbUrl, durationSec: m.durationSec, fourK: m.fourK,
+  };
+
+  if (!fullVideo) {
+    const a = m.audio[0];
+    if (!a) throw new Error('no audio format available');
+    const ext = a.mime.includes('webm') || a.mime.includes('opus') ? 'webm' : 'm4a';
+    const key = `scribe/${jobId}/source.${ext}`;
+    const { bytes, ct } = await streamFmt(a, key, a.clen ? (b) => writePct((b / (a.clen as number)) * 100) : undefined);
+    return { key, method: 'browser', contentType: ct, bytes, ...meta };
+  }
+
+  // Full video: best video-only + best audio-only, then mux (container from R2/CDN).
+  const v = m.video[0];
+  const a = m.audio[0];
+  if (!v || !a) {
+    // fall back to a progressive muxed format if adaptive is unavailable
+    const p = m.progressive[0];
+    if (!p) throw new Error('no downloadable video format available');
+    const key = `scribe/${jobId}/source.mp4`;
+    const { bytes, ct } = await streamFmt(p, key);
+    return { key, method: 'browser', contentType: ct, bytes, ...meta };
+  }
+  const videoKey = `scribe/${jobId}/video.${v.mime.includes('webm') ? 'webm' : 'mp4'}`;
+  const audioKey = `scribe/${jobId}/audio.${a.mime.includes('webm') || a.mime.includes('opus') ? 'webm' : 'm4a'}`;
+  const vTotal = v.clen ?? (await yt.discoverLength(v.url));
+  const aTotal = a.clen ?? (await yt.discoverLength(a.url));
+  const grand = vTotal + aTotal;
+  let vDone = 0;
+  await streamFmt(v, videoKey, grand ? (b) => { vDone = b; writePct((b / grand) * 100); } : undefined);
+  const av = await streamFmt(a, audioKey, grand ? (b) => writePct(((vDone + b) / grand) * 100) : undefined);
+  const merged = await muxViaContainer(env, jobId, videoKey, audioKey);
+  // tidy the intermediate streams
+  env.MEDIA_BUCKET.delete(videoKey).catch(() => {});
+  env.MEDIA_BUCKET.delete(audioKey).catch(() => {});
+  return { key: merged.key, method: 'browser', contentType: merged.contentType, bytes: merged.bytes, videoKey, audioKey, ...meta };
+}
+
+/** YouTube URLs bot-wall datacenter fetches — download via Browser Rendering. */
+export function needsBrowser(url: string): boolean {
+  return /(youtube\.com|youtu\.be)\//i.test(url);
 }
 
 // Global download slot: the yt-dlp container path funnels through shared
@@ -238,15 +247,7 @@ export async function releaseDownloadSlot(env: ScribeEnv, jobId: string): Promis
 }
 
 export async function download(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
-  if (needsYtdlp(url)) return ytdlpDownload(env, jobId, url, fullVideo);
-  try {
-    return await directDownload(env, jobId, url);
-  } catch (err: any) {
-    // Cloudflare-side download failed — fall back to yt-dlp + proxies
-    try {
-      return await ytdlpDownload(env, jobId, url, fullVideo);
-    } catch (err2: any) {
-      throw new Error(`direct: ${err.message}; yt-dlp: ${err2.message}`);
-    }
-  }
+  // YouTube → Browser Rendering (primary). Everything else → plain Worker fetch.
+  if (needsBrowser(url)) return browserDownload(env, jobId, url, fullVideo);
+  return directDownload(env, jobId, url);
 }

@@ -44,6 +44,13 @@ name = "clip-render"
 binding = "CLIP_WORKFLOW"
 class_name = "ClipRenderer"
 
+# Browser Rendering — primary YouTube download: a real headless Chrome on a
+# Cloudflare IP passes YouTube's BotGuard, mints ANDROID_VR direct URLs, and the
+# Worker range-streams them to R2 at ~100 MB/s. Replaces the yt-dlp container/
+# companion download path (no cookies, no proxies).
+[browser]
+binding = "MYBROWSER"
+
 # Workers AI (embeddings) + Vectorize (semantic transcript search)
 [ai]
 binding = "AI"
