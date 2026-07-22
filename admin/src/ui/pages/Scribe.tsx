@@ -941,6 +941,10 @@ export default function Scribe() {
   }, [anyRunning, refetch]);
 
   const looksLikePlaylist = /[?&]list=|\/playlist|\/@[\w.-]+|\/channel\//.test(url);
+  // Parse the YouTube id client-side so we can paint the thumbnail with zero
+  // latency (i.ytimg.com is CORS-free for <img>) — title/duration follow.
+  const _ytm = looksLikePlaylist ? null : url.trim().match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/);
+  const optimisticVid = _ytm ? _ytm[1] : null;
 
   // Paste intelligence: instant identity probe + container pre-warm
   useEffect(() => {
@@ -1151,10 +1155,10 @@ export default function Scribe() {
               }}
             />
           </div>
-          {(probe || probing) && !looksLikePlaylist && (
+          {(probe || probing || optimisticVid) && !looksLikePlaylist && (
             <div className="mt-3 flex items-center gap-3 rounded-xl border border-hairline bg-inset p-2.5">
-              {probe?.thumb_url ? (
-                <img src={probe.thumb_url} alt="" className="h-14 w-24 shrink-0 rounded-lg border border-hairline object-cover" />
+              {(probe?.thumb_url || optimisticVid) ? (
+                <img src={probe?.thumb_url || `https://i.ytimg.com/vi/${optimisticVid}/hqdefault.jpg`} alt="" className="h-14 w-24 shrink-0 rounded-lg border border-hairline object-cover" />
               ) : (
                 <div className="flex h-14 w-24 shrink-0 items-center justify-center rounded-lg border border-hairline bg-soft">
                   {probing ? <Spinner className="h-4 w-4" /> : <Icon name="video" className="h-4 w-4 text-faint" />}
