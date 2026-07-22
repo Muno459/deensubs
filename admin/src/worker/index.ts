@@ -536,6 +536,28 @@ app.post('/api/scribe/probe', async (c) => {
     // oEmbed's thumbnail is instant and always exists; maxresdefault 404s for
     // many videos and showed broken images. The deep probe upgrades to the
     // real best thumbnail from the player response moments later.
+    // Innertube straight from the Worker (concurrent with oEmbed, bounded to
+    // 1.2s so it can never slow the probe): datacenter IPs are often walled
+    // for STREAM urls, but videoDetails (duration) frequently survives on the
+    // WEB client; the deep browser probe stays authoritative either way.
+    if (!out.duration) {
+      try {
+        const r = await fetch('https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context: { client: { clientName: 'WEB', clientVersion: '2.20240726.00.00', hl: 'en' } }, videoId: vid }),
+          signal: AbortSignal.timeout(1200),
+        });
+        if (r.ok) {
+          const d: any = await r.json();
+          const secs = parseInt(d?.videoDetails?.lengthSeconds || '0', 10);
+          if (secs) {
+            out.duration = secs;
+            out.est_cost = Math.round(((secs / 3600) * 0.4 + (secs * 450 / 1e6) * 0.4) * 100) / 100;
+          }
+        }
+      } catch { /* deep probe covers it */ }
+    }
   } else if (out.path === 'direct') {
     // Cheap HEAD for size/type
     try {
