@@ -44,6 +44,7 @@ Rules:
 - title_ar: faithful Arabic title.
 - description: 2-3 sentences (200-400 chars) summarizing what is actually discussed — concrete points, not generic praise.
 - slug: lowercase-hyphenated from the English title, max 60 chars, a-z0-9- only.
+- category_id and scholar_id: choose ONLY from the provided lists; null when nothing fits, never invent. Match the scholar only if the transcript or original title clearly names them.
 - Keep Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ.`,
       },
       {
@@ -112,9 +113,16 @@ export async function generateMetaAndChapters(
   cues: Cue[],
   languageCode: string,
   src?: { title?: string | null; channel?: string | null; description?: string | null }
-): Promise<VideoMetadata & { chapters: Chapter[] }> {
+): Promise<VideoMetadata & { chapters: Chapter[]; category_id: number | null; scholar_id: number | null }> {
   // Entire transcript for anything under ~7 hours; beyond that, sampled evenly
   const BUDGET = 400000;
+  const [cats, sch] = await Promise.all([
+    (env as any).DB.prepare('SELECT id, name FROM categories ORDER BY name').all(),
+    (env as any).DB.prepare('SELECT id, name FROM scholars ORDER BY name').all(),
+  ]);
+  const catIds = new Set<number>((cats.results as any[]).map((c) => c.id));
+  const schIds = new Set<number>((sch.results as any[]).map((x) => x.id));
+  const catalog = `Categories: ${(cats.results as any[]).map((c) => `${c.id}=${c.name}`).join(', ')}\nScholars: ${(sch.results as any[]).map((x) => `${x.id}=${x.name}`).join(', ')}`;
   const line = (c: Cue) => `${Math.round(c.start)}s: ${c.text.length > 200 ? c.text.slice(0, 197) + '...' : c.text}`;
   let sampled = cues;
   let lines = sampled.map(line).join('\n');
@@ -129,7 +137,7 @@ export async function generateMetaAndChapters(
   const target = Math.min(20, Math.max(4, Math.round(mins / 8)));
   const wantChapters = cues.length >= 20;
   const sys = `You write metadata for Islamic lecture videos on DeenSubs (Arabic lectures with English subtitles). Answer with ONE JSON object only, no markdown, no code fences, no text before or after:
-{"title": "...", "title_ar": "...", "description": "...", "slug": "..."${wantChapters ? ', "chapters": [{"t": startSeconds, "title": "Short chapter title"}]' : ''}}
+{"title": "...", "title_ar": "...", "description": "...", "slug": "...", "category_id": number|null, "scholar_id": number|null${wantChapters ? ', "chapters": [{"t": startSeconds, "title": "Short chapter title"}]' : ''}}
 
 Rules:
 - title: natural English, specific to the actual content (60-90 chars). Name the topic; NEVER include the speaker's or sheikh's name in the title (the scholar is shown separately on the site). No clickbait, no quotes around it.
@@ -143,8 +151,8 @@ Rules:
     src?.channel ? `Channel: ${src.channel}` : '',
     src?.description ? `Original upload description (source-platform text — context only, may be generic or promotional):\n${String(src.description).slice(0, 1500)}` : '',
   ].filter(Boolean).join('\n');
-  const user = `Source language: ${languageCode}\nTotal length: ${mins} minutes (${endS}s).${srcCtx ? `\n\n${srcCtx}` : ''}\n\nTranscript${sampled.length < cues.length ? ' (sampled evenly across the full talk)' : ''}:\n${lines}`;
-  let out: (VideoMetadata & { chapters: Chapter[] }) | null = null;
+  const user = `Source language: ${languageCode}\nTotal length: ${mins} minutes (${endS}s).\n\n${catalog}${srcCtx ? `\n\n${srcCtx}` : ''}\n\nTranscript${sampled.length < cues.length ? ' (sampled evenly across the full talk)' : ''}:\n${lines}`;
+  let out: (VideoMetadata & { chapters: Chapter[]; category_id: number | null; scholar_id: number | null }) | null = null;
   let raw = '';
   for (let attempt = 0; attempt < 3 && !out; attempt++) {
     raw = await llmChat(env, [
@@ -164,6 +172,8 @@ Rules:
         description: String(obj.description || '').slice(0, 1000),
         slug: String(obj.slug || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60),
         chapters: wantChapters ? sanitizeChapters(obj.chapters, endS) : [],
+        category_id: Number.isInteger(obj.category_id) && catIds.has(obj.category_id) ? obj.category_id : null,
+        scholar_id: Number.isInteger(obj.scholar_id) && schIds.has(obj.scholar_id) ? obj.scholar_id : null,
       };
     } catch { /* retry */ }
   }

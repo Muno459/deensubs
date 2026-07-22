@@ -482,6 +482,8 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         title_ar: meta.title_ar,
         description: meta.description,
         chapters: meta.chapters?.length ? JSON.stringify(meta.chapters) : null,
+        category_id: (meta as any).category_id ?? null,
+        scholar_id: (meta as any).scholar_id ?? null,
         error: null,
       });
       return { ok: true, srt: out.srtKey, cues: primaryCueCount, title: meta.title, langs };

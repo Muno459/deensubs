@@ -306,8 +306,8 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
       description: job.description || '',
       chapters: (() => { try { const a = JSON.parse(job.chapters || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } })(),
       slug: (job.title || job.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80),
-      category_id: null,
-      scholar_id: null,
+      category_id: job.category_id ?? null,
+      scholar_id: job.scholar_id ?? null,
     });
     // Generate frame candidates via the container (video jobs only — audio
     // jobs have no frames; artwork is the scholar stage card or an upload)
@@ -333,6 +333,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
         if (ct) { setCustomThumb(ct.key); setChosenKey(ct.key); }
       })
       .catch(() => {});
+    if (job.category_id != null || job.scholar_id != null) return () => { live = false; }; // metadata step already picked these — no extra LLM call
     api('/api/ai/fill', { method: 'POST', body: JSON.stringify({ kind: 'publish', jobId: job.id }) })
       .then((r) => {
         if (!live) return;

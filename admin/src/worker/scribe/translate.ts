@@ -194,7 +194,7 @@ export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.SCRIBE_LLM_KEY },
     body: JSON.stringify({
-      model: model || env.SCRIBE_LLM_MODEL || 'ag/gemini-3.5-flash-low',
+      model: model || env.SCRIBE_LLM_MODEL || 'ag/gemini-3.6-flash-tiered',
       messages,
       temperature: 0.4,
       max_tokens: maxTokens,
@@ -204,7 +204,7 @@ export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000,
   const text = await res.text();
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${text.slice(0, 200)}`);
 
-  const effModel = model || env.SCRIBE_LLM_MODEL || 'ag/gemini-3.5-flash-low';
+  const effModel = model || env.SCRIBE_LLM_MODEL || 'ag/gemini-3.6-flash-tiered';
   let content = '';
   if (text.trimStart().startsWith('data:')) {
     content = parseSse(text, effModel);

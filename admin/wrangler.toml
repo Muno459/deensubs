@@ -91,7 +91,7 @@ tag = "v2"
 new_sqlite_classes = ["CompanionHub"]
 
 [vars]
-SCRIBE_LLM_MODEL = "ag/gemini-3.5-flash-low"
+SCRIBE_LLM_MODEL = "ag/gemini-3.6-flash-tiered"
 SCRIBE_LLM_URL = "https://router.padborginn.dk"
 
 # Secrets (set via: echo "value" | npx wrangler secret put NAME):
