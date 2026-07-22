@@ -713,6 +713,15 @@ app.post('/api/scribe/batch', async (c) => {
     ids.push(await createScribeJob(c.env, url, langs, !!full_video, {}, c.get('user')?.id,
       playlistId != null ? { id: playlistId, pos: basePos + ids.length } : undefined));
   }
+  // one browser session pre-mints stream URLs for the whole batch (bounded);
+  // download-audio steps then hit the warm cache instead of minting each
+  const mintIds = urls.map((u: string) => ytId(u)).filter((v: string | null): v is string => !!v && !pubIds.has(v));
+  if (mintIds.length > 1) {
+    c.executionCtx.waitUntil((async () => {
+      const { browserMintMany } = await import('./scribe/ytbrowser');
+      await browserMintMany(c.env as any, mintIds).catch(() => {});
+    })());
+  }
   return c.json({ created: ids.length, ids, playlist_id: playlistId, skipped_published: skippedPublished });
 });
 

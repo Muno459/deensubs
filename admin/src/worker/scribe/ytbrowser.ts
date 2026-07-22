@@ -74,6 +74,25 @@ export async function browserMintCached(env: any, videoId: string): Promise<YtMi
   return m;
 }
 
+function shapeMint(videoId: string, data: any): YtMint {
+  if (data.status !== 'OK') throw new Error(`not playable: ${data.status}${data.reason ? ' — ' + data.reason : ''}`);
+  const all = [...data.adaptive, ...data.progressive].filter((f: any) => f.url);
+  const video = data.adaptive.filter((f: YtFormat) => f.url && (f.mime || '').startsWith('video/')).sort((a: YtFormat, b: YtFormat) => (b.height || 0) - (a.height || 0));
+  const audio = data.adaptive.filter((f: YtFormat) => f.url && (f.mime || '').startsWith('audio/')).sort((a: YtFormat, b: YtFormat) => (b.abr || 0) - (a.abr || 0));
+  const progressive = data.progressive.filter((f: YtFormat) => f.url).sort((a: YtFormat, b: YtFormat) => (b.height || 0) - (a.height || 0));
+  return {
+    videoId,
+    title: data.title,
+    channel: data.channel,
+    channelId: data.channelId,
+    durationSec: data.duration,
+    description: data.description,
+    thumbUrl: bestThumb(data.thumbs, videoId),
+    fourK: all.some((f: YtFormat) => (f.height || 0) > 1080),
+    video, audio, progressive,
+  };
+}
+
 export async function browserMint(env: any, videoId: string): Promise<YtMint> {
   const browser = await puppeteer.launch(env.MYBROWSER);
   try {
@@ -104,24 +123,7 @@ export async function browserMint(env: any, videoId: string): Promise<YtMint> {
       };
     }, ANDROID_VR_CLIENT, videoId);
 
-    if (data.status !== 'OK') throw new Error(`not playable: ${data.status}${data.reason ? ' — ' + data.reason : ''}`);
-
-    const all = [...data.adaptive, ...data.progressive].filter((f: any) => f.url);
-    const video = data.adaptive.filter((f: YtFormat) => f.url && (f.mime || '').startsWith('video/')).sort((a: YtFormat, b: YtFormat) => (b.height || 0) - (a.height || 0));
-    const audio = data.adaptive.filter((f: YtFormat) => f.url && (f.mime || '').startsWith('audio/')).sort((a: YtFormat, b: YtFormat) => (b.abr || 0) - (a.abr || 0));
-    const progressive = data.progressive.filter((f: YtFormat) => f.url).sort((a: YtFormat, b: YtFormat) => (b.height || 0) - (a.height || 0));
-
-    return {
-      videoId,
-      title: data.title,
-      channel: data.channel,
-      channelId: data.channelId,
-      durationSec: data.duration,
-      description: data.description,
-      thumbUrl: bestThumb(data.thumbs, videoId),
-      fourK: all.some((f: YtFormat) => (f.height || 0) > 1080),
-      video, audio, progressive,
-    };
+    return shapeMint(videoId, data);
   } finally {
     await browser.close();
   }
@@ -226,4 +228,60 @@ export async function discoverLength(url: string): Promise<number> {
   const p = await fetch(url, { headers: { Range: 'bytes=0-1' } });
   const cr = p.headers.get('content-range');
   return cr ? parseInt(cr.split('/')[1], 10) : 0;
+}
+
+
+/** One browser session, many mints — the prototype's amortization the port
+    dropped. Pre-warms the KV mint cache for batch imports; each additional
+    video costs one in-page player call instead of a whole browser session.
+    Bounded by count and wall-clock so waitUntil never overruns. */
+export async function browserMintMany(env: any, videoIds: string[], maxMs = 90_000): Promise<number> {
+  const ids = videoIds.slice(0, 40);
+  if (!ids.length) return 0;
+  const started = Date.now();
+  const browser = await puppeteer.launch(env.MYBROWSER);
+  let minted = 0;
+  try {
+    const page = await browser.newPage();
+    await page.goto('https://www.youtube.com/watch?v=' + ids[0], { waitUntil: 'domcontentloaded', timeout: 45000 });
+    for (const vid of ids) {
+      if (Date.now() - started > maxMs) break;
+      try {
+        const hit = await env.CACHE?.get('ytmint:' + vid);
+        if (hit) { minted++; continue; }
+        const data = await page.evaluate(async (client: any, v: string) => {
+          const visitor = (window as any).ytcfg?.data_?.INNERTUBE_CONTEXT?.client?.visitorData || null;
+          const r = await fetch('/youtubei/v1/player?prettyPrint=false', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-YouTube-Client-Name': '28', 'X-YouTube-Client-Version': '1.65.10', 'X-Goog-Visitor-Id': visitor || '' },
+            body: JSON.stringify({ context: { client: { ...client, visitorData: visitor } }, videoId: v, contentCheckOk: true, racyCheckOk: true, playbackContext: { contentPlaybackContext: { html5Preference: 'HTML5_PREF_WANTS' } } }),
+          });
+          const d: any = await r.json();
+          const st = d.streamingData || {};
+          const vd = d.videoDetails || {};
+          const mf = d.microformat?.playerMicroformatRenderer || {};
+          return {
+            status: d.playabilityStatus?.status,
+            reason: d.playabilityStatus?.reason,
+            title: vd.title || '',
+            channel: vd.author || '',
+            channelId: vd.channelId || '',
+            duration: parseInt(vd.lengthSeconds || '0', 10),
+            description: (vd.shortDescription || mf.description?.simpleText || '').slice(0, 4000),
+            thumbs: vd.thumbnail?.thumbnails || [],
+            adaptive: (st.adaptiveFormats || []).map((f: any) => ({ itag: f.itag, url: f.url, clen: f.contentLength || null, mime: f.mimeType || '', height: f.height, abr: f.averageBitrate || f.bitrate })),
+            progressive: (st.formats || []).map((f: any) => ({ itag: f.itag, url: f.url, clen: f.contentLength || null, mime: f.mimeType || '', height: f.height })),
+          };
+        }, ANDROID_VR_CLIENT, vid);
+        const m = shapeMint(vid, data);
+        if (m.video?.length || m.audio?.length) {
+          await env.CACHE?.put('ytmint:' + vid, JSON.stringify(m), { expirationTtl: 1800 });
+          minted++;
+        }
+      } catch { /* this video mints individually at download time */ }
+    }
+  } finally {
+    await browser.close();
+  }
+  return minted;
 }
