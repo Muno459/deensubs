@@ -224,6 +224,30 @@ async function browserDownload(env: ScribeEnv, jobId: string, url: string, fullV
   return { key: merged.key, method: 'browser', contentType: merged.contentType, bytes: merged.bytes, videoKey, audioKey, ...meta };
 }
 
+/** Audio-first: stream just the audio track (seconds, not minutes) so ASR can
+    start immediately while the full video + mux completes in the background. */
+export async function downloadAudioOnly(env: ScribeEnv, jobId: string, url: string): Promise<{ key: string; durationSec: number }> {
+  const yt = await import('./ytbrowser');
+  const { videoId } = yt.parseYouTube(url);
+  if (!videoId) throw new Error('could not parse a YouTube video id from the URL');
+  for (const ext of ['m4a', 'webm']) {
+    const k = `scribe/${jobId}/audio-first.${ext}`;
+    const h = await env.MEDIA_BUCKET.head(k);
+    if (h && h.size > 10_000) return { key: k, durationSec: 0 };
+  }
+  const m = await yt.browserMintCached(env, videoId);
+  const a = m.audio[0];
+  if (!a) throw new Error('no audio format available');
+  const ext = a.mime.includes('webm') || a.mime.includes('opus') ? 'webm' : 'm4a';
+  const key = `scribe/${jobId}/audio-first.${ext}`;
+  const clen = a.clen ?? (await yt.discoverLength(a.url));
+  if (!clen) throw new Error('audio: no content length');
+  const ct = (a.mime || '').split(';')[0] || 'audio/mp4';
+  const bytes = await streamToR2(env.MEDIA_BUCKET, key, yt.rangeStream(a.url, clen), ct);
+  if (bytes < 10_000) throw new Error(`audio too small (${bytes} bytes)`);
+  return { key, durationSec: m.durationSec || 0 };
+}
+
 /** YouTube URLs bot-wall datacenter fetches — download via Browser Rendering. */
 export function needsBrowser(url: string): boolean {
   return /(youtube\.com|youtu\.be)\//i.test(url);

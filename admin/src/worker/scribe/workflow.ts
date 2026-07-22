@@ -105,7 +105,45 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // Retries are patient on purpose: a big playlist batch can exhaust the
       // container max_instances cap, and jobs must wait out the contention
       // (~35 min of linear backoff) rather than fail.
-      const dl = await step.do(
+      // Audio-first (Browser Rendering full videos): the audio stream lands in
+      // seconds, so transcription starts immediately while the full video +
+      // mux completes concurrently — by the time ElevenLabs returns, the
+      // muxed file exists and the pipeline never waited on it.
+      let audioFirstKey: string | null = null;
+      let audioFirstDur = 0;
+      if (fullVideo && needsBrowser(url)) {
+        try {
+          const aud = await step.do('download-audio',
+            { retries: { limit: 3, delay: '20 seconds' }, timeout: '15 minutes' }, async () => {
+            const { downloadAudioOnly } = await import('./download');
+            return await downloadAudioOnly(env, jobId, url);
+          });
+          audioFirstKey = aud.key;
+          audioFirstDur = aud.durationSec || 0;
+        } catch { /* fall back to the classic sequential path */ }
+      }
+      const ASR_CFG = { retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' }, timeout: '2 hours' } as const;
+      const asrBody = (srcKey: string, srcDur: number) => async () => {
+        const asrKey = `scribe/${jobId}/asr.json`;
+        const existing = await env.MEDIA_BUCKET.get(asrKey);
+        if (existing) {
+          const data: any = await existing.json();
+          const words = (data.words || []).filter((w: any) => (w.type || 'word') === 'word');
+          if (words.length) {
+            return {
+              asrKey, languageCode: data.language_code || '',
+              wordCount: words.length,
+              durationSec: data.audio_duration_secs || words[words.length - 1].end || 0,
+              cached: true,
+            };
+          }
+        }
+        await stampTime(env, jobId, 'asr');
+        const res = await runAsr(env, jobId, srcKey, srcDur);
+        await stampTime(env, jobId, 'asr_end');
+        return { ...res, cached: false };
+      };
+      const dlStep = step.do(
         'download',
         { retries: { limit: 6, delay: '90 seconds', backoff: 'linear' }, timeout: '30 minutes' },
         async () => {
@@ -124,6 +162,12 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           return { ...res, cached: false };
         }
       );
+      if (audioFirstKey) {
+        // start transcription NOW; the same-named step later returns this
+        // cached result instantly (journaled by name)
+        await step.do('asr', ASR_CFG, asrBody(audioFirstKey, audioFirstDur));
+      }
+      const dl = await dlStep;
       if (slotGated) {
         await step.do('download-slot-release', async () => {
           await releaseDownloadSlot(env, jobId);
@@ -214,30 +258,8 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         : false;
 
       // 2. ASR (ElevenLabs Scribe v2; chunked automatically for long files)
-      const asr = await step.do(
-        'asr',
-        { retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' }, timeout: '2 hours' },
-        async () => {
-          const asrKey = `scribe/${jobId}/asr.json`;
-          const existing = await env.MEDIA_BUCKET.get(asrKey);
-          if (existing) {
-            const data: any = await existing.json();
-            const words = (data.words || []).filter((w: any) => (w.type || 'word') === 'word');
-            if (words.length) {
-              return {
-                asrKey, languageCode: data.language_code || '',
-                wordCount: words.length,
-                durationSec: data.audio_duration_secs || words[words.length - 1].end || 0,
-                cached: true,
-              };
-            }
-          }
-          await stampTime(env, jobId, 'asr');
-          const res = await runAsr(env, jobId, dl.key, dl.durationSec || 0);
-          await stampTime(env, jobId, 'asr_end');
-          return { ...res, cached: false };
-        }
-      );
+      const asr = await step.do('asr', ASR_CFG,
+        asrBody(audioFirstKey ?? dl.key, audioFirstKey ? audioFirstDur : dl.durationSec || 0));
       await markStage(env, jobId, 'translate', {
         asr_key: asr.asrKey,
         language_code: asr.languageCode,
@@ -270,7 +292,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             // attached so the model hears tone, pauses and emphasis while
             // translating and segmenting (fail-open — any clip failure falls
             // back to the text-only request).
-            const audioOpts = { jobId, sourceUrl: `https://cdn.deensubs.com/${dl.key}` };
+            const audioOpts = { jobId, sourceUrl: `https://cdn.deensubs.com/${audioFirstKey ?? dl.key}` };
             const cues = isAudiobook
               ? await translateWordsAudiobook(env, data.words, lang, audioOpts)
               : await translateWords(env, data.words, lang, audioOpts);

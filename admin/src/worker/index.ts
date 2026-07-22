@@ -533,8 +533,9 @@ app.post('/api/scribe/probe', async (c) => {
         out.thumb_url = d.thumbnail_url;
       }
     } catch {}
-    // Always prefer the highest-resolution thumbnail available.
-    out.thumb_url = `https://i.ytimg.com/vi/${vid}/maxresdefault.jpg`;
+    // oEmbed's thumbnail is instant and always exists; maxresdefault 404s for
+    // many videos and showed broken images. The deep probe upgrades to the
+    // real best thumbnail from the player response moments later.
   } else if (out.path === 'direct') {
     // Cheap HEAD for size/type
     try {
