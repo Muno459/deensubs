@@ -1407,6 +1407,25 @@ app.post('/api/scribe/:id/to-audiobook', async (c) => {
   return c.json({ ok: true, id: newId });
 });
 
+// Diagnostic: prove the translation pipeline's audio-in-the-loop still works
+// end to end (container clip -> input_audio part -> Gemini hears it)
+app.post('/api/scribe/:id/audio-test', async (c) => {
+  const id = c.req.param('id');
+  const job: any = await c.env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(id).first();
+  if (!job?.source_key) return c.json({ error: 'job has no source' }, 400);
+  const { windowAudio, llmChat } = await import('./scribe/translate');
+  const part = await windowAudio(c.env as any, { jobId: id, sourceUrl: `https://cdn.deensubs.com/${job.source_key}` }, 0, 25);
+  if (!part) return c.json({ error: 'audio clip could not be produced (container /audioclip failed)' }, 500);
+  const raw = await llmChat(c.env as any, [
+    { role: 'system', content: 'You are given an audio clip. Reply with ONLY JSON: {"heard": true|false, "language": "...", "first_words": "quote the first sentence you hear, in its original language"}' },
+    { role: 'user', content: [
+      { type: 'text', text: 'What do you hear in this clip?' },
+      part,
+    ] as any },
+  ], 2000);
+  return c.json({ audio_bytes_b64: (part.input_audio?.data || '').length, model_reply: raw.slice(0, 500) });
+});
+
 // ---- Thumbnail language review (Arabic artwork -> English replacements) ----
 app.post('/api/thumbs/scan', async (c) => {
   const { detectArabicThumb } = await import('./thumbs');
