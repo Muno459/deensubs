@@ -1486,6 +1486,22 @@ app.post('/api/scribe/mux-test', async (c) => {
   }
 });
 
+// Diagnostic: time the container yt-dlp + aria2c path (no proxies, no browser)
+app.post('/api/scribe/ytdlp-test', async (c) => {
+  const { url, video, aria2, player_client } = await c.req.json();
+  if (!url) return c.json({ error: 'url required' }, 400);
+  const { ytdlpViaContainer } = await import('./scribe/download');
+  (c.env as any).__ARIA2 = aria2;
+  (c.env as any).__PLAYER_CLIENT = player_client;
+  const t0 = Date.now();
+  try {
+    const r: any = await ytdlpViaContainer(c.env as any, 'dltest-' + Date.now().toString(36), url, !!video);
+    return c.json({ ok: true, ms: Date.now() - t0, bytes: r.bytes, key: r.key, mbps: Math.round(r.bytes / 1024 / 1024 / ((Date.now() - t0) / 1000) * 10) / 10 });
+  } catch (e: any) {
+    return c.json({ ok: false, ms: Date.now() - t0, error: String(e?.message || e).slice(0, 300) });
+  }
+});
+
 // ---- Thumbnail language review (Arabic artwork -> English replacements) ----
 app.post('/api/thumbs/scan', async (c) => {
   const { detectArabicThumb } = await import('./thumbs');

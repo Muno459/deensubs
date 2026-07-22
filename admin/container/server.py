@@ -64,7 +64,7 @@ def maybe_self_update() -> None:
         pass  # never block downloads on update failures
 
 
-def run_download(job_id: str, url: str, cookies: str | None = None, video: bool = False, pinned_proxy: str | None = None) -> None:
+def run_download(job_id: str, url: str, cookies: str | None = None, video: bool = False, pinned_proxy: str | None = None, use_aria2: bool = True, player_client: str | None = None) -> None:
     maybe_self_update()
     out_tmpl = os.path.join(DIR, f"{job_id}.%(ext)s")
     cookies_file = None
@@ -96,6 +96,14 @@ def run_download(job_id: str, url: str, cookies: str | None = None, video: bool 
             "--socket-timeout", "30",
             "--retries", "3",
             "-N", "4",
+            # googlevideo throttles per CONNECTION (~playback speed); aria2c
+            # splits every file across 16 byte-range connections, each with its
+            # own throttle allowance. This is what made datacenter downloads
+            # crawl at realtime - not a bot wall.
+            *(["--extractor-args", f"youtube:player_client={player_client}"] if player_client else []),
+            *(["--downloader", "aria2c",
+               "--downloader-args", "aria2c:-x16 -s16 -k1M --console-log-level=warn --summary-interval=0"]
+              if use_aria2 else []),
             "--newline",
             "--progress-template", "download:PROG %(progress._percent_str)s",
             *fmt,
@@ -770,7 +778,7 @@ class Handler(BaseHTTPRequestHandler):
         job_id = str(uuid.uuid4())
         with jobs_lock:
             jobs[job_id] = {"status": "running", "url": url}
-        threading.Thread(target=run_download, args=(job_id, url, payload.get("cookies"), bool(payload.get("video")), payload.get("proxy") or None), daemon=True).start()
+        threading.Thread(target=run_download, args=(job_id, url, payload.get("cookies"), bool(payload.get("video")), payload.get("proxy") or None, payload.get("aria2", True), payload.get("player_client")), daemon=True).start()
         return self._send(200, {"id": job_id})
 
     def do_DELETE(self):  # noqa: N802

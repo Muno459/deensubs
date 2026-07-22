@@ -162,6 +162,56 @@ export async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: s
   return { key, bytes, contentType: ct };
 }
 
+/** Fallback: the container runs yt-dlp + aria2c from its own IP (no proxies,
+    no browser). Extraction works fine from the datacenter; aria2c's 16
+    byte-range connections defeat googlevideo's per-connection throttle. */
+export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
+  if (!env.YTDLP) throw new Error('container binding not configured');
+  const { getContainer } = await import('@cloudflare/containers');
+  const container = getContainer(env.YTDLP as any, jobId);
+  const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };
+  const call = (path: string, init?: RequestInit) =>
+    container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
+
+  const start = await call('/download', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      url, video: fullVideo,
+      // measured A/B: default web client 403s the media fetch from the
+      // container IP; android_vr URLs are honored, with or without aria2c
+      aria2: (env as any).__ARIA2 ?? true,
+      player_client: (env as any).__PLAYER_CLIENT ?? 'android_vr',
+    }),
+  });
+  if (!start.ok) throw new Error(`ytdlp start failed: HTTP ${start.status}`);
+  const { id } = (await start.json()) as { id: string };
+
+  let info: any = null;
+  for (let i = 0; i < 1200; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const st = await call(`/jobs/${id}`).catch(() => null);
+    if (!st || !st.ok) continue;
+    info = await st.json();
+    if (info.status === 'done') break;
+    if (info.status === 'error') throw new Error('ytdlp failed: ' + (info.error || 'unknown'));
+  }
+  if (!info || info.status !== 'done') throw new Error('ytdlp timed out');
+
+  const file = await call(`/files/${id}`);
+  if (!file.ok || !file.body) throw new Error(`ytdlp file fetch failed: HTTP ${file.status}`);
+  const ct = file.headers.get('content-type') || (fullVideo ? 'video/mp4' : 'audio/mp4');
+  const ext = ct.includes('webm') ? (fullVideo ? 'webm' : 'webm')
+    : ct.startsWith('audio/') ? 'm4a' : 'mp4';
+  const key = `scribe/${jobId}/source.${ext}`;
+  const bytes = await streamToR2(env.MEDIA_BUCKET, key, file.body, ct);
+  call(`/files/${id}`, { method: 'DELETE' }).catch(() => {});
+  return {
+    key, method: 'ytdlp' as any, contentType: ct, bytes,
+    title: info.title, channel: info.channel || info.uploader,
+    thumbUrl: info.thumbnail, durationSec: info.duration || 0,
+  } as any;
+}
+
 /** Primary path: mint direct URLs with Browser Rendering, range-stream to R2. */
 async function browserDownload(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
   const yt = await import('./ytbrowser');
@@ -275,7 +325,14 @@ export async function releaseDownloadSlot(env: ScribeEnv, jobId: string): Promis
 }
 
 export async function download(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
-  // YouTube → Browser Rendering (primary). Everything else → plain Worker fetch.
-  if (needsBrowser(url)) return browserDownload(env, jobId, url, fullVideo);
+  // YouTube → Browser Rendering (primary); container yt-dlp + aria2c is the
+  // self-sufficient fallback (BR quota, client changes). Others → edge fetch.
+  if (needsBrowser(url)) {
+    try {
+      return await browserDownload(env, jobId, url, fullVideo);
+    } catch (e: any) {
+      return await ytdlpViaContainer(env, jobId, url, fullVideo);
+    }
+  }
   return directDownload(env, jobId, url);
 }
