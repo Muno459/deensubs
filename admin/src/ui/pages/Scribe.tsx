@@ -1108,9 +1108,11 @@ export default function Scribe() {
             <div>
               <h2 className="text-[15px] font-semibold tracking-tight text-cream">Add a video</h2>
               <p className="mt-1 max-w-xl text-[12px] leading-relaxed text-muted">
-                Cloudflare downloads the video directly at the edge. ElevenLabs Scribe v2 transcribes,
-                Gemini translates on word-index timing, and metadata is written from the full transcript.
-                Or drag &amp; drop a local video / mp3 anywhere on this card.
+                Cloudflare downloads the video directly at the edge. ElevenLabs Scribe v2 is the ears:
+                word-timed Arabic transcription with speaker diarization. Gemini is the brain: it translates
+                window by window while listening to the matching audio, keyed to those word timings, then
+                writes chapters and metadata from the full transcript. Or drag &amp; drop a local
+                video / mp3 anywhere on this card.
               </p>
             </div>
           </div>
