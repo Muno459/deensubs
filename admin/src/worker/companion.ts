@@ -46,6 +46,18 @@ export class CompanionHub {
       return Response.json({ companions: this.roster() });
     }
 
+    if (url.pathname.endsWith('/nudge')) {
+      // work-available push: connected companions wake their lanes instantly
+      // instead of polling the claim endpoints on a timer
+      const lane = (url.searchParams.get('lane') || 'work').slice(0, 16);
+      const msg = JSON.stringify({ type: 'work', lane });
+      let sent = 0;
+      for (const ws of this.companions.keys()) {
+        try { ws.send(msg); sent++; } catch {}
+      }
+      return Response.json({ ok: true, sent });
+    }
+
     if (req.headers.get('Upgrade') !== 'websocket') {
       return new Response('expected websocket', { status: 426 });
     }
@@ -132,4 +144,13 @@ export async function selectedProxy(env: any): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+
+/** Push a work-available nudge to every connected companion. */
+export async function nudgeCompanions(env: any, lane: 'enhance' | 'encode'): Promise<void> {
+  try {
+    const stub = env.HUB.get(env.HUB.idFromName('hub'));
+    await stub.fetch(`https://hub/nudge?lane=${lane}`);
+  } catch { /* best effort — the fallback poll still exists */ }
 }

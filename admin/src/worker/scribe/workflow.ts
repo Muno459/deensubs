@@ -143,6 +143,10 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         // so nothing ever needs probing again (cached resumes keep their flag)
         ...(fullVideo && !(dl as any).cached ? { k4_status: (dl as any).fourK ? 'capable' : 'none' } : {}),
       });
+      if (fullVideo && (dl as any).fourK && !(dl as any).cached) {
+        const { nudgeCompanions } = await import('../companion');
+        await nudgeCompanions(env, 'encode');
+      }
       // Channel avatar → R2 (shared per channel, fetched once), best-effort
       if ((dl as any).channelId && !row?.channel_image_key) {
         try {
@@ -200,6 +204,8 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             await env.DB.prepare(
               "UPDATE scribe_jobs SET se_status = 'wanted' WHERE id = ? AND (se_status IS NULL OR se_status = '' OR se_status = 'failed')"
             ).bind(jobId).run();
+            const { nudgeCompanions } = await import('../companion');
+            await nudgeCompanions(env, 'enhance');
             return true;
           })
         : false;
