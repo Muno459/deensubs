@@ -63,10 +63,12 @@ export async function browserMintCached(env: any, videoId: string): Promise<YtMi
   const key = 'ytmint:' + videoId;
   try {
     const hit: any = await env.CACHE?.get(key, 'json');
-    if (hit && hit.status === 'OK') return hit;
+    // browserMint throws on non-playable and returns a clean shape (no status
+    // field) — validity means it carries stream formats
+    if (hit && hit.videoId && (hit.video?.length || hit.audio?.length)) return hit;
   } catch {}
-  const m = await browserMint(env, videoId);
-  if (m && (m as any).status === 'OK') {
+  const m: any = await browserMint(env, videoId);
+  if (m && (m.video?.length || m.audio?.length)) {
     try { await env.CACHE?.put(key, JSON.stringify(m), { expirationTtl: 1800 }); } catch {}
   }
   return m;

@@ -127,7 +127,7 @@ const CDN_BASE = 'https://cdn.deensubs.com';
 /** Mux a video-only + audio-only pair (already in R2, served via CDN) into one
  *  MP4 using the container's ffmpeg — it fetches from R2/CDN (fast, no throttle),
  *  never from googlevideo. Streams the merged result back into R2. */
-async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: string, audioKey: string): Promise<{ key: string; bytes: number; contentType: string }> {
+export async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: string, audioKey: string): Promise<{ key: string; bytes: number; contentType: string }> {
   if (!env.YTDLP) throw new Error('mux container binding not configured');
   const { getContainer } = await import('@cloudflare/containers');
   const container = getContainer(env.YTDLP as any, jobId);

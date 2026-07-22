@@ -1456,6 +1456,27 @@ app.post('/api/scribe/:id/audio-test', async (c) => {
   return c.json({ audio_bytes_b64: (part.input_audio?.data || '').length, model_reply: raw.slice(0, 500) });
 });
 
+// Diagnostic: can the mux container fetch BR-minted googlevideo URLs
+// directly? (IP-binding test — decides whether downloads can skip the Worker
+// streaming + intermediate R2 objects entirely.)
+app.post('/api/scribe/mux-test', async (c) => {
+  const { video_id } = await c.req.json();
+  if (!video_id) return c.json({ error: 'video_id required' }, 400);
+  const { browserMintCached } = await import('./scribe/ytbrowser');
+  const m: any = await browserMintCached(c.env as any, video_id);
+  if (!m?.video?.[0] || !m?.audio?.[0]) {
+    return c.json({ error: 'mint has no adaptive formats' }, 500);
+  }
+  const { muxViaContainer } = await import('./scribe/download');
+  const t0 = Date.now();
+  try {
+    const r = await muxViaContainer(c.env as any, 'muxtest-' + video_id, m.video[0].url, m.audio[0].url);
+    return c.json({ ok: true, bytes: r.bytes, key: r.key, ms: Date.now() - t0 });
+  } catch (e: any) {
+    return c.json({ ok: false, error: String(e?.message || e).slice(0, 300), ms: Date.now() - t0 });
+  }
+});
+
 // ---- Thumbnail language review (Arabic artwork -> English replacements) ----
 app.post('/api/thumbs/scan', async (c) => {
   const { detectArabicThumb } = await import('./thumbs');
