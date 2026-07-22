@@ -4,7 +4,8 @@ export type ScribeEnv = {
   DB: D1Database;
   MEDIA_BUCKET: R2Bucket;
   MYBROWSER: Fetcher; // Cloudflare Browser Rendering (primary YouTube download)
-  YTDLP: DurableObjectNamespace; // container: mux fallback + grade/clips/thumbs (NOT download)
+  YTDLP: DurableObjectNamespace; // small container: download + probe + mux + thumbs + split
+  CLIP: DurableObjectNamespace; // bigger container: CPU-heavy clip renders + image grading
   ELEVENLABS_API_KEY?: string;
   SCRIBE_LLM_URL?: string;
   SCRIBE_LLM_KEY?: string;

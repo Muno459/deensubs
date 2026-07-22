@@ -68,15 +68,28 @@ crons = ["*/5 * * * *"]
 # Reached only via the YTDLP Durable Object binding, never public.
 # max_instances sizes for a full 30-video playlist batch plus enum/clips
 # overhead; account limits (6 TiB mem / 1500 vCPU concurrent) are far above.
+# Download/probe/mux: network-bound + light ffmpeg -c copy. A small instance
+# is plenty (download speed is network-bound, not CPU-bound).
 [[containers]]
 class_name = "YtdlpContainer"
 image = "./container/Dockerfile"
 max_instances = 40
+instance_type = "standard-1"
+
+# Clips + image grading: CPU-heavy libx264 encodes get a bigger instance.
+[[containers]]
+class_name = "ClipContainer"
+image = "./container/Dockerfile"
+max_instances = 10
 instance_type = "standard-2"
 
 [[durable_objects.bindings]]
 name = "YTDLP"
 class_name = "YtdlpContainer"
+
+[[durable_objects.bindings]]
+name = "CLIP"
+class_name = "ClipContainer"
 
 [[durable_objects.bindings]]
 name = "HUB"
@@ -89,6 +102,10 @@ new_sqlite_classes = ["YtdlpContainer"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["CompanionHub"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["ClipContainer"]
 
 [vars]
 SCRIBE_LLM_MODEL = "ag/gemini-3.6-flash-tiered"

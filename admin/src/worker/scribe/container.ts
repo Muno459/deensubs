@@ -25,3 +25,19 @@ export class YtdlpContainer extends Container<ContainerEnv> {
     };
   }
 }
+
+// Same image, but a bigger instance type (see wrangler.toml). Handles the
+// CPU-heavy ffmpeg work — viral clip renders (libx264) and image grading —
+// so downloads (network-bound, light) can run on a smaller, cheaper instance.
+export class ClipContainer extends Container<ContainerEnv> {
+  defaultPort = 8199;
+  sleepAfter = '3m';
+
+  constructor(ctx: any, env: ContainerEnv) {
+    super(ctx, env);
+    this.envVars = {
+      YTDLP_TOKEN: env.YTDLP_TOKEN || 'internal',
+      YTDLP_PROXIES: env.YTDLP_PROXIES || '',
+    };
+  }
+}

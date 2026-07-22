@@ -16,6 +16,7 @@ type Env = {
   SCRIBE_WORKFLOW: Workflow;
   CLIP_WORKFLOW: Workflow;
   YTDLP: DurableObjectNamespace;
+  CLIP: DurableObjectNamespace;
   AI: Ai;
   VECTORIZE: VectorizeIndex;
   ADMIN_KEY?: string;
@@ -2139,7 +2140,7 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export { ScribePipeline } from './scribe/workflow';
 export { ClipRenderer } from './scribe/clips';
-export { YtdlpContainer } from './scribe/container';
+export { YtdlpContainer, ClipContainer } from './scribe/container';
 export { CompanionHub } from './companion';
 
 /** Auto-resume jobs killed by infrastructure (deploy rollouts reset the

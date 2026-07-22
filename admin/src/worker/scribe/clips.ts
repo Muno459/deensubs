@@ -192,7 +192,7 @@ type ClipEnv = ScribeEnv & { CACHE: KVNamespace };
 
 async function containerCall(env: ClipEnv, name: string, path: string, init?: RequestInit): Promise<Response> {
   const { getContainer } = await import('@cloudflare/containers');
-  const container = getContainer(env.YTDLP as any, name);
+  const container = getContainer(env.CLIP as any, name); // CPU-heavy clip render → bigger container
   const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };
   return container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
 }

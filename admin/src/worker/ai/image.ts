@@ -130,7 +130,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     const cAuth = { Authorization: 'Bearer ' + ((env as any).YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' };
     const srcUrl = `${CDN}/${payload.imageKey}?v=${Date.now()}`; // bust the 30-day edge cache
     try {
-      const prep = getContainer(env.YTDLP as any, 'grade');
+      const prep = getContainer(env.CLIP as any, 'grade');
       // 1. Exact-geometry canvas; placement comes back in headers
       const cres: Response = await prep.fetch(new Request('http://ytdlp/grade', {
         method: 'POST', headers: cAuth,
@@ -174,7 +174,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     const keyOut = async (bytes: Uint8Array, tmpName: string): Promise<Uint8Array> => {
       const tmpKey = `scribe/tmp/${tmpName}`;
       await env.MEDIA_BUCKET.put(tmpKey, bytes, { httpMetadata: { contentType: 'image/png' } });
-      const container = getContainer(env.YTDLP as any, 'grade');
+      const container = getContainer(env.CLIP as any, 'grade');
       const res: Response = await container.fetch(new Request('http://ytdlp/grade', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + ((env as any).YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
@@ -201,7 +201,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     // (e.g. alpha-erosion de-fringing) — deterministic, no model involved.
     if (!payload.imageKey || !payload.filter) throw new Error('imageKey and filter required');
     const { getContainer } = await import('@cloudflare/containers');
-    const container = getContainer(env.YTDLP as any, 'grade');
+    const container = getContainer(env.CLIP as any, 'grade');
     const res: Response = await container.fetch(new Request('http://ytdlp/grade', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + ((env as any).YTDLP_TOKEN || 'internal'), 'Content-Type': 'application/json' },
@@ -224,7 +224,7 @@ export async function aiImage(env: ImgEnv, kind: string, payload: any): Promise<
     // including real-person portraits the LLM refuses to touch)
     if (!payload.imageKey) throw new Error('imageKey required');
     const { getContainer } = await import('@cloudflare/containers');
-    const container = getContainer(env.YTDLP as any, 'grade');
+    const container = getContainer(env.CLIP as any, 'grade');
     const res: Response = await container.fetch(new Request('http://ytdlp/grade', {
       method: 'POST',
       headers: {
