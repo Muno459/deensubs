@@ -1,6 +1,7 @@
 name = "deensubs-admin"
 main = "src/worker/index.ts"
 compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
 account_id = "a04f68eb4a3c42642bb23718c532d0b4"
 
 routes = [
