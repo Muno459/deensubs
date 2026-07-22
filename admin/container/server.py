@@ -183,7 +183,9 @@ def run_download(job_id: str, url: str, cookies: str | None = None, video: bool 
     the fast parallel-range downloader and mux with ffmpeg. Extraction works
     from the datacenter IP directly (no proxy, no bot-wall); the proxy list is
     kept as a fallback for anything the direct IP can't extract."""
-    maybe_self_update()
+    # non-blocking: never let a cold-container yt-dlp -U (up to 120s) stall the
+    # download at 0% — the 12h marker + boot-time update keep yt-dlp current.
+    threading.Thread(target=maybe_self_update, daemon=True).start()
     cookies_file = None
     if cookies:
         cookies_file = os.path.join(DIR, f"{job_id}.cookies.txt")
@@ -648,7 +650,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "bad JSON"})
             if not re.match(r"^https?://", payload.get("url", "")):
                 return self._send(400, {"error": "valid url required"})
-            maybe_self_update()
+            threading.Thread(target=maybe_self_update, daemon=True).start()
             return self._send(200, enumerate_playlist(payload["url"], payload.get("cookies")))
         if self.path == "/clip":
             try:

@@ -931,10 +931,11 @@ export default function Scribe() {
   useEffect(() => {
     if (timer.current) clearInterval(timer.current);
     if (anyRunning) {
+      let tick = 0;
       timer.current = setInterval(() => {
-        setNow(Date.now());
-        refetch();
-      }, 3000);
+        setNow(Date.now());          // tick the live clock every second
+        if (++tick % 3 === 0) refetch(); // refetch jobs every 3s (same API load)
+      }, 1000);
     }
     return () => { if (timer.current) clearInterval(timer.current); };
   }, [anyRunning, refetch]);
