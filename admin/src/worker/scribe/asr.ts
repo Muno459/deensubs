@@ -12,6 +12,7 @@
 // stay small.
 
 import { streamToR2 } from './download';
+import { getAsrConfig, resolveAsrMode } from './asr-config';
 import type { AsrResult, ScribeEnv, Word } from './types';
 
 const STT_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
@@ -26,14 +27,17 @@ export function sttResultKey(requestId: string): string {
   return `scribe/stt-results/${requestId}.json`;
 }
 
-async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, attempts = 5, withFormats = false): Promise<any> {
+async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, attempts = 5, withFormats = false, forceSync = false): Promise<any> {
   // Async mode when the webhook secret is configured: the request returns
   // immediately with a transcription_id, and the result arrives EITHER via
   // the /hooks/elevenlabs webhook OR by polling their GET transcript
   // endpoint. The transcription_id persists to R2 the moment it exists
   // (pendingKey), so a crash, retry or resume picks up the SAME in-flight
   // transcription instead of paying for a new one.
-  const useWebhook = !!(env as any).ELEVENLABS_WEBHOOK_SECRET;
+  // forceSync bypasses the webhook entirely and reads the transcript straight
+  // from the response — the reliable path the dual-mode ASR uses (the webhook
+  // round-trip was stalling awaitResult for 40 min on some jobs).
+  const useWebhook = !forceSync && !!(env as any).ELEVENLABS_WEBHOOK_SECRET;
 
   if (useWebhook && pendingKey) {
     const pending = await env.MEDIA_BUCKET.get(pendingKey);
@@ -231,26 +235,28 @@ async function chunkedAsr(env: ScribeEnv, jobId: string, sourceKey: string): Pro
 }
 
 export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, durationSec = 0): Promise<AsrResult> {
-  if (!env.ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY secret not set');
+  // Dual mode (configurable in /tools):
+  //  - authenticated (API key set): the WHOLE file in ONE synchronous request
+  //    via source_url — no chunking, no webhook (the webhook round-trip was
+  //    stalling awaitResult for ~40 min and timing the step out at 2 h).
+  //  - proxy (no key): unauthenticated STT through SOCKS proxies, chunked into
+  //    ~80-min segments, synchronous response, quota coordinated over WebSocket.
+  const cfg = await getAsrConfig(env);
+  const mode = resolveAsrMode(cfg, !!env.ELEVENLABS_API_KEY);
+  if (mode === 'authenticated' && !env.ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY secret not set');
+  if (mode === 'proxy' && !cfg.proxies.length) throw new Error('proxy ASR selected but no proxies are configured (set them on the /tools page)');
 
-  // Idempotent: a finished transcription is never paid for twice — resumes
-  // and step retries reuse the stored result.
-  //
-  // With the webhook secret configured the WHOLE file goes in ONE async
-  // request (no sync processing window, so no chunking and no parallelism —
-  // ElevenLabs takes hours-long audio via cloud_storage_url + webhook).
-  // Without it, long files fall back to the chunked sync path.
   const existingKey = `scribe/${jobId}/asr.json`;
   const existing = await env.MEDIA_BUCKET.get(existingKey);
-  // A job that already has paid-for segment results finishes in chunked mode
-  // even if webhook mode switched on mid-flight — those caches are money.
+  // Any already-paid-for chunked segments finish in chunked mode — those caches are money.
   const partial = (await env.MEDIA_BUCKET.list({ prefix: `scribe/${jobId}/asr-seg-`, limit: 1 })).objects.length > 0;
-  const webhookMode = !!(env as any).ELEVENLABS_WEBHOOK_SECRET && !partial;
   const data: any = existing
     ? await existing.json()
-    : webhookMode || durationSec <= CHUNK_THRESHOLD_SEC
-      ? await sttCall(env, `${CDN_BASE}/${sourceKey}`, `scribe/${jobId}/stt-req-full.json`, 5, true)
-      : await chunkedAsr(env, jobId, sourceKey);
+    : mode === 'proxy'
+      ? await (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg)
+      : partial
+        ? await chunkedAsr(env, jobId, sourceKey)
+        : await sttCall(env, `${CDN_BASE}/${sourceKey}`, undefined, 5, true, /* forceSync */ true);
 
   const words: Word[] = data.words || [];
   if (!words.length) throw new Error('ElevenLabs returned no words');

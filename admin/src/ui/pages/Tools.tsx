@@ -1,9 +1,127 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api, useApi } from '../lib/api';
 import { fmtBytes, fmtAgo } from '../lib/format';
 import { GlowCard, SectionTitle, Button, inputCls, Table, Badge } from '../components/Primitives';
 import { BlurFade } from '../components/BlurFade';
 import { Icon } from '../components/Icon';
+
+// Dual ElevenLabs ASR: authenticated (API key → whole file, no chunk) vs
+// unauthenticated via SOCKS proxies (chunked, source_url, WS-coordinated quota).
+function AsrSettings() {
+  const { data, loading, refetch } = useApi<any>('/api/asr-config');
+  const [mode, setMode] = useState('auto');
+  const [chunk, setChunk] = useState('80');
+  const [proxies, setProxies] = useState('');
+  const [wsUrl, setWsUrl] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState('');
+
+  useEffect(() => {
+    if (!data) return;
+    setMode(data.mode || 'auto');
+    setChunk(String(data.chunkMinutes ?? 80));
+    setProxies((data.proxies || []).join('\n'));
+    setWsUrl(data.wsUrl || '');
+  }, [data]);
+
+  async function save() {
+    setSaving(true); setSaved('');
+    try {
+      const r = await api('/api/asr-config', { method: 'POST', body: JSON.stringify({
+        mode,
+        chunkMinutes: Number(chunk) || 80,
+        proxies: proxies.split('\n').map((s) => s.trim()).filter(Boolean),
+        wsUrl: wsUrl.trim(),
+      }) });
+      setSaved('Saved — active mode: ' + r.activeMode);
+      refetch();
+    } catch (e: any) { setSaved('Failed: ' + e.message); }
+    setSaving(false);
+  }
+
+  const active = data?.activeMode;
+  const proxyActive = active === 'proxy';
+  return (
+    <GlowCard className="p-5">
+      <SectionTitle
+        right={
+          <Badge tone={active === 'authenticated' ? 'gold' : 'dim'}>
+            {loading ? '…' : active === 'authenticated' ? 'authenticated · no chunk' : 'proxy · chunked'}
+          </Badge>
+        }
+      >
+        ElevenLabs transcription
+      </SectionTitle>
+      <p className="text-[13px] leading-relaxed text-muted">
+        With an API key set, the whole file transcribes in one request (no chunking, synchronous response — this is what
+        fixes the 2-hour timeouts). Without a key, audio is chunked and sent unauthenticated through your SOCKS proxies
+        (residential IPs) via <code className="text-cream/80">source_url</code>, quota coordinated over a WebSocket.
+      </p>
+
+      <div className="mt-3 flex items-center gap-2 text-[12px]">
+        <span className="text-muted">API key:</span>
+        <Badge tone={data?.hasApiKey ? 'gold' : 'dim'}>{data?.hasApiKey ? 'set (ELEVENLABS_API_KEY)' : 'not set'}</Badge>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Mode</label>
+          <div className="flex flex-wrap gap-2">
+            {[
+              ['auto', 'Auto (key → authenticated)'],
+              ['authenticated', 'Authenticated (no chunk)'],
+              ['proxy', 'Proxy (chunked)'],
+            ].map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setMode(v)}
+                className={`rounded-full border px-3 py-1 text-[12px] font-medium transition-colors ${
+                  mode === v ? 'border-gold/40 bg-gold/10 text-gold-bright' : 'border-hairline bg-soft text-muted hover:text-cream'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={proxyActive || mode !== 'authenticated' ? '' : 'opacity-50'}>
+          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">
+                SOCKS proxies (one per line)
+              </label>
+              <textarea
+                className={inputCls + ' h-20 w-full resize-y font-mono text-[12px]'}
+                value={proxies}
+                onChange={(e) => setProxies(e.target.value)}
+                placeholder="socks5://user:pass@host:1080&#10;socks5://user:pass@host2:1080"
+              />
+            </div>
+            <div className="sm:w-28">
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Chunk (min)</label>
+              <input className={inputCls + ' w-full font-mono'} value={chunk} onChange={(e) => setChunk(e.target.value)} inputMode="numeric" />
+            </div>
+          </div>
+          <label className="mb-1.5 mt-3 block text-[11px] font-semibold uppercase tracking-wide text-faint">
+            Quota-coordination WebSocket
+          </label>
+          <input
+            className={inputCls + ' w-full font-mono text-[12px]'}
+            value={wsUrl}
+            onChange={(e) => setWsUrl(e.target.value)}
+            placeholder="ws://unifi.padborghotel.dk:5556/api/coord/ws"
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          {saved && <span className="text-[12px] text-gold-bright">{saved}</span>}
+        </div>
+      </div>
+    </GlowCard>
+  );
+}
 
 export default function Tools() {
   const [purgeResult, setPurgeResult] = useState('');
@@ -26,6 +144,10 @@ export default function Tools() {
 
   return (
     <div className="space-y-6">
+      <BlurFade>
+        <AsrSettings />
+      </BlurFade>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <BlurFade>
           <GlowCard className="p-5">

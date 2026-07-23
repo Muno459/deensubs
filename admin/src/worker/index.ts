@@ -607,6 +607,23 @@ app.post('/api/scribe/prewarm', async (c) => {
   return c.json({ ok: true });
 });
 
+// ASR mode config (dual ElevenLabs system): authenticated no-chunk vs
+// unauthenticated-via-SOCKS-proxies chunked. Edited on the /tools page.
+function asrConfigView(c: any, cfg: any) {
+  const hasApiKey = !!c.env.ELEVENLABS_API_KEY;
+  const activeMode = cfg.mode === 'auto' ? (hasApiKey ? 'authenticated' : 'proxy') : cfg.mode;
+  return { ...cfg, hasApiKey, activeMode };
+}
+app.get('/api/asr-config', async (c) => {
+  const { getAsrConfig } = await import('./scribe/asr-config');
+  return c.json(asrConfigView(c, await getAsrConfig(c.env)));
+});
+app.post('/api/asr-config', async (c) => {
+  const { putAsrConfig } = await import('./scribe/asr-config');
+  const body = await c.req.json().catch(() => ({}));
+  return c.json(asrConfigView(c, await putAsrConfig(c.env, body)));
+});
+
 // Enumerate a playlist without downloading — Browser Rendering (one session,
 // InnerTube browse). No container, no cookies.
 app.post('/api/scribe/enumerate', async (c) => {
