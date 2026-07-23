@@ -15,9 +15,11 @@
 import { connect } from 'cloudflare:sockets';
 import { Tls13 } from './tls13';
 import { getAsrConfig } from './asr-config';
+import { containerCall } from './asr';
 import type { DownloadResult, ScribeEnv } from './types';
 
 const enc = new TextEncoder();
+const CDN_BASE = 'https://cdn.deensubs.com';
 const AVR_UA = 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip';
 const WEB_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const VD_KV_KEY = 'yt:session';
@@ -132,6 +134,20 @@ function pickAudio(player: any): any {
   return pool.reduce((a: any, b: any) => ((b.bitrate || 0) > (a.bitrate || 0) ? b : a));
 }
 
+/** Best H.264/avc1 video (widely compatible, clean stream-copy into mp4),
+ *  highest resolution then bitrate. avc1 tops out at 1080p on YouTube. */
+function pickVideo(player: any): any {
+  const fmts = (player.streamingData?.adaptiveFormats || []).filter((f: any) => f.url && (f.mimeType || '').startsWith('video/'));
+  if (!fmts.length) throw new Error('no video formats with direct URLs');
+  const avc = fmts.filter((f: any) => /avc1/.test(f.mimeType));
+  const pool = avc.length ? avc : fmts;
+  return pool.reduce((a: any, b: any) => {
+    const ah = a.height || 0, bh = b.height || 0;
+    if (bh !== ah) return bh > ah ? b : a;
+    return (b.bitrate || 0) > (a.bitrate || 0) ? b : a;
+  });
+}
+
 // ---- direct parallel download → R2 multipart ------------------------------
 async function fetchRange(url: string, start: number, end: number): Promise<Uint8Array> {
   let tries = 0;
@@ -172,22 +188,26 @@ async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: n
 
 type AudioCore = { key: string; bytes: number; durationSec: number; title?: string; channel?: string; thumbUrl?: string };
 
-/** Extract (via proxy) + range-download the best audio to `key` in R2. */
-async function ytdlAudioCore(env: ScribeEnv, jobId: string, url: string, key: string, writePct: boolean): Promise<AudioCore> {
+/** Extract the android_vr player response via the proxy (cached session,
+ *  one refresh retry on a non-OK status). */
+async function extractPlayer(env: ScribeEnv, url: string): Promise<any> {
   const videoId = videoIdOf(url);
   if (!videoId) throw new Error('not a YouTube video url');
   const cfg = await getAsrConfig(env);
   const proxyUrl = cfg.proxies?.[0];
   if (!proxyUrl) throw new Error('no proxy configured for extraction');
-
-  // extract with a cached session; on non-OK refresh the session once
   let player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId));
   if (player?.playabilityStatus?.status !== 'OK') {
     player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId, true));
   }
   const status = player?.playabilityStatus?.status;
   if (status !== 'OK') throw new Error(`playability ${status}: ${player?.playabilityStatus?.reason || ''}`);
+  return player;
+}
 
+/** Extract (via proxy) + range-download the best audio to `key` in R2. */
+async function ytdlAudioCore(env: ScribeEnv, jobId: string, url: string, key: string, writePct: boolean): Promise<AudioCore> {
+  const player = await extractPlayer(env, url);
   const a = pickAudio(player);
   const total = parseInt(a.contentLength || '0', 10);
   if (!total) throw new Error('audio format has no contentLength');
@@ -211,6 +231,68 @@ export async function ytdlWorkerNative(env: ScribeEnv, jobId: string, url: strin
 export async function ytdlAudioFirst(env: ScribeEnv, jobId: string, url: string): Promise<{ key: string; durationSec: number }> {
   const r = await ytdlAudioCore(env, jobId, url, `scribe/${jobId}/audio-first.m4a`, false);
   return { key: r.key, durationSec: r.durationSec };
+}
+
+/** Mux a Worker-downloaded video+audio (R2 CDN urls) via the container's ffmpeg
+ *  into a single mp4 → R2. The Worker did the heavy download; the container only
+ *  stream-copies the video and re-encodes audio to aac. */
+async function containerMux(env: ScribeEnv, jobId: string, videoUrl: string, audioUrl: string): Promise<{ key: string; bytes: number }> {
+  const cName = 'mux-' + jobId;
+  const start = await containerCall(env, cName, '/mux', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ video_url: videoUrl, audio_url: audioUrl }) });
+  if (!start.ok) throw new Error(`mux start HTTP ${start.status}`);
+  const { id } = (await start.json()) as { id: string };
+  let info: any = null;
+  for (let i = 0; i < 900; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const st = await containerCall(env, cName, `/jobs/${id}`).catch(() => null);
+    if (!st || !st.ok) continue;
+    info = await st.json();
+    if (info.status === 'done') break;
+    if (info.status === 'error') throw new Error('mux failed: ' + (info.error || 'unknown'));
+  }
+  if (!info || info.status !== 'done') throw new Error('mux timed out');
+  const file = await containerCall(env, cName, `/files/${id}`);
+  if (!file.ok || !file.body) throw new Error(`mux file fetch failed: HTTP ${file.status}`);
+  const { streamToR2 } = await import('./download');
+  const key = `scribe/${jobId}/source.mp4`;
+  const bytes = await streamToR2(env.MEDIA_BUCKET, key, file.body, 'video/mp4');
+  containerCall(env, cName, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
+  return { key, bytes };
+}
+
+/** Worker-native full-video download: extract via proxy, range-download the
+ *  video+audio streams DIRECT from the Worker, then container-mux into source.mp4.
+ *  The container only muxes (no download). Throws → caller falls back. */
+export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, url: string): Promise<DownloadResult> {
+  const player = await extractPlayer(env, url);
+  const vfmt = pickVideo(player);
+  const afmt = pickAudio(player);
+  const vTotal = parseInt(vfmt.contentLength || '0', 10);
+  const aTotal = parseInt(afmt.contentLength || '0', 10);
+  if (!vTotal || !aTotal) throw new Error('video/audio format missing contentLength');
+  const vExt = /webm/.test(vfmt.mimeType) ? 'webm' : 'mp4';
+  const vKey = `scribe/${jobId}/yt-video.${vExt}`;
+  const aKey = `scribe/${jobId}/yt-audio.m4a`;
+
+  // Download video then audio (sequential keeps peak memory bounded to one
+  // stream's part window); each is internally parallel across 4MB ranges.
+  const pct = throttledPct(env, jobId, vTotal + aTotal);
+  const vBytes = await downloadToR2(env.MEDIA_BUCKET, vKey, vfmt.url, vTotal, (vfmt.mimeType || 'video/mp4').split(';')[0], (n) => pct(n));
+  const aBytes = await downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4', (n) => pct(vBytes + n));
+  if (vBytes < 10_000 || aBytes < 5_000) throw new Error(`stream too small (v=${vBytes} a=${aBytes})`);
+
+  const muxed = await containerMux(env, jobId, `${CDN_BASE}/${vKey}`, `${CDN_BASE}/${aKey}`);
+  env.MEDIA_BUCKET.delete(vKey).catch(() => {});
+  env.MEDIA_BUCKET.delete(aKey).catch(() => {});
+
+  const vd = player.videoDetails || {};
+  const thumbs = vd.thumbnail?.thumbnails || [];
+  return {
+    key: muxed.key, method: 'yt-dlp', contentType: 'video/mp4', bytes: muxed.bytes,
+    title: vd.title, channel: vd.author,
+    thumbUrl: thumbs.length ? thumbs[thumbs.length - 1].url : undefined,
+    durationSec: parseInt(vd.lengthSeconds || '0', 10),
+  };
 }
 
 function throttledPct(env: ScribeEnv, jobId: string, total: number): (n: number) => void {

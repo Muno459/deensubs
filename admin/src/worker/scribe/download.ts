@@ -339,13 +339,16 @@ export async function download(env: ScribeEnv, jobId: string, url: string, fullV
   // browser, no proxies. Browser Rendering is the fallback (client changes,
   // rare extraction failures). Others → edge fetch.
   if (needsBrowser(url)) {
-    // YouTube AUDIO (transcription): fully Worker-native — extract via a
-    // residential proxy (bot wall), then range-stream the direct URL from the
-    // Worker. No container cold start, no browser. Container is the fallback.
-    if (!fullVideo && videoIdOf(url)) {
+    // YouTube: Worker-native — extract via a residential proxy (bot wall), then
+    // range-download the direct URLs from the Worker (no browser). Audio jobs are
+    // fully container-free; full-video downloads video+audio in the Worker and
+    // uses the container only to mux. Container/browser are the fallbacks.
+    if (videoIdOf(url)) {
       try {
-        const { ytdlWorkerNative } = await import('./ytdl');
-        return await ytdlWorkerNative(env, jobId, url);
+        const ytdl = await import('./ytdl');
+        return fullVideo
+          ? await ytdl.ytdlFullVideoWorkerNative(env, jobId, url)
+          : await ytdl.ytdlWorkerNative(env, jobId, url);
       } catch (e: any) {
         console.log('ytdl worker-native failed, falling back to container: ' + (e?.message || e));
       }
