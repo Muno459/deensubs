@@ -691,6 +691,58 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(502, {"error": (proc.stderr or b"").decode()[-200:] or "empty clip"})
             import base64 as _b64
             return self._send(200, {"b64": _b64.b64encode(proc.stdout).decode(), "bytes": len(proc.stdout)})
+        if self.path == "/stt-proxy":
+            # Unauthenticated ElevenLabs STT through a SOCKS5 residential proxy.
+            # curl (not the Worker) performs the SOCKS5 + TLS so the SNI targets
+            # api.elevenlabs.io correctly: Cloudflare Workers' startTls() sends
+            # the SNI of the connect() host (the proxy) and can't override it,
+            # which Google-fronted api.elevenlabs.io rejects. curl sets SNI to
+            # the tunnel destination, so the handshake succeeds. source_url points
+            # at the R2 chunk (ElevenLabs fetches it); the transcript is the
+            # synchronous response (webhooks aren't available unauthenticated).
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                return self._send(400, {"error": "bad JSON"})
+            proxy = payload.get("proxy", "")
+            source_url = payload.get("source_url", "")
+            if not re.match(r"^socks", proxy) or not re.match(r"^https?://", source_url):
+                return self._send(400, {"error": "proxy (socks5[h]://…) and source_url required"})
+            cmd = [
+                "curl", "-s", "--max-time", "175", "-x", proxy,
+                "-X", "POST",
+                "https://api.elevenlabs.io/v1/speech-to-text?allow_unauthenticated=1",
+                "-H", "origin: https://elevenlabs.io",
+                "-H", "referer: https://elevenlabs.io/",
+                "-F", "model_id=scribe_v2",
+                "-F", "source_url=" + source_url,
+                "-F", "diarize=true",
+                "-F", "timestamps_granularity=character",
+                "-F", "tag_audio_events=true",
+                "-w", "\n%{http_code}",
+            ]
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=185)
+            except subprocess.TimeoutExpired:
+                return self._send(504, {"error": "proxy STT timed out", "rate_limited": True})
+            if proc.returncode != 0:
+                return self._send(502, {"error": ((proc.stderr or "curl failed").strip())[-200:], "curl_rc": proc.returncode})
+            out = proc.stdout or ""
+            nl = out.rfind("\n")
+            body = out[:nl] if nl >= 0 else out
+            try:
+                code = int(out[nl + 1:].strip()) if nl >= 0 else 0
+            except ValueError:
+                code = 0
+            if code != 200:
+                rl = code in (401, 429) or bool(re.search(r"rate limit|quota|too many", body, re.I))
+                return self._send(502, {"error": "HTTP %d: %s" % (code, body[:200]), "status": code, "rate_limited": rl})
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                return self._send(502, {"error": "non-JSON STT response: " + body[:200]})
+            return self._send(200, data)
         if self.path == "/split":
             try:
                 length = int(self.headers.get("Content-Length", "0"))

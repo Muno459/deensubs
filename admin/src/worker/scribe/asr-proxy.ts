@@ -1,5 +1,4 @@
-// Unauthenticated ElevenLabs STT through SOCKS5 proxies (residential IPs),
-// entirely Worker-native via cloudflare:sockets.
+// Unauthenticated ElevenLabs STT through SOCKS5 proxies (residential IPs).
 //
 // Why: the unauthenticated endpoint (allow_unauthenticated=1) is rate-limited
 // per source IP. A Cloudflare Worker's own egress is datacenter/flagged, so we
@@ -8,11 +7,16 @@
 // control connection rides the proxy. Webhooks aren't available unauthenticated,
 // so the transcript is read straight from the synchronous response.
 //
-// Flow per chunk: container splits audio → chunk to R2 → SOCKS5 CONNECT to
-// api.elevenlabs.io:443 → startTls() → HTTP POST source_url → parse response.
-// Quota across the proxies is coordinated over a WebSocket (best-effort).
+// The SOCKS5 + TLS is done in the CONTAINER (curl via /stt-proxy), NOT the
+// Worker: cloudflare:sockets' startTls() sends the SNI of the connect() host
+// (the proxy) and offers no way to override it to the tunnel destination, and
+// Google-fronted api.elevenlabs.io rejects the mismatched SNI ("TLS Handshake
+// Failed"). curl sets SNI to the destination, so the handshake succeeds.
+//
+// Flow per chunk: container splits audio → chunk to R2 → Worker leases quota
+// (WS coordinator) and calls the container /stt-proxy (SOCKS5 → source_url POST)
+// → merge. Quota across the proxies is coordinated over a WebSocket (best-effort).
 
-import { connect } from 'cloudflare:sockets';
 import { streamToR2 } from './download';
 import { containerCall, authStt } from './asr';
 import { AsrCoordinator } from './asr-coord';
@@ -30,10 +34,8 @@ import type { AsrConfig } from './asr-config';
 import type { ScribeEnv, Word } from './types';
 
 const CDN_BASE = 'https://cdn.deensubs.com';
-const STT_HOST = 'api.elevenlabs.io';
-const STT_PATH = '/v1/speech-to-text?allow_unauthenticated=1';
 
-// ---- SOCKS5 ---------------------------------------------------------------
+// ---- SOCKS proxy parsing (nic identity) -----------------------------------
 
 type Proxy = { host: string; port: number; user?: string; pass?: string };
 
@@ -45,166 +47,27 @@ function parseProxy(url: string): Proxy {
   return { user: m[1], pass: m[2], host: m[3], port: parseInt(m[4], 10) };
 }
 
-/** Minimal buffered reader over a ReadableStream<Uint8Array>. */
-class Buf {
-  private q: Uint8Array = new Uint8Array(0);
-  constructor(private reader: ReadableStreamDefaultReader<Uint8Array>) {}
-  async readN(n: number): Promise<Uint8Array> {
-    while (this.q.length < n) {
-      const { done, value } = await this.reader.read();
-      if (done) throw new Error('socket closed mid-read');
-      const merged = new Uint8Array(this.q.length + value.length);
-      merged.set(this.q); merged.set(value, this.q.length);
-      this.q = merged;
-    }
-    const out = this.q.slice(0, n);
-    this.q = this.q.slice(n);
-    return out;
-  }
-  release() { try { this.reader.releaseLock(); } catch {} }
-}
-
-/** Open a TLS tunnel to destHost:destPort THROUGH a SOCKS5 proxy. */
-async function socks5Tls(proxy: Proxy, destHost: string, destPort: number): Promise<any> {
-  const socket = connect({ hostname: proxy.host, port: proxy.port }, { secureTransport: 'starttls', allowHalfOpen: false });
-  await socket.opened;
-  const writer = socket.writable.getWriter();
-  const buf = new Buf(socket.readable.getReader());
-  try {
-    // greeting: version 5, offered auth methods
-    const methods = proxy.user ? [0x00, 0x02] : [0x00];
-    await writer.write(new Uint8Array([0x05, methods.length, ...methods]));
-    const g = await buf.readN(2);
-    if (g[0] !== 0x05) throw new Error('socks: not v5');
-    if (g[1] === 0x02) {
-      const u = new TextEncoder().encode(proxy.user || '');
-      const p = new TextEncoder().encode(proxy.pass || '');
-      await writer.write(new Uint8Array([0x01, u.length, ...u, p.length, ...p]));
-      const a = await buf.readN(2);
-      if (a[1] !== 0x00) throw new Error('socks: auth rejected');
-    } else if (g[1] !== 0x00) {
-      throw new Error('socks: no acceptable auth method (0x' + g[1].toString(16) + ')');
-    }
-    // CONNECT destHost:destPort (ATYP 0x03 = domain)
-    const dh = new TextEncoder().encode(destHost);
-    await writer.write(new Uint8Array([0x05, 0x01, 0x00, 0x03, dh.length, ...dh, (destPort >> 8) & 0xff, destPort & 0xff]));
-    const r = await buf.readN(4);
-    if (r[1] !== 0x00) throw new Error('socks: CONNECT failed (reply 0x' + r[1].toString(16) + ')');
-    const atyp = r[3];
-    const alen = atyp === 0x01 ? 4 : atyp === 0x04 ? 16 : (await buf.readN(1))[0];
-    await buf.readN(alen + 2); // drain BND.ADDR + BND.PORT
-  } finally {
-    // release BOTH locks before startTls — it needs to take over the socket's
-    // streams, and a still-locked reader throws "ReadableStream is locked".
-    buf.release();
-    writer.releaseLock();
-  }
-  // the socket now tunnels raw bytes to destHost:destPort — upgrade to TLS.
-  // SNI/cert must validate against the DESTINATION (ElevenLabs), not the proxy
-  // we dialed, so pin expectedServerHostname to destHost.
-  const tls = socket.startTls({ expectedServerHostname: destHost });
-  await tls.opened;
-  return tls;
-}
-
-// ---- HTTP over the TLS socket --------------------------------------------
-
-function multipart(fields: Record<string, string>): { body: Uint8Array; contentType: string } {
-  const boundary = '----DeenSubs' + crypto.randomUUID().replace(/-/g, '');
-  const enc = new TextEncoder();
-  const parts: Uint8Array[] = [];
-  for (const [k, v] of Object.entries(fields)) {
-    parts.push(enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
-  }
-  parts.push(enc.encode(`--${boundary}--\r\n`));
-  let len = 0; for (const p of parts) len += p.length;
-  const body = new Uint8Array(len);
-  let off = 0; for (const p of parts) { body.set(p, off); off += p.length; }
-  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
-}
-
-function concat(chunks: Uint8Array[]): Uint8Array {
-  let len = 0; for (const c of chunks) len += c.length;
-  const out = new Uint8Array(len);
-  let off = 0; for (const c of chunks) { out.set(c, off); off += c.length; }
-  return out;
-}
-
-/** Decode an HTTP/1.1 response (Connection: close) into {status, body}. */
-function parseHttp(raw: Uint8Array): { status: number; body: string } {
-  const sep = indexOfCRLFCRLF(raw);
-  if (sep < 0) throw new Error('http: no header terminator');
-  const head = new TextDecoder().decode(raw.slice(0, sep));
-  const status = parseInt(head.split('\r\n')[0].split(' ')[1] || '0', 10);
-  const chunked = /transfer-encoding:\s*chunked/i.test(head);
-  const rest = raw.slice(sep + 4);
-  return { status, body: new TextDecoder().decode(chunked ? dechunk(rest) : rest) };
-}
-
-function indexOfCRLFCRLF(a: Uint8Array): number {
-  for (let i = 0; i + 3 < a.length; i++) {
-    if (a[i] === 13 && a[i + 1] === 10 && a[i + 2] === 13 && a[i + 3] === 10) return i;
-  }
-  return -1;
-}
-
-function dechunk(a: Uint8Array): Uint8Array {
-  const out: Uint8Array[] = [];
-  let i = 0;
-  while (i < a.length) {
-    let j = i;
-    while (j + 1 < a.length && !(a[j] === 13 && a[j + 1] === 10)) j++;
-    const size = parseInt(new TextDecoder().decode(a.slice(i, j)).trim(), 16);
-    if (!size || Number.isNaN(size)) break;
-    const start = j + 2;
-    out.push(a.slice(start, start + size));
-    i = start + size + 2;
-  }
-  return concat(out);
-}
-
-/** One transcription request through a given proxy. */
-async function proxyStt(proxyUrl: string, sourceUrl: string): Promise<any> {
-  const proxy = parseProxy(proxyUrl);
-  const tls = await socks5Tls(proxy, STT_HOST, 443);
-  const { body, contentType } = multipart({
-    model_id: 'scribe_v2',
-    source_url: sourceUrl,
-    diarize: 'true',
-    timestamps_granularity: 'character',
-    tag_audio_events: 'true',
+/** One transcription request through a given proxy, executed in the container.
+ *  The container (curl) does the SOCKS5 + TLS because a Cloudflare Worker's
+ *  startTls() sends the SNI of the connect() host (the proxy) and cannot
+ *  override it to the tunnel destination — Google-fronted api.elevenlabs.io
+ *  rejects the mismatched SNI, while curl sets it correctly. The chunk lives in
+ *  R2 (source_url); ElevenLabs fetches it and the transcript is the synchronous
+ *  response (webhooks aren't available unauthenticated). */
+async function containerSttProxy(env: ScribeEnv, cName: string, proxyUrl: string, sourceUrl: string): Promise<any> {
+  const r = await containerCall(env, cName, '/stt-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ proxy: proxyUrl, source_url: sourceUrl }),
   });
-  const writer = tls.writable.getWriter();
-  const head =
-    `POST ${STT_PATH} HTTP/1.1\r\n` +
-    `Host: ${STT_HOST}\r\n` +
-    `Connection: close\r\n` +
-    `accept: */*\r\n` +
-    `origin: https://elevenlabs.io\r\n` +
-    `referer: https://elevenlabs.io/\r\n` +
-    `user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36\r\n` +
-    `content-type: ${contentType}\r\n` +
-    `content-length: ${body.length}\r\n\r\n`;
-  await writer.write(new TextEncoder().encode(head));
-  await writer.write(body);
-  writer.releaseLock();
-
-  const reader = tls.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-  }
-  try { await tls.close(); } catch {}
-  const { status, body: text } = parseHttp(concat(chunks));
-  if (status !== 200) {
-    const rateLimited = status === 429 || status === 401 || /rate limit|quota|too many/i.test(text);
-    const err: any = new Error(`ElevenLabs unauth STT HTTP ${status}: ${text.slice(0, 160)}`);
-    err.rateLimited = rateLimited;
+  const j: any = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const err: any = new Error(j?.error || `stt-proxy HTTP ${r.status}`);
+    // 429/401/quota/timeouts → rate-limited so the loop rotates to the next NIC
+    err.rateLimited = !!j?.rate_limited || r.status === 429;
     throw err;
   }
-  return JSON.parse(text);
+  return j;
 }
 
 // ---- WS quota coordination (best-effort) ----------------------------------
@@ -278,7 +141,7 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
         leaseId = lease.leaseId;
       }
       try {
-        data = await withTimeout(proxyStt(proxyUrl, chunkUrl), 180_000, `proxy STT (${nic})`);
+        data = await withTimeout(containerSttProxy(env, cName, proxyUrl, chunkUrl), 190_000, `proxy STT (${nic})`);
         const ok = !!(data?.words?.length || data?.text);
         if (coord && leaseId) coord.release(leaseId, minutes, ok);
         if (ok) break;

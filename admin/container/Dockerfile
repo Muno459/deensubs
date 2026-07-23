@@ -6,7 +6,7 @@ FROM jauderho/yt-dlp:latest
 
 # Fonts for the clip renderer: Geist for Latin captions/titles,
 # Noto Naskh Arabic for Arabic text in ASS subtitles.
-RUN apk add --no-cache aria2 fontconfig font-noto font-noto-naskh-arabic font-inter font-noto-emoji \
+RUN apk add --no-cache aria2 curl fontconfig font-noto font-noto-naskh-arabic font-inter font-noto-emoji \
   && mkdir -p /usr/share/fonts/custom
 COPY fonts/*.ttf /usr/share/fonts/custom/
 RUN fc-cache -f
