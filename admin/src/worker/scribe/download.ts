@@ -345,15 +345,24 @@ export async function download(env: ScribeEnv, jobId: string, url: string, fullV
     // uses the container only to REMUX (stream-copy, no re-encode). Fallbacks:
     // container download, then Browser Rendering.
     if (videoIdOf(url)) {
+      // 1. proxy extraction + Worker download (fast path)
       try {
         const ytdl = await import('./ytdl');
         return fullVideo
           ? await ytdl.ytdlFullVideoWorkerNative(env, jobId, url)
           : await ytdl.ytdlWorkerNative(env, jobId, url);
       } catch (e: any) {
-        console.log('ytdl worker-native failed, falling back to container: ' + (e?.message || e));
+        console.log('ytdl proxy extraction failed, trying Browser Rendering: ' + (e?.message || e));
+      }
+      // 2. Browser Rendering — proxy-free (a real Chrome session passes the bot
+      //    wall from the datacenter IP); still Worker-downloaded bytes.
+      try {
+        return await browserDownload(env, jobId, url, fullVideo);
+      } catch (e: any) {
+        console.log('Browser Rendering failed, trying container: ' + (e?.message || e));
       }
     }
+    // 3. container yt-dlp (last resort)
     try {
       return await ytdlpViaContainer(env, jobId, url, fullVideo);
     } catch (e: any) {
