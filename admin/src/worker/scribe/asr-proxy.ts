@@ -14,7 +14,17 @@
 
 import { connect } from 'cloudflare:sockets';
 import { streamToR2 } from './download';
-import { containerCall } from './asr';
+import { containerCall, authStt } from './asr';
+
+/** Race a promise against a timeout so a hung proxy socket can never stall a
+ *  chunk for hours. A timeout is flagged rateLimited so the loop tries the next
+ *  proxy (and ultimately the authenticated fallback). */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, rej) => setTimeout(() => rej(Object.assign(new Error(`${label} timed out after ${ms}ms`), { rateLimited: true })), ms)),
+  ]);
+}
 import type { AsrConfig } from './asr-config';
 import type { ScribeEnv, Word } from './types';
 
@@ -268,7 +278,8 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
     for (let attempt = 0; attempt < proxies.length * 2; attempt++) {
       const proxyUrl = proxies[(n + attempt) % proxies.length];
       try {
-        data = await withQuotaLease(cfg, `deensubs-${jobId}-${n}`, minutes, () => proxyStt(proxyUrl, chunkUrl));
+        data = await withQuotaLease(cfg, `deensubs-${jobId}-${n}`, minutes, () =>
+          withTimeout(proxyStt(proxyUrl, chunkUrl), 180_000, `proxy STT (${new URL(proxyUrl.replace('socks5h', 'http').replace('socks5', 'http')).host})`));
         if (data?.words?.length || data?.text) break;
         lastErr = 'empty transcript';
       } catch (e: any) {
@@ -277,7 +288,13 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
         await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
       }
     }
-    if (!data) throw new Error(`segment ${n} failed via all proxies: ${lastErr}`);
+    // Fallback: if no proxy could transcribe this chunk and an API key exists,
+    // transcribe it authenticated so the job completes rather than failing.
+    if ((!data || !(data.words?.length || data.text)) && env.ELEVENLABS_API_KEY) {
+      try { data = await authStt(env, chunkUrl); }
+      catch (e: any) { lastErr = `proxy + auth fallback both failed: ${lastErr} | ${String(e?.message || e)}`; }
+    }
+    if (!data || !(data.words?.length || data.text)) throw new Error(`segment ${n} failed: ${lastErr}`);
     await env.MEDIA_BUCKET.put(segKey, JSON.stringify(data), { httpMetadata: { contentType: 'application/json' } });
     await env.MEDIA_BUCKET.delete(chunkKey).catch(() => {});
     return { n, data };

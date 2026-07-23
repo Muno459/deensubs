@@ -69,6 +69,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
     try {
       // 1. Download → R2
       await updateJob(env.DB, jobId, { status: 'running' });
+      // Validate the ASR config BEFORE spending a download — a misconfig (e.g.
+      // proxy mode with no proxies) otherwise only surfaced after the audio
+      // download, ~50s in. This makes it fail in ~1s.
+      await step.do('asr-preflight', { retries: { limit: 0, delay: '5 seconds' }, timeout: '20 seconds' }, async () => {
+        const { getAsrPlan } = await import('./asr');
+        await getAsrPlan(env);
+        return 'ok';
+      });
       await markStage(env, jobId, 'download');
       // Downloads run via Browser Rendering (a headless Chrome on a CF IP mints
       // the direct URLs; the Worker range-streams them to R2). The companion

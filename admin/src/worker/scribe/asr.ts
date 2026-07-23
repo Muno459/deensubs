@@ -12,7 +12,7 @@
 // stay small.
 
 import { streamToR2 } from './download';
-import { getAsrConfig, resolveAsrMode } from './asr-config';
+import { getAsrConfig, resolveAsrMode, type AsrConfig } from './asr-config';
 import type { AsrResult, ScribeEnv, Word } from './types';
 
 const STT_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
@@ -234,6 +234,24 @@ async function chunkedAsr(env: ScribeEnv, jobId: string, sourceKey: string): Pro
   return { language_code: languageCode, text, words: allWords, audio_duration_secs: acc };
 }
 
+/** Authenticated whole-file synchronous STT for a single URL. Used as the
+ *  proxy-mode fallback: a chunk that can't get through any SOCKS proxy is
+ *  transcribed with the API key instead of hanging/failing. */
+export async function authStt(env: ScribeEnv, sourceUrl: string): Promise<any> {
+  return sttCall(env, sourceUrl, undefined, 5, false, /* forceSync */ true);
+}
+
+/** Resolve + validate the ASR plan. Throws immediately on misconfiguration so
+ *  callers (workflow preflight, runAsr) can fail fast instead of after a
+ *  download. Exported so the workflow can validate before spending a download. */
+export async function getAsrPlan(env: ScribeEnv): Promise<{ cfg: AsrConfig; mode: 'authenticated' | 'proxy' }> {
+  const cfg = await getAsrConfig(env);
+  const mode = resolveAsrMode(cfg, !!env.ELEVENLABS_API_KEY);
+  if (mode === 'authenticated' && !env.ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY secret not set');
+  if (mode === 'proxy' && !cfg.proxies.length) throw new Error('proxy ASR selected but no proxies are configured (set them on the /tools page)');
+  return { cfg, mode };
+}
+
 export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, durationSec = 0): Promise<AsrResult> {
   // Dual mode (configurable in /tools):
   //  - authenticated (API key set): the WHOLE file in ONE synchronous request
@@ -241,10 +259,7 @@ export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, d
   //    stalling awaitResult for ~40 min and timing the step out at 2 h).
   //  - proxy (no key): unauthenticated STT through SOCKS proxies, chunked into
   //    ~80-min segments, synchronous response, quota coordinated over WebSocket.
-  const cfg = await getAsrConfig(env);
-  const mode = resolveAsrMode(cfg, !!env.ELEVENLABS_API_KEY);
-  if (mode === 'authenticated' && !env.ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY secret not set');
-  if (mode === 'proxy' && !cfg.proxies.length) throw new Error('proxy ASR selected but no proxies are configured (set them on the /tools page)');
+  const { cfg, mode } = await getAsrPlan(env);
 
   const existingKey = `scribe/${jobId}/asr.json`;
   const existing = await env.MEDIA_BUCKET.get(existingKey);
