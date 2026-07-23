@@ -163,7 +163,9 @@ async function fetchRange(url: string, start: number, end: number): Promise<Uint
 /** Parallel 4MB ranges assembled into 8MB R2 parts, up to ~20 concurrent range
  *  fetches, bounded memory (~80MB). Reports byte progress. */
 async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: number, contentType: string, onBytes?: (n: number) => void): Promise<number> {
-  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024, PARTCONC = 10;
+  // PART=8MB, ~6 parts in flight: peak memory ~6*(part + concat scratch) stays
+  // comfortably under the Worker's 128MB even for large videos.
+  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024, PARTCONC = 6;
   const nParts = Math.ceil(total / PART);
   const mpu = await bucket.createMultipartUpload(key, { httpMetadata: { contentType } });
   const uploaded: R2UploadedPart[] = new Array(nParts);
