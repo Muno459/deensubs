@@ -11,6 +11,7 @@
 
 import type { DownloadResult, ScribeEnv } from './types';
 import type { YtFormat } from './ytbrowser';
+import { videoIdOf } from './ytdl';
 
 const PART_SIZE = 10 * 1024 * 1024; // R2 multipart minimum is 5MB per part
 
@@ -331,6 +332,17 @@ export async function download(env: ScribeEnv, jobId: string, url: string, fullV
   // browser, no proxies. Browser Rendering is the fallback (client changes,
   // rare extraction failures). Others → edge fetch.
   if (needsBrowser(url)) {
+    // YouTube AUDIO (transcription): fully Worker-native — extract via a
+    // residential proxy (bot wall), then range-stream the direct URL from the
+    // Worker. No container cold start, no browser. Container is the fallback.
+    if (!fullVideo && videoIdOf(url)) {
+      try {
+        const { ytdlWorkerNative } = await import('./ytdl');
+        return await ytdlWorkerNative(env, jobId, url);
+      } catch (e: any) {
+        console.log('ytdl worker-native failed, falling back to container: ' + (e?.message || e));
+      }
+    }
     try {
       return await ytdlpViaContainer(env, jobId, url, fullVideo);
     } catch (e: any) {
