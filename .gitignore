@@ -10,3 +10,4 @@ src/scripts/build-version.txt
 *.eps
 tools/logo/*.ttf
 venv/
+__pycache__/
