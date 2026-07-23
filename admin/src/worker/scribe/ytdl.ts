@@ -240,7 +240,9 @@ export async function ytdlAudioFirst(env: ScribeEnv, jobId: string, url: string)
  *  stream-copies the video and re-encodes audio to aac. */
 async function containerMux(env: ScribeEnv, jobId: string, videoUrl: string, audioUrl: string): Promise<{ key: string; bytes: number }> {
   const cName = 'mux-' + jobId;
-  const start = await containerCall(env, cName, '/mux', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ video_url: videoUrl, audio_url: audioUrl }) });
+  // copy_audio: the audio is already AAC (itag 140 m4a), so stream-copy it — a
+  // pure remux is near-instant vs re-encoding a multi-hour lecture to aac.
+  const start = await containerCall(env, cName, '/mux', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ video_url: videoUrl, audio_url: audioUrl, copy_audio: true }) });
   if (!start.ok) throw new Error(`mux start HTTP ${start.status}`);
   const { id } = (await start.json()) as { id: string };
   let info: any = null;
@@ -273,14 +275,18 @@ export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, u
   const aTotal = parseInt(afmt.contentLength || '0', 10);
   if (!vTotal || !aTotal) throw new Error('video/audio format missing contentLength');
   const vExt = /webm/.test(vfmt.mimeType) ? 'webm' : 'mp4';
-  const vKey = `scribe/${jobId}/yt-video.${vExt}`;
-  const aKey = `scribe/${jobId}/yt-audio.m4a`;
+  // Intermediate streams live under tmp/ and are deleted after the mux.
+  const vKey = `scribe/${jobId}/tmp/yt-video.${vExt}`;
+  const aKey = `scribe/${jobId}/tmp/yt-audio.m4a`;
 
   // Download video then audio (sequential keeps peak memory bounded to one
   // stream's part window); each is internally parallel across 4MB ranges.
+  // Resume: if the streams are already in R2 (a mux retry), skip the re-download.
   const pct = throttledPct(env, jobId, vTotal + aTotal);
-  const vBytes = await downloadToR2(env.MEDIA_BUCKET, vKey, vfmt.url, vTotal, (vfmt.mimeType || 'video/mp4').split(';')[0], (n) => pct(n));
-  const aBytes = await downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4', (n) => pct(vBytes + n));
+  const vHead = await env.MEDIA_BUCKET.head(vKey);
+  const vBytes = vHead && vHead.size > 10_000 ? vHead.size : await downloadToR2(env.MEDIA_BUCKET, vKey, vfmt.url, vTotal, (vfmt.mimeType || 'video/mp4').split(';')[0], (n) => pct(n));
+  const aHead = await env.MEDIA_BUCKET.head(aKey);
+  const aBytes = aHead && aHead.size > 5_000 ? aHead.size : await downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4', (n) => pct(vBytes + n));
   if (vBytes < 10_000 || aBytes < 5_000) throw new Error(`stream too small (v=${vBytes} a=${aBytes})`);
 
   const muxed = await containerMux(env, jobId, `${CDN_BASE}/${vKey}`, `${CDN_BASE}/${aKey}`);

@@ -499,12 +499,15 @@ def run_thumbs(job_id: str, url: str, timestamps: list, variants: bool = False) 
             jobs[job_id].update(status="error", error="; ".join(errors) or "no frames produced")
 
 
-def run_mux(job_id: str, video_url: str, audio_url: str) -> None:
-    """Replace a video's audio track (dubbing mux). Streams both inputs."""
+def run_mux(job_id: str, video_url: str, audio_url: str, copy_audio: bool = False) -> None:
+    """Mux a video + audio stream into one mp4. copy_audio=True stream-copies the
+    audio (near-instant remux, for video+audio already from the same source);
+    False re-encodes to aac (dubbing, where the audio was replaced)."""
     out_path = os.path.join(DIR, f"{job_id}.mp4")
     try:
+        acodec = ["-c:a", "copy"] if copy_audio else ["-c:a", "aac", "-b:a", "160k"]
         cmd = ["ffmpeg", "-y", "-i", video_url, "-i", audio_url,
-               "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+               "-map", "0:v", "-map", "1:a", "-c:v", "copy", *acodec,
                "-shortest", "-movflags", "+faststart", out_path]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         if proc.returncode == 0 and os.path.exists(out_path):
@@ -715,7 +718,7 @@ class Handler(BaseHTTPRequestHandler):
             job_id = str(uuid.uuid4())
             with jobs_lock:
                 jobs[job_id] = {"status": "running", "kind": "mux"}
-            threading.Thread(target=run_mux, args=(job_id, payload["video_url"], payload["audio_url"]), daemon=True).start()
+            threading.Thread(target=run_mux, args=(job_id, payload["video_url"], payload["audio_url"], bool(payload.get("copy_audio"))), daemon=True).start()
             return self._send(200, {"id": job_id})
         if self.path == "/grade":
             # Deterministic v2 brand re-grade: neutralize golden/sepia cast +

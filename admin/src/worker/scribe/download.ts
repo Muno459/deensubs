@@ -342,7 +342,8 @@ export async function download(env: ScribeEnv, jobId: string, url: string, fullV
     // YouTube: Worker-native — extract via a residential proxy (bot wall), then
     // range-download the direct URLs from the Worker (no browser). Audio jobs are
     // fully container-free; full-video downloads video+audio in the Worker and
-    // uses the container only to mux. Container/browser are the fallbacks.
+    // uses the container only to REMUX (stream-copy, no re-encode). Fallbacks:
+    // container download, then Browser Rendering.
     if (videoIdOf(url)) {
       try {
         const ytdl = await import('./ytdl');
