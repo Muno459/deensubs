@@ -289,18 +289,28 @@ export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, u
   const aBytes = aHead && aHead.size > 5_000 ? aHead.size : await downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4', (n) => pct(vBytes + n));
   if (vBytes < 10_000 || aBytes < 5_000) throw new Error(`stream too small (v=${vBytes} a=${aBytes})`);
 
-  const muxed = await containerMux(env, jobId, `${CDN_BASE}/${vKey}`, `${CDN_BASE}/${aKey}`);
-  env.MEDIA_BUCKET.delete(vKey).catch(() => {});
-  env.MEDIA_BUCKET.delete(aKey).catch(() => {});
-
+  // Do NOT mux here — the mux runs as a BACKGROUND workflow step (muxWorkerNative)
+  // in parallel with transcription, so subtitles never wait on it. The video-only
+  // stream is the interim source_key (thumbnails/audiobook-detect only need frames);
+  // the workflow swaps source_key to the muxed source.mp4 before marking done.
   const vd = player.videoDetails || {};
   const thumbs = vd.thumbnail?.thumbnails || [];
   return {
-    key: muxed.key, method: 'yt-dlp', contentType: 'video/mp4', bytes: muxed.bytes,
+    key: vKey, method: 'yt-dlp', contentType: 'video/mp4', bytes: vBytes,
+    videoKey: vKey, audioKey: aKey, muxPending: true,
     title: vd.title, channel: vd.author,
     thumbUrl: thumbs.length ? thumbs[thumbs.length - 1].url : undefined,
     durationSec: parseInt(vd.lengthSeconds || '0', 10),
   };
+}
+
+/** Background mux step: remux the Worker-downloaded video+audio into source.mp4
+ *  (container ffmpeg stream-copy). The intermediate streams are NOT deleted here
+ *  — the interim source_key still points at the video stream and parallel steps
+ *  (thumbnails/detect) may be reading it; the workflow deletes them after it has
+ *  swapped source_key to the muxed file. */
+export async function muxWorkerNative(env: ScribeEnv, jobId: string, videoKey: string, audioKey: string): Promise<{ key: string; bytes: number }> {
+  return containerMux(env, jobId, `${CDN_BASE}/${videoKey}`, `${CDN_BASE}/${audioKey}`);
 }
 
 function throttledPct(env: ScribeEnv, jobId: string, total: number): (n: number) => void {

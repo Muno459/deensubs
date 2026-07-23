@@ -45,6 +45,9 @@ export type DownloadResult = {
   /** Full-video only: separate video+audio keys handed to the encoder to mux. */
   videoKey?: string;
   audioKey?: string;
+  /** `key` is the interim video-only stream; a background mux step must produce
+   *  the final source.mp4 from videoKey+audioKey and swap source_key. */
+  muxPending?: boolean;
   contentType: string;
   bytes: number;
   title?: string;

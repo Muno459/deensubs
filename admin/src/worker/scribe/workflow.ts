@@ -176,6 +176,17 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         await step.do('asr', ASR_CFG, asrBody(audioFirstKey, audioFirstDur));
       }
       const dl = await dlStep;
+      // Background mux (Worker-native full-video path): the streams are already
+      // in R2. Remux to source.mp4 as a step that runs IN PARALLEL with detect +
+      // transcription so subtitles never wait on it. `dl.key` is the interim
+      // video-only source (thumbnails/audiobook-detect only need frames); we swap
+      // source_key to the muxed file just before marking the job done.
+      const muxStep = (dl as any).muxPending && (dl as any).videoKey && (dl as any).audioKey
+        ? step.do('mux', { retries: { limit: 2, delay: '30 seconds' }, timeout: '20 minutes' }, async () => {
+            const { muxWorkerNative } = await import('./ytdl');
+            return muxWorkerNative(env, jobId, (dl as any).videoKey, (dl as any).audioKey);
+          })
+        : null;
       if (slotGated) {
         await step.do('download-slot-release', async () => {
           await releaseDownloadSlot(env, jobId);
@@ -266,8 +277,12 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         : false;
 
       // 2. ASR (ElevenLabs Scribe v2; chunked automatically for long files)
+      // Audio source for ASR: audio-first, else the downloaded audio stream
+      // (Worker-native full-video path), else the muxed/source key. Never dl.key
+      // alone on the native path — that key is the video-ONLY stream.
+      const audioSrcKey = audioFirstKey ?? (dl as any).audioKey ?? dl.key;
       const asr = await step.do('asr', ASR_CFG,
-        asrBody(audioFirstKey ?? dl.key, audioFirstKey ? audioFirstDur : dl.durationSec || 0));
+        asrBody(audioSrcKey, audioFirstKey ? audioFirstDur : dl.durationSec || 0));
       await markStage(env, jobId, 'translate', {
         asr_key: asr.asrKey,
         language_code: asr.languageCode,
@@ -300,7 +315,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             // attached so the model hears tone, pauses and emphasis while
             // translating and segmenting (fail-open — any clip failure falls
             // back to the text-only request).
-            const audioOpts = { jobId, sourceUrl: `https://cdn.deensubs.com/${audioFirstKey ?? dl.key}` };
+            const audioOpts = { jobId, sourceUrl: `https://cdn.deensubs.com/${audioSrcKey}` };
             const cues = isAudiobook
               ? await translateWordsAudiobook(env, data.words, lang, audioOpts)
               : await translateWords(env, data.words, lang, audioOpts);
@@ -509,6 +524,18 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         }
       }
 
+      // Rendezvous with the background mux: subtitles are done; make sure the
+      // muxed source.mp4 (video+audio) is ready and swap source_key to it before
+      // the job becomes publishable (the intermediate streams were deleted by
+      // muxWorkerNative). Fast in practice — the mux overlapped transcription.
+      if (muxStep) {
+        const muxed = await muxStep;
+        await updateJob(env.DB, jobId, { source_key: muxed.key });
+        // now safe to drop the intermediate streams — source_key points at the
+        // muxed file and no parallel step will read the video stream anymore.
+        env.MEDIA_BUCKET.delete((dl as any).videoKey).catch(() => {});
+        env.MEDIA_BUCKET.delete((dl as any).audioKey).catch(() => {});
+      }
       await markStage(env, jobId, 'done', {
         status: 'done',
         title: meta.title,

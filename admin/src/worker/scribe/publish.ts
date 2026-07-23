@@ -138,6 +138,11 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   const isAudiobook = !job.full_video;
   const extMatch = (job.source_key || '').match(/\.(mp4|webm|mkv|mov)$/i);
   if (!isAudiobook && !extMatch) throw new Error(`Source is ${job.source_key} — run fetch-video first or publish as audiobook`);
+  // The Worker-native full-video path serves the video-only stream as an interim
+  // source_key while the mux runs; refuse to publish that (it has no audio).
+  if (!isAudiobook && (job.source_key || '').includes('/tmp/')) {
+    throw new Error('Video is still being muxed (audio track pending) — try again in a moment.');
+  }
 
   const title = opts.title || job.title || jobId;
   const slug = (opts.slug || title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
