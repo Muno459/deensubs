@@ -82,8 +82,10 @@ async function socks5Tls(proxy: Proxy, destHost: string, destPort: number): Prom
   } finally {
     writer.releaseLock();
   }
-  // the socket now tunnels raw bytes to destHost:destPort — upgrade to TLS
-  return socket.startTls();
+  // the socket now tunnels raw bytes to destHost:destPort — upgrade to TLS.
+  // SNI/cert must validate against the DESTINATION (ElevenLabs), not the proxy
+  // we dialed, so pin expectedServerHostname to destHost.
+  return socket.startTls({ expectedServerHostname: destHost });
 }
 
 // ---- HTTP over the TLS socket --------------------------------------------
