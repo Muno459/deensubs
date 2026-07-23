@@ -15,6 +15,7 @@
 import { connect } from 'cloudflare:sockets';
 import { streamToR2 } from './download';
 import { containerCall, authStt } from './asr';
+import { AsrCoordinator } from './asr-coord';
 
 /** Race a promise against a timeout so a hung proxy socket can never stall a
  *  chunk for hours. A timeout is flagged rateLimited so the loop tries the next
@@ -202,35 +203,8 @@ async function proxyStt(proxyUrl: string, sourceUrl: string): Promise<any> {
 
 // ---- WS quota coordination (best-effort) ----------------------------------
 
-/** Lease `minutes` of ASR quota over the coordinator WS, run fn, release.
- *  If wsUrl is empty or the coordinator is unreachable, runs fn without a lease. */
-async function withQuotaLease<T>(cfg: AsrConfig, clientId: string, minutes: number, fn: () => Promise<T>): Promise<T> {
-  if (!cfg.wsUrl) return fn();
-  let ws: WebSocket | null = null;
-  let leaseId: string | null = null;
-  try {
-    const resp = await fetch(cfg.wsUrl.replace(/^ws/, 'http'), { headers: { Upgrade: 'websocket' } });
-    ws = (resp as any).webSocket as WebSocket | undefined || null;
-    if (!ws) return fn();
-    ws.accept();
-    const granted = await new Promise<boolean>((resolve) => {
-      const to = setTimeout(() => resolve(true), 4000); // don't block forever on a flaky coordinator
-      ws!.addEventListener('message', (e: any) => {
-        try {
-          const m = JSON.parse(typeof e.data === 'string' ? e.data : '');
-          if (m.type === 'lease_granted') { leaseId = m.lease_id; clearTimeout(to); resolve(true); }
-          else if (m.type === 'lease_denied') { clearTimeout(to); resolve(false); }
-        } catch {}
-      });
-      ws!.send(JSON.stringify({ type: 'lease_request', namespace: 'asr', minutes, queue: true, client_id: clientId }));
-    });
-    if (!granted) throw Object.assign(new Error('quota denied'), { rateLimited: true });
-    return await fn();
-  } finally {
-    try { if (ws && leaseId) ws.send(JSON.stringify({ type: 'lease_release', lease_id: leaseId, actual_minutes: minutes, success: true })); } catch {}
-    try { ws?.close(); } catch {}
-  }
-}
+// Quota leasing is handled by AsrCoordinator (asr-coord.ts) — the full
+// register / lease / refresh-drain protocol, one session per run.
 
 // ---- chunked orchestration ------------------------------------------------
 
@@ -260,6 +234,12 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
   for (let n = 0; n < names.length; n++) { offsets.push(acc); acc += durations[n] || chunkSec; }
 
   const proxies = cfg.proxies;
+  const nics = proxies.map((p) => { try { return parseProxy(p).user || 'default'; } catch { return 'default'; } });
+  // One coordinator session for the whole run: register + per-nic quota leases,
+  // IP-refresh drain/resume. Null if no wsUrl or the coordinator is unreachable
+  // (then we lease-free — the per-IP rate-limit still triggers proxy rotation).
+  const coord = await AsrCoordinator.connect(cfg.wsUrl, [...new Set(nics)]);
+  try {
   // round-robin the segments across proxies; retry a segment on the next proxy
   // when it comes back rate-limited (per-IP quota / IP flagged).
   const results = await Promise.all(names.map(async (name, n) => {
@@ -276,13 +256,29 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
     let data: any = null;
     let lastErr = '';
     for (let attempt = 0; attempt < proxies.length * 2; attempt++) {
-      const proxyUrl = proxies[(n + attempt) % proxies.length];
+      const idx = (n + attempt) % proxies.length;
+      const proxyUrl = proxies[idx];
+      const nic = nics[idx];
+      // Reserve quota for this modem before uploading. Denied → try the next
+      // modem; if all are dry, wait once for freed quota, then fall through.
+      let leaseId: string | undefined;
+      if (coord) {
+        const lease = await coord.lease(nic, minutes);
+        if (!lease.granted) {
+          lastErr = 'lease ' + (lease.reason || 'denied');
+          if (attempt >= proxies.length - 1) await coord.waitAvailable(15_000);
+          continue;
+        }
+        leaseId = lease.leaseId;
+      }
       try {
-        data = await withQuotaLease(cfg, `deensubs-${jobId}-${n}`, minutes, () =>
-          withTimeout(proxyStt(proxyUrl, chunkUrl), 180_000, `proxy STT (${new URL(proxyUrl.replace('socks5h', 'http').replace('socks5', 'http')).host})`));
-        if (data?.words?.length || data?.text) break;
+        data = await withTimeout(proxyStt(proxyUrl, chunkUrl), 180_000, `proxy STT (${nic})`);
+        const ok = !!(data?.words?.length || data?.text);
+        if (coord && leaseId) coord.release(leaseId, minutes, ok);
+        if (ok) break;
         lastErr = 'empty transcript';
       } catch (e: any) {
+        if (coord && leaseId) coord.release(leaseId, 0, false);
         lastErr = String(e?.message || e);
         if (!e?.rateLimited && attempt >= proxies.length) break; // non-quota error: give up after trying each proxy
         await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
@@ -314,4 +310,7 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
   containerCall(env, cName, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
   for (let n = 0; n < names.length; n++) env.MEDIA_BUCKET.delete(`scribe/${jobId}/asr-seg-${n}.json`).catch(() => {});
   return { language_code: languageCode, text, words: allWords, audio_duration_secs: acc };
+  } finally {
+    coord?.close();
+  }
 }
