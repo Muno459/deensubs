@@ -61,6 +61,7 @@ class Buf {
     this.q = this.q.slice(n);
     return out;
   }
+  release() { try { this.reader.releaseLock(); } catch {} }
 }
 
 /** Open a TLS tunnel to destHost:destPort THROUGH a SOCKS5 proxy. */
@@ -93,12 +94,17 @@ async function socks5Tls(proxy: Proxy, destHost: string, destPort: number): Prom
     const alen = atyp === 0x01 ? 4 : atyp === 0x04 ? 16 : (await buf.readN(1))[0];
     await buf.readN(alen + 2); // drain BND.ADDR + BND.PORT
   } finally {
+    // release BOTH locks before startTls — it needs to take over the socket's
+    // streams, and a still-locked reader throws "ReadableStream is locked".
+    buf.release();
     writer.releaseLock();
   }
   // the socket now tunnels raw bytes to destHost:destPort — upgrade to TLS.
   // SNI/cert must validate against the DESTINATION (ElevenLabs), not the proxy
   // we dialed, so pin expectedServerHostname to destHost.
-  return socket.startTls({ expectedServerHostname: destHost });
+  const tls = socket.startTls({ expectedServerHostname: destHost });
+  await tls.opened;
+  return tls;
 }
 
 // ---- HTTP over the TLS socket --------------------------------------------
