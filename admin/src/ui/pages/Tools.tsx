@@ -12,7 +12,7 @@ function AsrSettings() {
   const [mode, setMode] = useState('auto');
   const [chunk, setChunk] = useState('80');
   const [proxies, setProxies] = useState('');
-  const [wsUrl, setWsUrl] = useState('');
+  const [ytProxy, setYtProxy] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
 
@@ -21,7 +21,7 @@ function AsrSettings() {
     setMode(data.mode || 'auto');
     setChunk(String(data.chunkMinutes ?? 80));
     setProxies((data.proxies || []).join('\n'));
-    setWsUrl(data.wsUrl || '');
+    setYtProxy(data.ytProxy || '');
   }, [data]);
 
   async function save() {
@@ -31,7 +31,7 @@ function AsrSettings() {
         mode,
         chunkMinutes: Number(chunk) || 80,
         proxies: proxies.split('\n').map((s) => s.trim()).filter(Boolean),
-        wsUrl: wsUrl.trim(),
+        ytProxy: ytProxy.trim(),
       }) });
       setSaved('Saved — active mode: ' + r.activeMode);
       refetch();
@@ -54,8 +54,9 @@ function AsrSettings() {
       </SectionTitle>
       <p className="text-[13px] leading-relaxed text-muted">
         With an API key set, the whole file transcribes in one request (no chunking, synchronous response — this is what
-        fixes the 2-hour timeouts). Without a key, audio is chunked and sent unauthenticated through your SOCKS proxies
-        (residential IPs) via <code className="text-cream/80">source_url</code>, quota coordinated over a WebSocket.
+        fixes the 2-hour timeouts). In proxy mode, audio is chunked and sent unauthenticated through rotating residential
+        proxies via <code className="text-cream/80">source_url</code>; each attempt regenerates the{' '}
+        <code className="text-cream/80">{'{SESSION}'}</code> id so every chunk lands on a fresh IP (no coordinator needed).
       </p>
 
       <div className="mt-3 flex items-center gap-2 text-[12px]">
@@ -89,13 +90,13 @@ function AsrSettings() {
           <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
             <div>
               <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">
-                SOCKS proxies (one per line)
+                ElevenLabs STT proxies (one per line)
               </label>
               <textarea
                 className={inputCls + ' h-20 w-full resize-y font-mono text-[12px]'}
                 value={proxies}
                 onChange={(e) => setProxies(e.target.value)}
-                placeholder="socks5://user:pass@host:1080&#10;socks5://user:pass@host2:1080"
+                placeholder="socks5h://user:pass_session-{SESSION}_lifetime-10m@geo.spyderproxy.com:12321"
               />
             </div>
             <div className="sm:w-28">
@@ -104,13 +105,13 @@ function AsrSettings() {
             </div>
           </div>
           <label className="mb-1.5 mt-3 block text-[11px] font-semibold uppercase tracking-wide text-faint">
-            Quota-coordination WebSocket
+            YouTube /player proxy (rotating) — extraction only, download stays on the Worker
           </label>
           <input
             className={inputCls + ' w-full font-mono text-[12px]'}
-            value={wsUrl}
-            onChange={(e) => setWsUrl(e.target.value)}
-            placeholder="ws://unifi.padborghotel.dk:5556/api/coord/ws"
+            value={ytProxy}
+            onChange={(e) => setYtProxy(e.target.value)}
+            placeholder="socks5h://user:pass@geo.spyderproxy.com:12321"
           />
         </div>
 

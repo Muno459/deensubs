@@ -196,7 +196,9 @@ async function extractPlayer(env: ScribeEnv, url: string): Promise<any> {
   const videoId = videoIdOf(url);
   if (!videoId) throw new Error('not a YouTube video url');
   const cfg = await getAsrConfig(env);
-  const proxyUrl = cfg.proxies?.[0];
+  // Rotating residential proxy for /player extraction only — the byte download
+  // stays Worker-native. Falls back to the ASR proxy list if ytProxy is unset.
+  const proxyUrl = cfg.ytProxy || cfg.proxies?.[0];
   if (!proxyUrl) throw new Error('no proxy configured for extraction');
   let player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId));
   if (player?.playabilityStatus?.status !== 'OK') {

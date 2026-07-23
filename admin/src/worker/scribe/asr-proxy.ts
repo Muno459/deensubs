@@ -22,7 +22,6 @@
 import { connect } from 'cloudflare:sockets';
 import { streamToR2 } from './download';
 import { containerCall } from './asr';
-import { AsrCoordinator } from './asr-coord';
 import { Tls13 } from './tls13';
 
 /** Race a promise against a timeout so a hung proxy socket can never stall a
@@ -51,6 +50,13 @@ function parseProxy(url: string): Proxy {
   const m = url.trim().match(/^socks(?:5h?|4)?:\/\/(?:([^:@\/]+):([^@\/]+)@)?([^:\/]+):(\d+)\/?$/i);
   if (!m) throw new Error('bad SOCKS proxy url (want socks5[h]://[user:pass@]host:port): ' + url);
   return { user: m[1], pass: m[2], host: m[3], port: parseInt(m[4], 10) };
+}
+
+/** Replace a `{SESSION}` placeholder with a fresh random id so each request
+ *  lands on a new SpyderProxy sticky session (a new residential IP). Rotating or
+ *  fixed URLs (no placeholder) are returned unchanged. */
+export function freshSession(url: string): string {
+  return url.replace(/\{SESSION\}/gi, () => crypto.randomUUID().replace(/-/g, '').slice(0, 12));
 }
 
 // ---- SOCKS5 handshake (plaintext, over a raw socket) ----------------------
@@ -170,12 +176,10 @@ async function proxyStt(proxyUrl: string, sourceUrl: string): Promise<any> {
   }
 }
 
-// ---- WS quota coordination (best-effort) ----------------------------------
-
-// Quota leasing is handled by AsrCoordinator (asr-coord.ts) — the full
-// register / lease / refresh-drain protocol, one session per run.
-
 // ---- chunked orchestration ------------------------------------------------
+// No quota coordinator: SpyderProxy issues a fresh residential IP per session,
+// so there is no shared per-IP quota to coordinate (each attempt regenerates the
+// session id via freshSession()).
 
 /** Split (container) → transcribe each chunk through a proxy → merge. */
 export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: AsrConfig): Promise<any> {
@@ -203,14 +207,13 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
   for (let n = 0; n < names.length; n++) { offsets.push(acc); acc += durations[n] || chunkSec; }
 
   const proxies = cfg.proxies;
-  const nics = proxies.map((p) => { try { return parseProxy(p).user || 'default'; } catch { return 'default'; } });
-  // One coordinator session for the whole run: register + per-nic quota leases,
-  // IP-refresh drain/resume. Null if no wsUrl or the coordinator is unreachable
-  // (then we lease-free — the per-IP rate-limit still triggers proxy rotation).
-  const coord = await AsrCoordinator.connect(cfg.wsUrl, [...new Set(nics)]);
-  try {
-  // round-robin the segments across proxies; retry a segment on the next proxy
-  // when it comes back rate-limited (per-IP quota / IP flagged).
+  if (!proxies.length) throw new Error('proxy ASR selected but no proxies are configured');
+
+  // Each segment is transcribed through a rotating residential proxy. Every
+  // attempt regenerates the proxy session ({SESSION} → fresh id), landing on a
+  // NEW residential IP, so a rate-limited/flagged IP is simply replaced. No
+  // quota coordinator: SpyderProxy hands out a fresh IP per session, so there is
+  // no shared per-IP quota to coordinate.
   const results = await Promise.all(names.map(async (name, n) => {
     const segKey = `scribe/${jobId}/asr-seg-${n}.json`;
     const cached = await env.MEDIA_BUCKET.get(segKey);
@@ -220,43 +223,23 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
     const chunkKey = `scribe/${jobId}/${name}`;
     await streamToR2(env.MEDIA_BUCKET, chunkKey, file.body, 'audio/mp4');
     const chunkUrl = `${CDN_BASE}/${chunkKey}`;
-    const minutes = (durations[n] || chunkSec) / 60;
 
     let data: any = null;
     let lastErr = '';
-    for (let attempt = 0; attempt < proxies.length * 2; attempt++) {
-      const idx = (n + attempt) % proxies.length;
-      const proxyUrl = proxies[idx];
-      const nic = nics[idx];
-      // Reserve quota for this modem before uploading. Denied → try the next
-      // modem; if all are dry, wait once for freed quota, then fall through.
-      let leaseId: string | undefined;
-      if (coord) {
-        const lease = await coord.lease(nic, minutes);
-        if (!lease.granted) {
-          lastErr = 'lease ' + (lease.reason || 'denied');
-          if (attempt >= proxies.length - 1) await coord.waitAvailable(15_000);
-          continue;
-        }
-        leaseId = lease.leaseId;
-      }
+    const maxAttempts = Math.max(6, proxies.length * 2);
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const proxyUrl = freshSession(proxies[attempt % proxies.length]);
       try {
-        data = await withTimeout(proxyStt(proxyUrl, chunkUrl), 190_000, `proxy STT (${nic})`);
-        const ok = !!(data?.words?.length || data?.text);
-        if (coord && leaseId) coord.release(leaseId, minutes, ok);
-        if (ok) break;
+        data = await withTimeout(proxyStt(proxyUrl, chunkUrl), 190_000, 'proxy STT');
+        if (data?.words?.length || data?.text) break;
         lastErr = 'empty transcript';
       } catch (e: any) {
-        if (coord && leaseId) coord.release(leaseId, 0, false);
         lastErr = String(e?.message || e);
-        if (!e?.rateLimited && attempt >= proxies.length) break; // non-quota error: give up after trying each proxy
-        await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
       }
     }
-    // No authenticated fallback here: the API key is ONLY ever used for the
-    // whole-file authenticated path (never on a chunk). Proxy mode is proxy-only
-    // — if every proxy fails this chunk, the job fails rather than quietly
-    // spending API quota on a chunked request.
+    // No authenticated fallback: the API key is ONLY the whole-file authenticated
+    // path (never a chunk). Proxy mode is proxy-only.
     if (!data || !(data.words?.length || data.text)) throw new Error(`segment ${n} failed via all proxies: ${lastErr}`);
     await env.MEDIA_BUCKET.put(segKey, JSON.stringify(data), { httpMetadata: { contentType: 'application/json' } });
     await env.MEDIA_BUCKET.delete(chunkKey).catch(() => {});
@@ -277,7 +260,4 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
   containerCall(env, cName, `/files/${id}`, { method: 'DELETE' }).catch(() => {});
   for (let n = 0; n < names.length; n++) env.MEDIA_BUCKET.delete(`scribe/${jobId}/asr-seg-${n}.json`).catch(() => {});
   return { language_code: languageCode, text, words: allWords, audio_duration_secs: acc };
-  } finally {
-    coord?.close();
-  }
 }

@@ -11,14 +11,17 @@
 export type AsrConfig = {
   mode: 'auto' | 'authenticated' | 'proxy';
   chunkMinutes: number; // proxy-mode segment length (ElevenLabs edge ~caps long unauth calls)
-  proxies: string[]; // SOCKS5 URLs: socks5://user:pass@host:port  (the 2 Padborg modems)
-  wsUrl: string; // quota-coordination WebSocket, e.g. ws://unifi.padborghotel.dk:5556/api/coord/ws
+  proxies: string[]; // SOCKS5 URLs for ElevenLabs STT; a `{SESSION}` placeholder is
+                     // replaced per request with a fresh id (SpyderProxy sticky session)
+  ytProxy: string; // SOCKS5 URL for the YouTube /player extraction (rotating). Download stays Worker-native.
+  wsUrl: string; // legacy quota-coordination WebSocket (unused — coordinator disabled)
 };
 
 export const DEFAULT_ASR_CONFIG: AsrConfig = {
   mode: 'auto',
   chunkMinutes: 80,
   proxies: [],
+  ytProxy: '',
   wsUrl: '',
 };
 
@@ -46,6 +49,7 @@ export async function putAsrConfig(env: any, cfg: Partial<AsrConfig>): Promise<A
     mode: (['auto', 'authenticated', 'proxy'] as const).includes(merged.mode as any) ? merged.mode : 'auto',
     chunkMinutes: Math.max(5, Math.min(120, Number(merged.chunkMinutes) || 80)),
     proxies: (merged.proxies || []).filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim()),
+    ytProxy: (merged.ytProxy || '').trim(),
     wsUrl: (merged.wsUrl || '').trim(),
   };
   await env.MEDIA_KV?.put(KV_KEY, JSON.stringify(clean));
