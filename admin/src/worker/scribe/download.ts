@@ -287,6 +287,13 @@ export async function downloadAudioOnly(env: ScribeEnv, jobId: string, url: stri
     const h = await env.MEDIA_BUCKET.head(k);
     if (h && h.size > 10_000) return { key: k, durationSec: 0 };
   }
+  // Worker-native first: extract via proxy, range-download direct (no browser).
+  try {
+    const { ytdlAudioFirst } = await import('./ytdl');
+    return await ytdlAudioFirst(env, jobId, url);
+  } catch (e: any) {
+    console.log('ytdl audio-first failed, falling back to Browser Rendering: ' + (e?.message || e));
+  }
   const m = await yt.browserMintCached(env, videoId);
   const a = m.audio[0];
   if (!a) throw new Error('no audio format available');

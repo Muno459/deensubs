@@ -170,16 +170,17 @@ async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: n
   } catch (e) { try { await mpu.abort(); } catch {} throw e; }
 }
 
-/** Worker-native YouTube AUDIO download. Throws (caller falls back to the
- *  container) if the proxy/config is missing or extraction fails. */
-export async function ytdlWorkerNative(env: ScribeEnv, jobId: string, url: string): Promise<DownloadResult> {
+type AudioCore = { key: string; bytes: number; durationSec: number; title?: string; channel?: string; thumbUrl?: string };
+
+/** Extract (via proxy) + range-download the best audio to `key` in R2. */
+async function ytdlAudioCore(env: ScribeEnv, jobId: string, url: string, key: string, writePct: boolean): Promise<AudioCore> {
   const videoId = videoIdOf(url);
   if (!videoId) throw new Error('not a YouTube video url');
   const cfg = await getAsrConfig(env);
   const proxyUrl = cfg.proxies?.[0];
   if (!proxyUrl) throw new Error('no proxy configured for extraction');
 
-  // extract with a cached session; on LOGIN_REQUIRED refresh the session once
+  // extract with a cached session; on non-OK refresh the session once
   let player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId));
   if (player?.playabilityStatus?.status !== 'OK') {
     player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId, true));
@@ -190,18 +191,26 @@ export async function ytdlWorkerNative(env: ScribeEnv, jobId: string, url: strin
   const a = pickAudio(player);
   const total = parseInt(a.contentLength || '0', 10);
   if (!total) throw new Error('audio format has no contentLength');
-  const key = `scribe/${jobId}/source.m4a`;
-  const pctWriter = throttledPct(env, jobId, total);
-  const bytes = await downloadToR2(env.MEDIA_BUCKET, key, a.url, total, 'audio/mp4', pctWriter);
+  const bytes = await downloadToR2(env.MEDIA_BUCKET, key, a.url, total, 'audio/mp4', writePct ? throttledPct(env, jobId, total) : undefined);
+  if (bytes < 10_000) throw new Error(`audio too small (${bytes} bytes)`);
 
   const vd = player.videoDetails || {};
   const thumbs = vd.thumbnail?.thumbnails || [];
-  return {
-    key, method: 'yt-dlp', contentType: 'audio/mp4', bytes,
-    title: vd.title, channel: vd.author,
-    thumbUrl: thumbs.length ? thumbs[thumbs.length - 1].url : undefined,
-    durationSec: parseInt(vd.lengthSeconds || '0', 10),
-  };
+  return { key, bytes, durationSec: parseInt(vd.lengthSeconds || '0', 10), title: vd.title, channel: vd.author, thumbUrl: thumbs.length ? thumbs[thumbs.length - 1].url : undefined };
+}
+
+/** Worker-native YouTube AUDIO download (source). Throws → caller falls back
+ *  to the container. */
+export async function ytdlWorkerNative(env: ScribeEnv, jobId: string, url: string): Promise<DownloadResult> {
+  const r = await ytdlAudioCore(env, jobId, url, `scribe/${jobId}/source.m4a`, true);
+  return { key: r.key, method: 'yt-dlp', contentType: 'audio/mp4', bytes: r.bytes, title: r.title, channel: r.channel, thumbUrl: r.thumbUrl, durationSec: r.durationSec };
+}
+
+/** Audio-first (full-video jobs): grab just the audio so ASR starts instantly
+ *  while the video downloads. Throws → caller falls back to Browser Rendering. */
+export async function ytdlAudioFirst(env: ScribeEnv, jobId: string, url: string): Promise<{ key: string; durationSec: number }> {
+  const r = await ytdlAudioCore(env, jobId, url, `scribe/${jobId}/audio-first.m4a`, false);
+  return { key: r.key, durationSec: r.durationSec };
 }
 
 function throttledPct(env: ScribeEnv, jobId: string, total: number): (n: number) => void {
