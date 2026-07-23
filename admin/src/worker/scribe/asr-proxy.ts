@@ -27,8 +27,10 @@ const STT_PATH = '/v1/speech-to-text?allow_unauthenticated=1';
 type Proxy = { host: string; port: number; user?: string; pass?: string };
 
 function parseProxy(url: string): Proxy {
-  const m = url.trim().match(/^socks5?:\/\/(?:([^:@\/]+):([^@\/]+)@)?([^:\/]+):(\d+)\/?$/i);
-  if (!m) throw new Error('bad SOCKS proxy url (want socks5://[user:pass@]host:port): ' + url);
+  // socks5:// and socks5h:// are equivalent for us — we always CONNECT by
+  // domain (ATYP 0x03), so the proxy resolves the hostname either way.
+  const m = url.trim().match(/^socks(?:5h?|4)?:\/\/(?:([^:@\/]+):([^@\/]+)@)?([^:\/]+):(\d+)\/?$/i);
+  if (!m) throw new Error('bad SOCKS proxy url (want socks5[h]://[user:pass@]host:port): ' + url);
   return { user: m[1], pass: m[2], host: m[3], port: parseInt(m[4], 10) };
 }
 
