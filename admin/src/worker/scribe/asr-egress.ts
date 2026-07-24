@@ -1,10 +1,13 @@
 import type { ScribeEnv } from './types';
 
-/** A Durable Object placed (via `locationHint`) in a specific Cloudflare region
- *  so its outbound `fetch` egresses from THAT region's IP. Used to multiply the
- *  unauthenticated ElevenLabs STT per-IP quota: each region is a distinct egress
- *  IP with its own ~8-clip quota, and each instance transcribes a WHOLE file
- *  from its own IP (no chunking). Verified: 9 region hints → distinct egress IPv4. */
+/** A Durable Object placed (via `locationHint`) in a specific Cloudflare region.
+ *  Distinct DO instances land in distinct data centers (colos) within a region,
+ *  each with its own egress IP — and ElevenLabs' unauthenticated STT quota is
+ *  strictly PER-IP (~8 clips; verified: an exhausted IP 401s while every other
+ *  colo IP still 200s, even within the same /16 and the same ASN). So rotating a
+ *  pool of these instances (asr.ts `unauthAsr`) multiplies the free quota by the
+ *  number of distinct colo IPs (~24 measured across 8 instances × 9 regions),
+ *  each transcribing a WHOLE file from its own IP — no chunking. */
 export class AsrEgress {
   private env: ScribeEnv;
   constructor(_state: DurableObjectState, env: ScribeEnv) {
@@ -17,7 +20,7 @@ export class AsrEgress {
       const data = await directUnauthStt(this.env, url, /* withFormats */ true, /* attempts */ 1);
       return Response.json(data);
     } catch (e: any) {
-      // 502 → caller rotates to the next region / falls back to the proxy.
+      // 502 → caller rotates to the next pool instance / falls back to the proxy.
       return new Response(String(e?.message || e).slice(0, 200), { status: 502 });
     }
   }

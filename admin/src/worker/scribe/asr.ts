@@ -278,29 +278,55 @@ export async function directUnauthStt(env: ScribeEnv, sourceUrl: string, withFor
   throw new Error(lastErr);
 }
 
-// Cloudflare regions → distinct egress IPs (verified). Rotating across them
-// multiplies the unauth per-IP quota by ~9 while keeping WHOLE-file (no chunk).
+// The 9 Cloudflare Durable Object `locationHint` regions. Within EACH region,
+// distinct DO instances land in distinct data centers (colos), each with its own
+// egress IP — so the pool of distinct IPs is regions × instances, not just 9.
 const ASR_REGIONS = ['weur', 'enam', 'wnam', 'apac', 'eeur', 'sam', 'oc', 'afr', 'me'];
+// Instances per region. MEASURED: each region saturates at ~4-6 reachable colos,
+// so 8 instances/region harvests ~25-30 DISTINCT egress IPs across the pool.
+// Each IP has its own ~8-clip unauth quota (proven per-IP, not per-subnet/ASN),
+// so the pool is worth ~200+ whole-file transcriptions per quota window — enough
+// that the residential-proxy fallback is effectively never reached.
+const ASR_POOL_PER_REGION = 8;
+
+/** Deterministic per-job shuffle of [0, len). Spreads quota usage across the IP
+ *  pool (consecutive jobs start at different IPs) while staying reproducible on a
+ *  workflow-step retry. Seeded FNV-1a → LCG Fisher-Yates. */
+function seededOrder(len: number, seed: string): number[] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+  let s = h >>> 0;
+  const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+  const idx = Array.from({ length: len }, (_, i) => i);
+  for (let i = len - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+  return idx;
+}
 
 /** Free ASR at scale. The unauth endpoint caps at ~8 clips per SOURCE IP, so:
  *   1) transcribe the whole file from THIS Worker's egress IP;
- *   2) on rate-limit, retry from region-placed egress DOs (each a distinct IP →
- *      its own quota) — still whole-file, no chunking;
- *   3) only if every Cloudflare IP is exhausted, fall back to the residential
- *      proxy (unlimited fresh IPs, but chunked). */
+ *   2) on rate-limit, rotate through a POOL of region-placed egress DOs — each a
+ *      distinct colo IP with its own quota (still whole-file, no chunking). An
+ *      exhausted IP 401s in ~1-2s (no transcription) so skipping it is cheap;
+ *   3) only if EVERY pool IP is exhausted, fall back to the residential proxy
+ *      (unlimited fresh IPs, but chunked). */
 async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: AsrConfig): Promise<any> {
   const url = `${CDN_BASE}/${sourceKey}`;
   const ok = (d: any) => !!(d && (d.words?.length || d.text));
 
-  try { const d = await directUnauthStt(env, url, /* withFormats */ true, /* attempts */ 2); if (ok(d)) return d; } catch { /* rate-limited → regions */ }
+  try { const d = await directUnauthStt(env, url, /* withFormats */ true, /* attempts */ 2); if (ok(d)) return d; } catch { /* rate-limited → pool */ }
 
   if (env.ASR_EGRESS) {
-    for (const h of ASR_REGIONS) {
+    // Build the region × instance pool, then walk it in a per-job shuffled order
+    // so load spreads and we don't always exhaust the same IPs first.
+    const pool: { r: string; n: number }[] = [];
+    for (const r of ASR_REGIONS) for (let n = 0; n < ASR_POOL_PER_REGION; n++) pool.push({ r, n });
+    for (const i of seededOrder(pool.length, jobId)) {
+      const { r, n } = pool[i];
       try {
-        const stub = env.ASR_EGRESS.get(env.ASR_EGRESS.idFromName('asr-egress-' + h), { locationHint: h as any });
-        const r = await stub.fetch('https://asr/', { method: 'POST', body: JSON.stringify({ url }) });
-        if (r.ok) { const d: any = await r.json(); if (ok(d)) return d; }
-      } catch { /* next region */ }
+        const stub = env.ASR_EGRESS.get(env.ASR_EGRESS.idFromName(`asr-egress-${r}-${n}`), { locationHint: r as any });
+        const resp = await stub.fetch('https://asr/', { method: 'POST', body: JSON.stringify({ url }) });
+        if (resp.ok) { const d: any = await resp.json(); if (ok(d)) return d; }
+      } catch { /* next instance */ }
     }
   }
 
@@ -308,7 +334,7 @@ async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: 
     console.log('all Cloudflare egress IPs exhausted/failed → proxy-chunked fallback');
     return (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg);
   }
-  throw new Error('unauth STT failed on this Worker + all regions, and no proxy fallback configured');
+  throw new Error('unauth STT failed on this Worker + all pool IPs, and no proxy fallback configured');
 }
 
 /** Resolve + validate the ASR plan. Throws immediately on misconfiguration so
