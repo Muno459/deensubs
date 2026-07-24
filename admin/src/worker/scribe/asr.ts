@@ -302,19 +302,26 @@ function seededOrder(len: number, seed: string): number[] {
   return idx;
 }
 
-/** Free ASR at scale. The unauth endpoint caps at ~8 clips per SOURCE IP, so:
- *   1) transcribe the whole file from THIS Worker's egress IP;
- *   2) on rate-limit, rotate through a POOL of region-placed egress DOs — each a
- *      distinct colo IP with its own quota (still whole-file, no chunking). An
+/** Free-first ASR with a reliable paid backstop. The unauth endpoint caps at ~8
+ *  clips per SOURCE IP, so the tiers escalate cheapest → most reliable:
+ *   1) CF free: transcribe the whole file from THIS Worker's egress IP;
+ *   2) CF free: on rate-limit, rotate through a POOL of region-placed egress DOs
+ *      — each a distinct colo IP with its own quota (still whole-file). An
  *      exhausted IP 401s in ~1-2s (no transcription) so skipping it is cheap;
- *   3) only if EVERY pool IP is exhausted, fall back to the residential proxy
- *      (unlimited fresh IPs, but chunked). */
+ *   3) SpyderProxy: only if EVERY CF pool IP is exhausted, the residential proxy
+ *      (unlimited fresh IPs, chunked). It is UNRELIABLE (can't hold the TCP
+ *      connection long), so its failure falls THROUGH to the paid backstop;
+ *   4) authenticated: the paid ElevenLabs API key, whole file — reliable last
+ *      resort, reached only when every free tier + the proxy couldn't serve it,
+ *      so we never pay when a cheaper tier can. */
 async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: AsrConfig): Promise<any> {
   const url = `${CDN_BASE}/${sourceKey}`;
   const ok = (d: any) => !!(d && (d.words?.length || d.text));
 
+  // Tier 1 — this Worker's own egress IP.
   try { const d = await directUnauthStt(env, url, /* withFormats */ true, /* attempts */ 2); if (ok(d)) return d; } catch { /* rate-limited → pool */ }
 
+  // Tier 2 — the CF region × instance colo pool (distinct free IPs).
   if (env.ASR_EGRESS) {
     // Build the region × instance pool, then walk it in a per-job shuffled order
     // so load spreads and we don't always exhaust the same IPs first.
@@ -330,11 +337,26 @@ async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: 
     }
   }
 
+  // Tier 3 — SpyderProxy residential (unreliable): wrap it so a failed/empty
+  // result falls THROUGH to the authenticated backstop instead of throwing.
   if (cfg.proxies?.length) {
-    console.log('all Cloudflare egress IPs exhausted/failed → proxy-chunked fallback');
-    return (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg);
+    try {
+      console.log('all Cloudflare egress IPs exhausted → SpyderProxy chunked fallback');
+      const d = await (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg);
+      if (ok(d)) return d;
+      console.log('SpyderProxy returned no transcript → authenticated fallback');
+    } catch (e: any) {
+      console.log('SpyderProxy fallback failed → authenticated fallback:', String(e?.message || e).slice(0, 160));
+    }
   }
-  throw new Error('unauth STT failed on this Worker + all pool IPs, and no proxy fallback configured');
+
+  // Tier 4 — authenticated whole-file (paid, reliable). Last resort.
+  if (env.ELEVENLABS_API_KEY) {
+    console.log('final fallback → authenticated ElevenLabs API (whole file)');
+    return sttCall(env, url, undefined, 5, /* withFormats */ true, /* forceSync */ true);
+  }
+
+  throw new Error('ASR failed: Worker IP + CF pool exhausted, proxy fallback failed/absent, and no ELEVENLABS_API_KEY for the authenticated backstop');
 }
 
 /** Resolve + validate the ASR plan. Throws immediately on misconfiguration so

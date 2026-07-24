@@ -73,9 +73,11 @@ export async function putAsrConfig(env: any, cfg: Partial<AsrConfig>): Promise<A
   return clean;
 }
 
-/** Which mode actually runs, given the config + whether an API key is present. */
-export function resolveAsrMode(cfg: AsrConfig, hasApiKey: boolean): 'authenticated' | 'proxy' {
-  if (cfg.mode === 'authenticated') return 'authenticated';
-  if (cfg.mode === 'proxy') return 'proxy';
-  return hasApiKey ? 'authenticated' : 'proxy'; // auto
+/** Which mode actually runs. `authenticated` FORCES the paid API for the whole
+ *  file (skips the free tiers). `proxy` and `auto` both run the free-first chain
+ *  (CF colo pool → SpyderProxy → authenticated backstop; see asr.ts `unauthAsr`),
+ *  so we never pay when a cheaper tier can serve the request — even when an API
+ *  key is configured, the key is only the final fallback, not the default. */
+export function resolveAsrMode(cfg: AsrConfig, _hasApiKey: boolean): 'authenticated' | 'proxy' {
+  return cfg.mode === 'authenticated' ? 'authenticated' : 'proxy';
 }
