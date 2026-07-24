@@ -263,11 +263,23 @@ export async function directUnauthStt(env: ScribeEnv, sourceUrl: string, withFor
         { format: 'segmented_json', ...seg },
       ]));
     }
-    const res = await fetch(`${STT_URL}?allow_unauthenticated=1`, {
-      method: 'POST',
-      headers: { origin: 'https://elevenlabs.io', referer: 'https://elevenlabs.io/' },
-      body: form,
-    });
+    let res: Response;
+    try {
+      // Hard per-request deadline so a hung/slow ElevenLabs fetch can never stall
+      // a job. A real whole-file transcription is ~45-120s (a 90-min file was
+      // ~81s), so 150s clears the slowest legit case; past that it's a hang.
+      res = await fetch(`${STT_URL}?allow_unauthenticated=1`, {
+        method: 'POST',
+        headers: { origin: 'https://elevenlabs.io', referer: 'https://elevenlabs.io/' },
+        body: form,
+        signal: AbortSignal.timeout(150_000),
+      });
+    } catch (e: any) {
+      // Timeout/network error: don't retry the SAME IP — let the caller rotate to
+      // a fresh colo IP (tier 2) rather than re-hitting a slow/hung endpoint.
+      lastErr = `unauth STT fetch failed: ${String(e?.name || e?.message || e).slice(0, 120)}`;
+      break;
+    }
     if (res.ok) return res.json();
     const body = await res.text().catch(() => '');
     lastErr = `unauth STT HTTP ${res.status}: ${body.slice(0, 200)}`;
