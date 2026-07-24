@@ -3,6 +3,8 @@
 export type ScribeEnv = {
   DB: D1Database;
   MEDIA_BUCKET: R2Bucket;
+  MEDIA_KV: KVNamespace; // ASR config + the egress-IP cooldown cache
+
   MYBROWSER: Fetcher; // Cloudflare Browser Rendering (primary YouTube download)
   YTDLP: DurableObjectNamespace; // small container: download + probe + mux + thumbs + split
   CLIP: DurableObjectNamespace; // bigger container: CPU-heavy clip renders + image grading

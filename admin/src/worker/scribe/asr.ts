@@ -314,13 +314,44 @@ function seededOrder(len: number, seed: string): number[] {
   return idx;
 }
 
+// Which CF egress IPs are "cooling" (hit their unauth 401) → skip them in the
+// first pass. Stored in KV as { sourceKey: expiryEpochMs }. Soft: cooled IPs are
+// still re-checked (oldest-first, capped) before the proxy, so recovery is caught.
+const COOLDOWN_KEY = 'asr:ip-cooldown';
+const COOLED_RECHECK_CAP = 8; // longest-cooled IPs to re-probe per job before the proxy
+
+const is401 = (x: any): boolean =>
+  /\b401\b|sign[_ -]?in|reached the limit|too many|rate limit|quota/i.test(String(x?.message ?? x ?? ''));
+
+async function readCooldown(env: ScribeEnv): Promise<Record<string, number>> {
+  try {
+    const raw = await env.MEDIA_KV?.get(COOLDOWN_KEY);
+    if (!raw) return {};
+    const m = JSON.parse(raw) as Record<string, number>;
+    const now = Date.now();
+    for (const k of Object.keys(m)) if (!(m[k] > now)) delete m[k]; // drop expired
+    return m;
+  } catch { return {}; }
+}
+
+/** Merge this job's cooldown changes into the latest KV map (best-effort — a lost
+ *  concurrent write just means one extra re-probe later). Writes only if changed. */
+async function flushCooldown(env: ScribeEnv, pending: Record<string, number | null>): Promise<void> {
+  if (!Object.keys(pending).length) return;
+  try {
+    const latest = await readCooldown(env);
+    for (const [k, v] of Object.entries(pending)) { if (v === null) delete latest[k]; else latest[k] = v; }
+    await env.MEDIA_KV?.put(COOLDOWN_KEY, JSON.stringify(latest));
+  } catch {}
+}
+
 /** Free-first ASR with a reliable paid backstop. The unauth endpoint caps at ~8
  *  clips per SOURCE IP, so the tiers escalate cheapest → most reliable:
- *   1) CF free: transcribe the whole file from THIS Worker's egress IP;
- *   2) CF free: on rate-limit, rotate through a POOL of region-placed egress DOs
- *      — each a distinct colo IP with its own quota (still whole-file). An
- *      exhausted IP 401s in ~1-2s (no transcription) so skipping it is cheap;
- *   3) SpyderProxy: only if EVERY CF pool IP is exhausted, the residential proxy
+ *   1+2) CF free: the whole file from a distinct egress IP — this Worker's own IP
+ *      plus a POOL of region-placed colo DOs. A cooldown cache skips IPs known to
+ *      be rate-limited (saving their ~6s 401) and re-checks the longest-cooled few
+ *      for recovery before giving up on CF;
+ *   3) SpyderProxy: only if EVERY CF IP is exhausted, the residential proxy
  *      (unlimited fresh IPs, chunked). It is UNRELIABLE (can't hold the TCP
  *      connection long), so its failure falls THROUGH to the paid backstop;
  *   4) authenticated: the paid ElevenLabs API key, whole file — reliable last
@@ -330,24 +361,54 @@ async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: 
   const url = `${CDN_BASE}/${sourceKey}`;
   const ok = (d: any) => !!(d && (d.words?.length || d.text));
 
-  // Tier 1 — this Worker's own egress IP.
-  try { const d = await directUnauthStt(env, url, /* withFormats */ true, /* attempts */ 2); if (ok(d)) return d; } catch { /* rate-limited → pool */ }
+  // --- CF free tiers (Worker IP + colo pool), rotated with a cooldown cache ---
+  const ttlMs = (cfg.cooldownHours ?? 3) * 3_600_000;
+  const cooldown = ttlMs > 0 ? await readCooldown(env) : {};
+  const now = Date.now();
+  const pending: Record<string, number | null> = {};
+  const isCool = (k: string) => (k in pending ? pending[k] !== null : (cooldown[k] ?? 0) > now);
+  const cool = (k: string) => { if (ttlMs > 0 && !isCool(k)) pending[k] = now + ttlMs; };
+  const uncool = (k: string) => { if (isCool(k)) pending[k] = null; };
 
-  // Tier 2 — the CF region × instance colo pool (distinct free IPs).
+  // Every CF source: the local Worker IP + each region colo DO instance.
+  type Src = { key: string; run: () => Promise<{ data?: any; rateLimited: boolean }> };
+  const srcs: Src[] = [{
+    key: 'local',
+    run: async () => {
+      try { const d = await directUnauthStt(env, url, /* withFormats */ true, /* attempts */ 2); return { data: ok(d) ? d : undefined, rateLimited: false }; }
+      catch (e) { return { rateLimited: is401(e) }; }
+    },
+  }];
   if (env.ASR_EGRESS) {
-    // Build the region × instance pool, then walk it in a per-job shuffled order
-    // so load spreads and we don't always exhaust the same IPs first.
-    const pool: { r: string; n: number }[] = [];
-    for (const r of ASR_REGIONS) for (let n = 0; n < ASR_POOL_PER_REGION; n++) pool.push({ r, n });
-    for (const i of seededOrder(pool.length, jobId)) {
-      const { r, n } = pool[i];
-      try {
-        const stub = env.ASR_EGRESS.get(env.ASR_EGRESS.idFromName(`asr-egress-${r}-${n}`), { locationHint: r as any });
-        const resp = await stub.fetch('https://asr/', { method: 'POST', body: JSON.stringify({ url }) });
-        if (resp.ok) { const d: any = await resp.json(); if (ok(d)) return d; }
-      } catch { /* next instance */ }
+    for (const r of ASR_REGIONS) for (let n = 0; n < ASR_POOL_PER_REGION; n++) {
+      const key = `${r}-${n}`;
+      srcs.push({
+        key,
+        run: async () => {
+          try {
+            const stub = env.ASR_EGRESS.get(env.ASR_EGRESS.idFromName(`asr-egress-${key}`), { locationHint: r as any });
+            const resp = await stub.fetch('https://asr/', { method: 'POST', body: JSON.stringify({ url }) });
+            if (resp.ok) { const d: any = await resp.json(); return { data: ok(d) ? d : undefined, rateLimited: false }; }
+            return { rateLimited: is401(await resp.text().catch(() => '')) };
+          } catch { return { rateLimited: false }; }
+        },
+      });
     }
   }
+
+  // Fresh IPs first (per-job shuffle so load spreads), then a capped recovery
+  // re-check of the longest-cooled IPs (most likely reset) before the proxy.
+  const shuffled = seededOrder(srcs.length, jobId).map((i) => srcs[i]);
+  const hot = shuffled.filter((s) => !isCool(s.key));
+  const cooled = shuffled.filter((s) => isCool(s.key))
+    .sort((a, b) => (cooldown[a.key] ?? 0) - (cooldown[b.key] ?? 0))
+    .slice(0, COOLED_RECHECK_CAP);
+  for (const s of [...hot, ...cooled]) {
+    const res = await s.run();
+    if (res.data) { uncool(s.key); await flushCooldown(env, pending); return res.data; }
+    if (res.rateLimited) cool(s.key);
+  }
+  await flushCooldown(env, pending);
 
   // Tier 3 — SpyderProxy residential (unreliable): wrap it so a failed/empty
   // result falls THROUGH to the authenticated backstop instead of throwing.

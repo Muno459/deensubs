@@ -13,6 +13,7 @@ function AsrSettings() {
   const [chunk, setChunk] = useState('80');
   const [proxies, setProxies] = useState('');
   const [ytProxy, setYtProxy] = useState('');
+  const [cooldown, setCooldown] = useState('3');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
 
@@ -22,6 +23,7 @@ function AsrSettings() {
     setChunk(String(data.chunkMinutes ?? 80));
     setProxies((data.proxies || []).join('\n'));
     setYtProxy(data.ytProxy || '');
+    setCooldown(String(data.cooldownHours ?? 3));
   }, [data]);
 
   async function save() {
@@ -32,6 +34,7 @@ function AsrSettings() {
         chunkMinutes: Number(chunk) || 80,
         proxies: proxies.split('\n').map((s) => s.trim()).filter(Boolean),
         ytProxy: ytProxy.trim(),
+        cooldownHours: Number(cooldown),
       }) });
       setSaved('Saved — active mode: ' + r.activeMode);
       refetch();
@@ -113,6 +116,11 @@ function AsrSettings() {
             onChange={(e) => setYtProxy(e.target.value)}
             placeholder="socks5h://user:pass@geo.spyderproxy.com:12321"
           />
+          <div className="mt-3 sm:w-40">
+            <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">IP cooldown (hours)</label>
+            <input className={inputCls + ' w-full font-mono'} value={cooldown} onChange={(e) => setCooldown(e.target.value)} inputMode="decimal" />
+            <p className="mt-1 text-[11px] text-faint">How long a rate-limited CF egress IP is skipped before re-probe. Measured recovery ~2h; 0 disables. Cooled IPs are still re-checked before the proxy.</p>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">

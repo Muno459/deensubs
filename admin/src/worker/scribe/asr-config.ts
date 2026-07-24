@@ -27,6 +27,12 @@ export type AsrConfig = {
                      // replaced per request with a fresh id (SpyderProxy sticky session)
   ytProxy: string; // SOCKS5 URL for the YouTube /player extraction (rotating). Download stays Worker-native.
   wsUrl: string; // legacy quota-coordination WebSocket (unused — coordinator disabled)
+  // How long a CF egress IP that hit its unauth 401 is skipped before we re-probe
+  // it. MEASURED recovery ~2h (an exhausted IP served again ~2h later); if the
+  // real reset is longer (daily/monthly), a larger value avoids wasted re-probes.
+  // The cache is soft (cooled IPs are still re-checked before the proxy), so
+  // being wrong just costs an occasional ~6s probe. See asr.ts unauthAsr.
+  cooldownHours: number;
 };
 
 export const DEFAULT_ASR_CONFIG: AsrConfig = {
@@ -35,7 +41,15 @@ export const DEFAULT_ASR_CONFIG: AsrConfig = {
   proxies: [],
   ytProxy: '',
   wsUrl: '',
+  cooldownHours: 3,
 };
+
+/** Clamp the egress-IP cooldown to [0.25h, 30d]; 0 disables it. */
+function clampCooldownHours(v: any): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 3;
+  return n === 0 ? 0 : Math.max(0.25, Math.min(720, n));
+}
 
 /** Clamp a proxy chunk length to the safe [3, PROXY_CHUNK_MAX_MIN] window. */
 function clampChunkMinutes(v: any): number {
@@ -54,6 +68,7 @@ export async function getAsrConfig(env: any): Promise<AsrConfig> {
         ...parsed,
         proxies: Array.isArray(parsed.proxies) ? parsed.proxies.filter((p: any) => typeof p === 'string' && p.trim()) : [],
         chunkMinutes: clampChunkMinutes(parsed.chunkMinutes),
+        cooldownHours: clampCooldownHours(parsed.cooldownHours),
       };
     }
   } catch {}
@@ -68,6 +83,7 @@ export async function putAsrConfig(env: any, cfg: Partial<AsrConfig>): Promise<A
     proxies: (merged.proxies || []).filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim()),
     ytProxy: (merged.ytProxy || '').trim(),
     wsUrl: (merged.wsUrl || '').trim(),
+    cooldownHours: clampCooldownHours(merged.cooldownHours),
   };
   await env.MEDIA_KV?.put(KV_KEY, JSON.stringify(clean));
   return clean;

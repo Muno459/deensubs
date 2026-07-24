@@ -611,7 +611,9 @@ app.post('/api/scribe/prewarm', async (c) => {
 // unauthenticated-via-SOCKS-proxies chunked. Edited on the /tools page.
 function asrConfigView(c: any, cfg: any) {
   const hasApiKey = !!c.env.ELEVENLABS_API_KEY;
-  const activeMode = cfg.mode === 'auto' ? (hasApiKey ? 'authenticated' : 'proxy') : cfg.mode;
+  // 'authenticated' forces the paid API; anything else runs the free-first chain
+  // (CF pool -> SpyderProxy -> authenticated backstop). Matches resolveAsrMode.
+  const activeMode = cfg.mode === 'authenticated' ? 'authenticated' : 'proxy';
   return { ...cfg, hasApiKey, activeMode };
 }
 app.get('/api/asr-config', async (c) => {
