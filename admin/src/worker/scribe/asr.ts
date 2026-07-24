@@ -266,13 +266,14 @@ export async function directUnauthStt(env: ScribeEnv, sourceUrl: string, withFor
     let res: Response;
     try {
       // Hard per-request deadline so a hung/slow ElevenLabs fetch can never stall
-      // a job. A real whole-file transcription is ~45-120s (a 90-min file was
-      // ~81s), so 150s clears the slowest legit case; past that it's a hang.
+      // a job. MEASURED whole-file: 20min→39s, 62min→102s, 92min→150s (~1.6s per
+      // audio-minute), so 150s was exactly the 90-min case and cut it off. 300s
+      // leaves ~2x headroom over the longest real file; past that it's a hang.
       res = await fetch(`${STT_URL}?allow_unauthenticated=1`, {
         method: 'POST',
         headers: { origin: 'https://elevenlabs.io', referer: 'https://elevenlabs.io/' },
         body: form,
-        signal: AbortSignal.timeout(150_000),
+        signal: AbortSignal.timeout(300_000),
       });
     } catch (e: any) {
       // Timeout/network error: don't retry the SAME IP — let the caller rotate to
@@ -334,6 +335,14 @@ function fnv1a(s: string): string {
 
 const is401 = (x: any): boolean =>
   /\b401\b|sign[_ -]?in|reached the limit|too many|rate limit|quota/i.test(String(x?.message ?? x ?? ''));
+
+/** A 403 from the edge in front of api.elevenlabs.io (Google Cloud Armor) means
+ *  the egress IP is reputation-blocked, not out of quota — it rejects the whole
+ *  domain. Cheap shared proxy ranges are commonly listed; MEASURED 3/10 on a
+ *  Webshare free pool. Worth a long cooldown: reputation does not clear in hours. */
+const is403 = (x: any): boolean =>
+  /\b403\b|forbidden|does not have permission/i.test(String(x?.message ?? x ?? ''));
+const BLOCKED_COOLDOWN_MS = 24 * 3_600_000;
 
 /** This colo's egress IPv4 (IPv4-only, non-Cloudflare echoes — api.elevenlabs.io
  *  is IPv4-only, so this IS the IP ElevenLabs rate-limits). Best-effort ''. */
@@ -464,9 +473,11 @@ async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: 
           const key = `px:${fnv1a(px[i])}`;
           if (isIpCool(key)) continue;
           try {
+            // MEASURED whole-file through a datacenter proxy: 20min→39s,
+            // 62min→102s, 92min→150s. 300s leaves ~2x headroom.
             const d = await Promise.race([
               proxyStt(freshSession(px[i]), url),
-              new Promise((_, r) => setTimeout(() => r(new Error('proxy whole-file timeout')), 170_000)),
+              new Promise((_, r) => setTimeout(() => r(new Error('proxy whole-file timeout')), 300_000)),
             ]);
             if (ok(d)) {
               coolPending[key] = null;
@@ -474,8 +485,12 @@ async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: 
               return d;
             }
           } catch (e: any) {
-            if (is401(e)) { if (ttlMs > 0) coolPending[key] = now + ttlMs; } // quota, not a drop
-            else drops++; // dropped/timed out → likely can't hold the idle gap
+            // Quota (401) and reputation blocks (403) are the PROXY's problem, not
+            // a sign the pool can't hold connections — cool that entry and keep
+            // going. Only real drops/timeouts count toward giving up on whole-file.
+            if (is401(e)) { if (ttlMs > 0) coolPending[key] = now + ttlMs; }
+            else if (is403(e)) coolPending[key] = now + Math.max(ttlMs, BLOCKED_COOLDOWN_MS);
+            else drops++;
           }
         }
         await flushPool(env, mapPending, coolPending);
