@@ -324,6 +324,14 @@ function seededOrder(len: number, seed: string): number[] {
 const POOL_KEY = 'asr:ippool';
 const COOLED_RECHECK_CAP = 8; // longest-cooled IPs to re-probe per job before the proxy
 
+/** Stable short key for a proxy entry, so its cooldown lives in the same IP map
+ *  without writing credentials into it a second time. */
+function fnv1a(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(16);
+}
+
 const is401 = (x: any): boolean =>
   /\b401\b|sign[_ -]?in|reached the limit|too many|rate limit|quota/i.test(String(x?.message ?? x ?? ''));
 
@@ -437,16 +445,50 @@ async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: 
   }
   await flushPool(env, mapPending, coolPending);
 
-  // Tier 3 — SpyderProxy residential (unreliable): wrap it so a failed/empty
-  // result falls THROUGH to the authenticated backstop instead of throwing.
+  // Tier 3 — the proxy pool. Every proxy entry is its OWN egress IP with its own
+  // ~8-clip quota, so this extends the same IP-keyed rotation rather than being a
+  // single last resort. Wrapped so any failure falls THROUGH to the paid backstop.
   if (cfg.proxies?.length) {
+    const px = cfg.proxies;
     try {
-      console.log('all Cloudflare egress IPs exhausted → SpyderProxy chunked fallback');
-      const d = await (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg);
+      const { proxyStt, freshSession, proxyChunkedAsr } = await import('./asr-proxy');
+
+      // 3a. Whole file in ONE request — only when the proxies can hold an idle
+      // connection through ElevenLabs' processing (datacenter proxies can;
+      // residential exits drop at ~60s). Avoids the container split + merge
+      // entirely. Rotates across proxies so each contributes its own quota.
+      if (cfg.proxyWholeFile) {
+        let drops = 0; // connection failures → these proxies can't hold; stop early
+        for (const i of seededOrder(px.length, jobId + ':px')) {
+          if (drops >= 2) break;
+          const key = `px:${fnv1a(px[i])}`;
+          if (isIpCool(key)) continue;
+          try {
+            const d = await Promise.race([
+              proxyStt(freshSession(px[i]), url),
+              new Promise((_, r) => setTimeout(() => r(new Error('proxy whole-file timeout')), 170_000)),
+            ]);
+            if (ok(d)) {
+              coolPending[key] = null;
+              await flushPool(env, mapPending, coolPending);
+              return d;
+            }
+          } catch (e: any) {
+            if (is401(e)) { if (ttlMs > 0) coolPending[key] = now + ttlMs; } // quota, not a drop
+            else drops++; // dropped/timed out → likely can't hold the idle gap
+          }
+        }
+        await flushPool(env, mapPending, coolPending);
+        console.log('proxy whole-file pass failed → chunked');
+      }
+
+      // 3b. Chunked (segments sized to clear a residential proxy's ~60s idle wall).
+      console.log('all Cloudflare egress IPs exhausted → proxy chunked fallback');
+      const d = await proxyChunkedAsr(env, jobId, sourceKey, cfg);
       if (ok(d)) return d;
-      console.log('SpyderProxy returned no transcript → authenticated fallback');
+      console.log('proxy returned no transcript → authenticated fallback');
     } catch (e: any) {
-      console.log('SpyderProxy fallback failed → authenticated fallback:', String(e?.message || e).slice(0, 160));
+      console.log('proxy fallback failed → authenticated fallback:', String(e?.message || e).slice(0, 160));
     }
   }
 

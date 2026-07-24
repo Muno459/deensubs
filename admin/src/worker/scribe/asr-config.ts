@@ -33,6 +33,13 @@ export type AsrConfig = {
   // The cache is soft (cooled IPs are still re-checked before the proxy), so
   // being wrong just costs an occasional ~6s probe. See asr.ts unauthAsr.
   cooldownHours: number;
+  // True when the configured proxies can hold an idle TCP connection through
+  // ElevenLabs' 30-150s processing gap — DATACENTER proxies (real servers) can,
+  // residential exits usually drop at ~60s. When true the proxy tier sends the
+  // WHOLE file in one request (no container split/merge, no R2 chunk churn) and
+  // only falls back to chunking if that fails. Datacenter IPs are fine with the
+  // unauth endpoint: Cloudflare's own egress IPs are datacenter ranges.
+  proxyWholeFile: boolean;
 };
 
 export const DEFAULT_ASR_CONFIG: AsrConfig = {
@@ -42,6 +49,7 @@ export const DEFAULT_ASR_CONFIG: AsrConfig = {
   ytProxy: '',
   wsUrl: '',
   cooldownHours: 3,
+  proxyWholeFile: false,
 };
 
 /** Clamp the egress-IP cooldown to [0.25h, 30d]; 0 disables it. */
@@ -69,6 +77,7 @@ export async function getAsrConfig(env: any): Promise<AsrConfig> {
         proxies: Array.isArray(parsed.proxies) ? parsed.proxies.filter((p: any) => typeof p === 'string' && p.trim()) : [],
         chunkMinutes: clampChunkMinutes(parsed.chunkMinutes),
         cooldownHours: clampCooldownHours(parsed.cooldownHours),
+        proxyWholeFile: !!parsed.proxyWholeFile,
       };
     }
   } catch {}
@@ -84,6 +93,7 @@ export async function putAsrConfig(env: any, cfg: Partial<AsrConfig>): Promise<A
     ytProxy: (merged.ytProxy || '').trim(),
     wsUrl: (merged.wsUrl || '').trim(),
     cooldownHours: clampCooldownHours(merged.cooldownHours),
+    proxyWholeFile: !!merged.proxyWholeFile,
   };
   await env.MEDIA_KV?.put(KV_KEY, JSON.stringify(clean));
   return clean;

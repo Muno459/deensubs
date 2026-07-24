@@ -159,7 +159,7 @@ function parseHttp(raw: Uint8Array): { status: number; body: string } {
 
 /** One transcription request through a proxy: raw socket → SOCKS5 CONNECT →
  *  Worker-native TLS 1.3 (correct SNI) → HTTP POST source_url → parse. */
-async function proxyStt(proxyUrl: string, sourceUrl: string): Promise<any> {
+export async function proxyStt(proxyUrl: string, sourceUrl: string): Promise<any> {
   const proxy = parseProxy(proxyUrl);
   const socket = connect({ hostname: proxy.host, port: proxy.port }, { secureTransport: 'off', allowHalfOpen: false });
   await socket.opened;

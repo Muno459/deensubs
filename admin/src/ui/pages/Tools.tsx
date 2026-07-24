@@ -14,6 +14,7 @@ function AsrSettings() {
   const [proxies, setProxies] = useState('');
   const [ytProxy, setYtProxy] = useState('');
   const [cooldown, setCooldown] = useState('3');
+  const [wholeFile, setWholeFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
 
@@ -24,6 +25,7 @@ function AsrSettings() {
     setProxies((data.proxies || []).join('\n'));
     setYtProxy(data.ytProxy || '');
     setCooldown(String(data.cooldownHours ?? 3));
+    setWholeFile(!!data.proxyWholeFile);
   }, [data]);
 
   async function save() {
@@ -35,6 +37,7 @@ function AsrSettings() {
         proxies: proxies.split('\n').map((s) => s.trim()).filter(Boolean),
         ytProxy: ytProxy.trim(),
         cooldownHours: Number(cooldown),
+        proxyWholeFile: wholeFile,
       }) });
       setSaved('Saved — active mode: ' + r.activeMode);
       refetch();
@@ -121,6 +124,15 @@ function AsrSettings() {
             <input className={inputCls + ' w-full font-mono'} value={cooldown} onChange={(e) => setCooldown(e.target.value)} inputMode="decimal" />
             <p className="mt-1 text-[11px] text-faint">How long a rate-limited CF egress IP is skipped before re-probe. Measured recovery ~2h; 0 disables. Cooled IPs are still re-checked before the proxy.</p>
           </div>
+          <label className="mt-3 flex items-start gap-2 text-[12px] text-cream/80">
+            <input type="checkbox" className="mt-0.5" checked={wholeFile} onChange={(e) => setWholeFile(e.target.checked)} />
+            <span>
+              Proxies hold long connections (datacenter)
+              <span className="mt-0.5 block text-[11px] text-faint">
+                Send the whole file in one request instead of chunking — skips the container split/merge. Enable for datacenter proxies; leave off for residential ones, which drop at ~60s idle. Falls back to chunking automatically.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="flex items-center gap-3">
