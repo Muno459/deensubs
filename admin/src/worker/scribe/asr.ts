@@ -241,6 +241,56 @@ export async function authStt(env: ScribeEnv, sourceUrl: string): Promise<any> {
   return sttCall(env, sourceUrl, undefined, 5, false, /* forceSync */ true);
 }
 
+/** WHOLE-FILE unauthenticated STT via a DIRECT Worker fetch — no proxy, no
+ *  chunking. Verified: the ElevenLabs demo endpoint doesn't rate-limit the
+ *  Worker's egress IP and has NO ~60s cap (that ceiling was the residential
+ *  proxy's idle timeout, not ElevenLabs). Inside a Workflow step the fetch has
+ *  no wall-clock limit (fetch wait isn't CPU), so a full 2h file transcribes in
+ *  one request (~160s). Free, and it returns native additional_formats too. */
+export async function directUnauthStt(env: ScribeEnv, sourceUrl: string, withFormats = false, attempts = 3): Promise<any> {
+  let lastErr = '';
+  for (let i = 0; i < attempts; i++) {
+    const form = new FormData();
+    form.append('model_id', 'scribe_v2');
+    form.append('source_url', sourceUrl);
+    form.append('diarize', 'true');
+    form.append('timestamps_granularity', 'character');
+    form.append('tag_audio_events', 'true');
+    if (withFormats) {
+      const seg = { segment_on_silence_longer_than_s: 1.1, max_segment_duration_s: 45, max_segment_chars: 500 };
+      form.append('additional_formats', JSON.stringify([
+        { format: 'txt', include_speakers: true, include_timestamps: true, ...seg },
+        { format: 'segmented_json', ...seg },
+      ]));
+    }
+    const res = await fetch(`${STT_URL}?allow_unauthenticated=1`, {
+      method: 'POST',
+      headers: { origin: 'https://elevenlabs.io', referer: 'https://elevenlabs.io/' },
+      body: form,
+    });
+    if (res.ok) return res.json();
+    const body = await res.text().catch(() => '');
+    lastErr = `unauth STT HTTP ${res.status}: ${body.slice(0, 200)}`;
+    const retryable = res.status >= 500 || res.status === 429 || /rate limit|too many|quota/i.test(body);
+    if (!retryable) break; // hard 4xx -> fail fast (caller falls back)
+    await new Promise((r) => setTimeout(r, 5000 * (i + 1)));
+  }
+  throw new Error(lastErr);
+}
+
+/** Free ASR: transcribe the WHOLE file in one direct Worker fetch. Falls back to
+ *  the residential-proxy chunked path only if the direct call is ever rate-limited
+ *  or blocked (proxies come from the ASR config; still Worker-native TLS+SOCKS). */
+async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: AsrConfig): Promise<any> {
+  try {
+    return await directUnauthStt(env, `${CDN_BASE}/${sourceKey}`, /* withFormats */ true);
+  } catch (e: any) {
+    if (!cfg.proxies?.length) throw e;
+    console.log('direct unauth STT failed, falling back to proxy-chunked: ' + (e?.message || e));
+    return (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg);
+  }
+}
+
 /** Resolve + validate the ASR plan. Throws immediately on misconfiguration so
  *  callers (workflow preflight, runAsr) can fail fast instead of after a
  *  download. Exported so the workflow can validate before spending a download. */
@@ -248,7 +298,8 @@ export async function getAsrPlan(env: ScribeEnv): Promise<{ cfg: AsrConfig; mode
   const cfg = await getAsrConfig(env);
   const mode = resolveAsrMode(cfg, !!env.ELEVENLABS_API_KEY);
   if (mode === 'authenticated' && !env.ELEVENLABS_API_KEY) throw new Error('ELEVENLABS_API_KEY secret not set');
-  if (mode === 'proxy' && !cfg.proxies.length) throw new Error('proxy ASR selected but no proxies are configured (set them on the /tools page)');
+  // proxy (free/unauth) mode needs no proxies for the primary direct-fetch path;
+  // proxies are only the rate-limit fallback, so an empty list is fine.
   return { cfg, mode };
 }
 
@@ -257,8 +308,10 @@ export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, d
   //  - authenticated (API key set): the WHOLE file in ONE synchronous request
   //    via source_url — no chunking, no webhook (the webhook round-trip was
   //    stalling awaitResult for ~40 min and timing the step out at 2 h).
-  //  - proxy (no key): unauthenticated STT through SOCKS proxies, chunked into
-  //    ~80-min segments, synchronous response, quota coordinated over WebSocket.
+  //  - proxy (no key): FREE unauthenticated STT — the WHOLE file in ONE direct
+  //    Worker fetch (no proxy, no chunking; the Worker IP isn't rate-limited and
+  //    there is no ~60s cap — that was the residential proxy's idle timeout).
+  //    Falls back to the residential-proxy chunked path only if rate-limited.
   const { cfg, mode } = await getAsrPlan(env);
 
   const existingKey = `scribe/${jobId}/asr.json`;
@@ -268,7 +321,7 @@ export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, d
   const data: any = existing
     ? await existing.json()
     : mode === 'proxy'
-      ? await (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg)
+      ? await unauthAsr(env, jobId, sourceKey, cfg)
       : partial
         ? await chunkedAsr(env, jobId, sourceKey)
         : await sttCall(env, `${CDN_BASE}/${sourceKey}`, undefined, 5, true, /* forceSync */ true);
