@@ -95,6 +95,13 @@ class_name = "ClipContainer"
 name = "HUB"
 class_name = "CompanionHub"
 
+# Region-placed egress for ASR: a DO per Cloudflare region gives a distinct
+# egress IP, so the unauthenticated ElevenLabs STT per-IP quota multiplies by the
+# number of regions (each does a whole-file transcription from its own IP).
+[[durable_objects.bindings]]
+name = "ASR_EGRESS"
+class_name = "AsrEgress"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["YtdlpContainer"]
@@ -106,6 +113,10 @@ new_sqlite_classes = ["CompanionHub"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["ClipContainer"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["AsrEgress"]
 
 [vars]
 SCRIBE_LLM_MODEL = "ag/gemini-3.6-flash-tiered"

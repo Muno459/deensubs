@@ -2158,6 +2158,7 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 export { ScribePipeline } from './scribe/workflow';
 export { ClipRenderer } from './scribe/clips';
 export { YtdlpContainer, ClipContainer } from './scribe/container';
+export { AsrEgress } from './scribe/asr-egress';
 export { CompanionHub } from './companion';
 
 /** Auto-resume jobs killed by infrastructure (deploy rollouts reset the

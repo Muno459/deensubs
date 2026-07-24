@@ -278,17 +278,37 @@ export async function directUnauthStt(env: ScribeEnv, sourceUrl: string, withFor
   throw new Error(lastErr);
 }
 
-/** Free ASR: transcribe the WHOLE file in one direct Worker fetch. Falls back to
- *  the residential-proxy chunked path only if the direct call is ever rate-limited
- *  or blocked (proxies come from the ASR config; still Worker-native TLS+SOCKS). */
+// Cloudflare regions → distinct egress IPs (verified). Rotating across them
+// multiplies the unauth per-IP quota by ~9 while keeping WHOLE-file (no chunk).
+const ASR_REGIONS = ['weur', 'enam', 'wnam', 'apac', 'eeur', 'sam', 'oc', 'afr', 'me'];
+
+/** Free ASR at scale. The unauth endpoint caps at ~8 clips per SOURCE IP, so:
+ *   1) transcribe the whole file from THIS Worker's egress IP;
+ *   2) on rate-limit, retry from region-placed egress DOs (each a distinct IP →
+ *      its own quota) — still whole-file, no chunking;
+ *   3) only if every Cloudflare IP is exhausted, fall back to the residential
+ *      proxy (unlimited fresh IPs, but chunked). */
 async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: AsrConfig): Promise<any> {
-  try {
-    return await directUnauthStt(env, `${CDN_BASE}/${sourceKey}`, /* withFormats */ true);
-  } catch (e: any) {
-    if (!cfg.proxies?.length) throw e;
-    console.log('direct unauth STT failed, falling back to proxy-chunked: ' + (e?.message || e));
+  const url = `${CDN_BASE}/${sourceKey}`;
+  const ok = (d: any) => !!(d && (d.words?.length || d.text));
+
+  try { const d = await directUnauthStt(env, url, /* withFormats */ true, /* attempts */ 2); if (ok(d)) return d; } catch { /* rate-limited → regions */ }
+
+  if (env.ASR_EGRESS) {
+    for (const h of ASR_REGIONS) {
+      try {
+        const stub = env.ASR_EGRESS.get(env.ASR_EGRESS.idFromName('asr-egress-' + h), { locationHint: h as any });
+        const r = await stub.fetch('https://asr/', { method: 'POST', body: JSON.stringify({ url }) });
+        if (r.ok) { const d: any = await r.json(); if (ok(d)) return d; }
+      } catch { /* next region */ }
+    }
+  }
+
+  if (cfg.proxies?.length) {
+    console.log('all Cloudflare egress IPs exhausted/failed → proxy-chunked fallback');
     return (await import('./asr-proxy')).proxyChunkedAsr(env, jobId, sourceKey, cfg);
   }
+  throw new Error('unauth STT failed on this Worker + all regions, and no proxy fallback configured');
 }
 
 /** Resolve + validate the ASR plan. Throws immediately on misconfiguration so

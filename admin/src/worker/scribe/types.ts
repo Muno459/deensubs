@@ -6,6 +6,7 @@ export type ScribeEnv = {
   MYBROWSER: Fetcher; // Cloudflare Browser Rendering (primary YouTube download)
   YTDLP: DurableObjectNamespace; // small container: download + probe + mux + thumbs + split
   CLIP: DurableObjectNamespace; // bigger container: CPU-heavy clip renders + image grading
+  ASR_EGRESS: DurableObjectNamespace; // region-placed egress DOs → distinct IPs for unauth STT
   ELEVENLABS_API_KEY?: string;
   SCRIBE_LLM_URL?: string;
   SCRIBE_LLM_KEY?: string;
