@@ -15,9 +15,13 @@
 // proxy, a plaintext SOCKS5 CONNECT to api.elevenlabs.io:443, then a hand-rolled
 // TLS 1.3 client (tls13.ts) over the tunnel where WE set the SNI.
 //
-// Flow per chunk: container splits audio → chunk to R2 → Worker leases quota
-// (WS coordinator) → SOCKS5+TLS1.3 POST source_url → merge. Quota across the
-// proxies is coordinated over a WebSocket (best-effort).
+// Only reached as the tier-3 fallback (asr.ts unauthAsr), when the whole-file
+// direct + region-egress IPs are all rate-limited. Flow per chunk: container
+// splits audio into ≤18-min segments (small enough to clear the proxy's ~60s
+// idle timeout) → segment to R2 → SOCKS5+TLS1.3 POST source_url on a fresh
+// rotating residential IP (retry on a new IP if that one is quota-exhausted) →
+// merge with per-segment time offsets. No quota coordinator: each attempt gets a
+// fresh SpyderProxy session, so there is no shared per-IP quota to coordinate.
 
 import { connect } from 'cloudflare:sockets';
 import { streamToR2 } from './download';
@@ -32,6 +36,22 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
     p,
     new Promise<T>((_, rej) => setTimeout(() => rej(Object.assign(new Error(`${label} timed out after ${ms}ms`), { rateLimited: true })), ms)),
   ]);
+}
+
+/** Run `fn` over `items` with at most `limit` in flight. Bounds how many
+ *  residential sessions hit the proxy pool at once so a burst of chunks doesn't
+ *  trip more per-IP rate limits than it has to. Preserves index order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 import type { AsrConfig } from './asr-config';
 import type { ScribeEnv, Word } from './types';
@@ -213,8 +233,16 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
   // attempt regenerates the proxy session ({SESSION} → fresh id), landing on a
   // NEW residential IP, so a rate-limited/flagged IP is simply replaced. No
   // quota coordinator: SpyderProxy hands out a fresh IP per session, so there is
-  // no shared per-IP quota to coordinate.
-  const results = await Promise.all(names.map(async (name, n) => {
+  // no shared per-IP quota to coordinate. Bounded concurrency keeps the burst of
+  // sessions small (fewer simultaneous IPs → fewer rate-limit collisions).
+  //
+  // Segments are sized (chunkMinutes, clamped ≤18) so ElevenLabs finishes each
+  // within the proxy's ~60s idle window, so the ONLY expected failure is a fresh
+  // IP that is already quota-exhausted (clean 401/429) — retried on a new IP. A
+  // per-attempt timeout above the ~106s worst-case success kills a truly hung
+  // socket without cutting a slow-but-valid response.
+  const CONCURRENCY = 6;
+  const results = await mapLimit(names, CONCURRENCY, async (name, n) => {
     const segKey = `scribe/${jobId}/asr-seg-${n}.json`;
     const cached = await env.MEDIA_BUCKET.get(segKey);
     if (cached) return { n, data: (await cached.json()) as any };
@@ -226,16 +254,19 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
 
     let data: any = null;
     let lastErr = '';
-    const maxAttempts = Math.max(6, proxies.length * 2);
+    const maxAttempts = Math.max(8, proxies.length * 3);
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const proxyUrl = freshSession(proxies[attempt % proxies.length]);
       try {
-        data = await withTimeout(proxyStt(proxyUrl, chunkUrl), 190_000, 'proxy STT');
+        data = await withTimeout(proxyStt(proxyUrl, chunkUrl), 160_000, 'proxy STT');
         if (data?.words?.length || data?.text) break;
         lastErr = 'empty transcript';
       } catch (e: any) {
         lastErr = String(e?.message || e);
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        // A fresh IP is available immediately, so only a short jittered backoff
+        // (capped) — no need to wait out a per-IP window we're abandoning.
+        const backoff = Math.min(4000, 800 * (attempt + 1)) + Math.floor(Math.random() * 400);
+        await new Promise((r) => setTimeout(r, backoff));
       }
     }
     // No authenticated fallback: the API key is ONLY the whole-file authenticated
@@ -244,7 +275,7 @@ export async function proxyChunkedAsr(env: ScribeEnv, jobId: string, sourceKey: 
     await env.MEDIA_BUCKET.put(segKey, JSON.stringify(data), { httpMetadata: { contentType: 'application/json' } });
     await env.MEDIA_BUCKET.delete(chunkKey).catch(() => {});
     return { n, data };
-  }));
+  });
 
   // merge word timelines with per-segment offsets (deterministic order)
   const allWords: Word[] = [];
