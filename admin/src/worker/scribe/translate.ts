@@ -11,6 +11,13 @@ import { findQuranQuotes, citeQuote, type QuranQuote } from './quran';
 
 export type CleanWord = { i: number; text: string; start: number; end: number; speaker: string; chars?: { start: number; end: number }[] };
 
+// Display limits. A cue must fit two 42-char lines, and must be readable in the
+// time it is on screen. Splitting used to trigger on DURATION alone, which made
+// a short-but-text-heavy cue unreachable: a whole canonical verse pinned to a
+// 1.3s recitation span stayed one 541-character cue at ~400 CPS.
+const MAX_CUE_CHARS = 84; // 2 lines x 42
+const TARGET_CPS = 17;
+
 const WINDOW_SIZE = 180; // words per LLM call — bigger windows = fewer calls; hole-filling catches drops
 const WINDOW_LOOKAHEAD = 30; // stretch to a natural boundary
 const CONCURRENCY = 16; // gemini flash sustains this fine; 6 made a 2.5h lecture translate in ~40 min
@@ -58,7 +65,13 @@ OUTPUT FORMAT — one JSON object per line, nothing else:
 RULES:
 - Cover EVERY word index exactly once, in order, with no gaps and no overlaps.
 - Segment at natural boundaries: sentence ends, pauses (marked [GAP]), speaker changes (marked [SPEAKER]).
-- Each cue: ideally 1.5-7 seconds of speech, translation at most 2 lines x 42 characters (~84 chars).
+- Each cue: ideally 1.5-7 seconds of speech, translation at most 2 lines x 42 characters (~84 chars). NEVER exceed 84 characters — split into another cue instead.
+
+SEGMENT ON MEANING, NOT ON LENGTH. Every cue must be a self-contained unit a viewer can read in one glance:
+- End a cue at a clause or sentence boundary. Do not end one mid-clause and let it dangle into the next.
+- NEVER end a cue on a word that governs what follows: an article (a, the), preposition (of, in, to, for, with, from, by), conjunction (and, or, but), auxiliary (is, was, has), or a relative (that, which, who). Move that word to the next cue.
+- Keep together what cannot be understood apart: a verb and its object, a name and its title, a number and its unit, a quotation and the verb introducing it.
+- Prefer a slightly short cue with a clean edge over a full one that breaks awkwardly.
 - Translate to ${targetLang}. Translate ALL meaningful content faithfully — never paraphrase away or condense meaning.
 - Clean speech artifacts: drop stutters, false starts, and filler sounds from the translation (their word indices still belong to the cue covering that span).
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
@@ -67,8 +80,14 @@ RULES:
 - Proper nouns and Arabic terms: standard English transliteration.
 - No markdown, no commentary, no code fences — only JSONL lines.`;
 
-function windowPrompt(win: CleanWord[], prevTail: string): string {
+function windowPrompt(win: CleanWord[], prevTail: string, verseContext?: string): string {
   const lines: string[] = [];
+  // A verse recited just before this passage is almost always its subject: the
+  // speaker recites, then explains. The verse itself is a locked cue the model
+  // never translates, but without it here the explanation loses its referent.
+  if (verseContext) {
+    lines.push(`The speaker has just recited this Quran passage, and the words below explain it. Use it to resolve pronouns and references. Do NOT translate or repeat it: ${verseContext}`, '');
+  }
   if (prevTail) lines.push(`Previous cue for context (already translated, do NOT repeat): ${prevTail}`, '');
   lines.push('Words:');
   let lastSpeaker = win[0]?.speaker || '';
@@ -286,11 +305,12 @@ async function translateWindow(
   targetLang: string,
   win: CleanWord[],
   prevTail: string,
-  audio?: any | null
+  audio?: any | null,
+  verseContext?: string
 ): Promise<{ w: [number, number]; t: string }[]> {
   const lo = win[0].i;
   const hi = win[win.length - 1].i;
-  const userText = windowPrompt(win, prevTail);
+  const userText = windowPrompt(win, prevTail, verseContext);
 
   // Ladder: primary twice, then the strong model. Audio rides only on the
   // primary (Gemini) attempts — the strong fallback sends the exact
@@ -373,7 +393,21 @@ export async function translateWords(
     cursor = Math.max(cursor, b + 1);
   }
   if (cursor < words.length) freeRanges.push([cursor, words.length - 1]);
-  const windows = freeRanges.flatMap(([a, b]) => makeWindows(words.slice(a, b + 1)));
+  // The verse recited immediately before a range is context for the passage
+  // that follows it, so tag the first window of that range with it.
+  const verseBefore = new Map<number, string>();
+  for (const q of quotes) {
+    const cite = citeQuote(q.verses);
+    verseBefore.set(q.wEnd + 1, `${q.verses.map((v) => `“${v.en}”`).join(' ')} (Quran ${cite})`.slice(0, 1200));
+  }
+  const windows: CleanWord[][] = [];
+  const windowVerse: (string | undefined)[] = [];
+  for (const [a, b] of freeRanges) {
+    makeWindows(words.slice(a, b + 1)).forEach((w, i) => {
+      windows.push(w);
+      windowVerse.push(i === 0 ? verseBefore.get(a) : undefined);
+    });
+  }
 
   // Windows are independent (context tail is best-effort), so run in batches
   const results: { w: [number, number]; t: string }[][] = new Array(windows.length);
@@ -386,7 +420,7 @@ export async function translateWords(
         const audio = audioOpts
           ? await windowAudio(env, audioOpts, win[0].start, win[win.length - 1].end)
           : null;
-        return translateWindow(env, targetLang, win, prevTail, audio);
+        return translateWindow(env, targetLang, win, prevTail, audio, windowVerse[i + j]);
       })
     );
     settled.forEach((cues, j) => (results[i + j] = cues));
@@ -417,7 +451,7 @@ export async function translateWords(
   // split at the proportional source-word boundary
   const splitLocked = (cue: WCue): WCue[] => {
     const dur = cue.end - cue.start;
-    if (dur <= 12 || cue.w[1] - cue.w[0] < 4) return [cue];
+    if ((dur <= 12 && cue.text.length <= MAX_CUE_CHARS) || cue.w[1] - cue.w[0] < 2) return [cue];
     const text = cue.text;
     const marks = [...text.matchAll(/[.!?؟…,;:—]\s+/g)].map((m) => m.index! + m[0].length);
     if (!marks.length) return [cue];
@@ -435,7 +469,7 @@ export async function translateWords(
   const splitOnce = (cue: WCue): WCue[] => {
     if (cue.q) return splitLocked(cue);
     const dur = cue.end - cue.start;
-    if (dur <= 8.5 || cue.w[1] - cue.w[0] < 4) return [cue];
+    if ((dur <= 8.5 && cue.text.length <= MAX_CUE_CHARS) || cue.w[1] - cue.w[0] < 2) return [cue];
     const text = cue.text;
     const marks = [...text.matchAll(/[.!?؟…,;:]\s+/g)].map((m) => m.index! + m[0].length);
     const mid = text.length / 2;

@@ -80,6 +80,13 @@ export async function assessQuality(env: QEnv, jobId: string, cuesKey: string): 
   const cpsAll = free.map((c) => c.text.length / Math.max(0.3, c.end - c.start));
   const cpsOver20 = cpsAll.filter((v) => v > 20).length;
 
+  // The same metrics over EVERY cue, verses included. Measuring only `free`
+  // hid the worst defects entirely: a canonical verse pinned to a short
+  // recitation span could sit at ~400 CPS while the report still graded A.
+  const cpsEvery = spoken.map((c) => c.text.length / Math.max(0.3, c.end - c.start));
+  const cpsEveryOver20 = cpsEvery.filter((v) => v > 20).length;
+  const overLong = spoken.filter((c) => c.text.length > 84).length;
+
   // Cross-lingual semantic audit (bge-m3): source AR vs translation
   const audit = free
     .map((c, idx) => ({ c, idx: spoken.indexOf(c) }))
@@ -120,6 +127,10 @@ export async function assessQuality(env: QEnv, jobId: string, cuesKey: string): 
     cps_p50: Math.round(pct(cpsAll, 50) * 10) / 10,
     cps_p90: Math.round(pct(cpsAll, 90) * 10) / 10,
     cps_over_20_pct: Math.round((cpsOver20 / Math.max(1, free.length)) * 1000) / 10,
+    cps_all_p90: Math.round(pct(cpsEvery, 90) * 10) / 10,
+    cps_all_max: Math.round(Math.max(0, ...cpsEvery) * 10) / 10,
+    cps_all_over_20_pct: Math.round((cpsEveryOver20 / Math.max(1, spoken.length)) * 1000) / 10,
+    cues_over_84_chars: overLong,
     audit_cues: audit.length,
     audit_flagged: flags.length,
     audit_flagged_pct: Math.round((flags.length / Math.max(1, audit.length)) * 1000) / 10,
@@ -137,6 +148,10 @@ export async function assessQuality(env: QEnv, jobId: string, cuesKey: string): 
   score -= Math.min(10, arLeak.length);
   if (metrics.cps_over_20_pct > 50) score -= 10;
   else if (metrics.cps_over_20_pct > 30) score -= 5;
+  // Unreadable cues are a hard defect wherever they live, verse or not.
+  if (metrics.cues_over_84_chars > 0) score -= Math.min(15, metrics.cues_over_84_chars);
+  if (metrics.cps_all_max > 40) score -= 10;
+  else if (metrics.cps_all_max > 25) score -= 5;
   if (metrics.audit_flagged_pct > 10) score -= 15;
   else if (metrics.audit_flagged_pct > 5) score -= 8;
   score = Math.max(0, Math.round(score));
