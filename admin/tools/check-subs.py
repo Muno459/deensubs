@@ -69,13 +69,19 @@ def main(srt_path, cues_path):
     srt = parse_srt(srt_path)
     cues = json.load(open(cues_path, encoding="utf-8"))
 
-    # Pair the SRT cues with their cues.json twins by start time so verse cues
-    # (identified by `q`) can be judged separately.
-    qmap = {}
-    for c in cues:
-        qmap[round(c["start"], 2)] = c.get("q")
-    for s in srt:
-        s["q"] = qmap.get(round(s["start"], 2))
+    # Pair the SRT cues with their cues.json twins so verse cues (identified by
+    # `q`) can be judged separately. The SRT is rendered from the cue list in
+    # order, so position is exact. Matching on rounded start times silently
+    # mislabelled verses as speech whenever a timestamp landed on a rounding
+    # edge, which dropped 40 CPS scripture into the speech statistics and made
+    # the worst reading speed look far worse than it was.
+    if len(srt) == len(cues):
+        for s, c in zip(srt, cues):
+            s["q"] = c.get("q")
+    else:
+        qmap = {round(c["start"], 2): c.get("q") for c in cues}
+        for s in srt:
+            s["q"] = qmap.get(round(s["start"], 2))
 
     speech = [c for c in srt if not c["q"]]
     verses = [c for c in srt if c["q"]]
@@ -126,10 +132,11 @@ def main(srt_path, cues_path):
 
     # ---- verse cues ------------------------------------------------------
     # A verse must be rendered once per time it is recited. Fuzzy matching used
-    # to emit the same verse two or three times over a few seconds; that is the
-    # defect. A speaker genuinely reciting a verse again later in the lecture
-    # (39:29 at 11:02 and again at 12:05, or the Bismillah twice) is not.
-    REPEAT_WINDOW = 30.0
+    # to emit the same verse two or three times within a few SECONDS (3:7 came
+    # out at 1.3s and 5.6s apart); that is the defect. A speaker reciting a verse,
+    # expounding it, and reciting it again twenty seconds later is not, so the
+    # window is narrow enough to tell the two apart.
+    REPEAT_WINDOW = 10.0
     seen = {}
     repeats = 0
     for c in verses:

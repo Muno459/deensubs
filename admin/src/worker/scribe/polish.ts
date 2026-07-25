@@ -34,6 +34,10 @@ const TARGET_CPS = 17; // comfortable reading speed
 const MIN_DUR = 1.0;
 const MAX_DUR = 7.0;
 const HARD_MIN = 0.7; // below this a cue reads as a flash
+// Timestamps are written to the millisecond, and rounding the start up while
+// rounding the end down can shave a hair off a cue. Aim above the floor so a
+// cue that is legitimately long enough cannot render as though it is not.
+const FLOOR_TARGET = 0.78;
 const GAP = 0.08; // never let two cues touch
 // Cue timing comes straight from the speech (each cue is addressed by word
 // indices into the ASR), and that sync is the point: a line must be on screen
@@ -124,6 +128,86 @@ function respan(c: PCue, pieces: string[]): PCue[] {
   });
 }
 
+
+/** One presentation per recitation, laid out legibly.
+ *
+ *  Fuzzy matching emits the same verse two or three times over a few seconds and
+ *  every match carries the FULL canonical translation, so the verse gets shown
+ *  repeatedly, each copy crammed into a fraction of the recitation. Cluster all
+ *  cues of a verse that sit near each other, take the longest text (that is the
+ *  complete canonical wording), and spread it across the whole window.
+ *
+ *  Splitting here is by character share rather than word timing, and that is the
+ *  right call for a verse: the canonical English does not map word-for-word onto
+ *  the Arabic being recited, so the meaningful guarantee is that the verse is on
+ *  screen while it is recited, not that each clause lands on a syllable. */
+/** Is this line simply part of the verse, worded slightly differently? Used to
+ *  tell the translator's own rendering of a recited verse apart from speech the
+ *  speaker made in the middle of reciting it. */
+function partOf(text: string, canonical: string): boolean {
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 3);
+  const w = words(text);
+  if (!w.length) return true;
+  const inCanon = new Set(words(canonical));
+  return w.filter((x) => inCanon.has(x)).length / w.length >= 0.6;
+}
+
+function rebuildVerses(cues: PCue[]): PCue[] {
+  const groups = new Map<string, PCue[]>();
+  for (const c of cues) if (c.q) (groups.get(c.q) ?? groups.set(c.q, []).get(c.q)!).push(c);
+
+  const blocks: PCue[] = [];
+  for (const [q, items] of groups) {
+    items.sort((a, b) => a.start - b.start);
+    let run: PCue[] = [items[0]];
+    const flush = () => {
+      const start = Math.min(...run.map((c) => c.start));
+      const end = Math.max(...run.map((c) => c.end));
+      const full = run.reduce((a, b) => (b.text.length > a.text.length ? b : a)).text;
+      const cite = run.map((c) => c.text).join(' ').match(/\(Quran [^)]+\)/);
+      const text = cite && !full.includes(cite[0]) ? `${full} ${cite[0]}` : full;
+      const block: PCue = { ...run[0], start, end, text, q, s0: start };
+      blocks.push(...respan(block, toFitting(text)));
+    };
+    for (const c of items.slice(1)) {
+      // Only join matches that are genuinely one recitation. A wide window
+      // swallows whatever the speaker said between two recitations of the same
+      // verse, which both loses that speech and squeezes its neighbours.
+      const gap = c.start - run[run.length - 1].end;
+      const canon = run.reduce((a, b) => (b.text.length > a.text.length ? b : a)).text;
+      const between = cues.filter((x) => !x.q
+        && x.start >= run[run.length - 1].end - 0.01 && x.end <= c.start + 0.01);
+      const allVerse = between.every((x) => partOf(x.text, canon));
+      if (gap <= 8 && allVerse) run.push(c);
+      else { flush(); run = [c]; }
+    }
+    flush();
+  }
+
+  // A free cue inside a verse window is only the verse mis-attributed to the
+  // free-text translator when it actually says the verse. Real speech that
+  // happens to fall in the window is kept.
+  const kept = cues.filter((c) => !c.q && !blocks.some((b) =>
+    b.start - 0.01 <= c.start && c.end <= b.end + 0.01 && partOf(c.text, b.text)));
+  return [...kept, ...blocks].sort((a, b) => a.start - b.start);
+}
+
+/** Split whatever still breaks the display limits. translate.ts does the
+ *  sync-critical splitting on real word timings; this only catches the residue
+ *  it could not cut (a long cue with no punctuation to break on), and only when
+ *  the pieces still get enough time to read. */
+function splitOversize(cues: PCue[]): PCue[] {
+  const out: PCue[] = [];
+  for (const c of cues) {
+    if (c.q || (c.text.length <= MAX_CHARS && fitsTwoLines(c.text)) || dur(c) < 2 * HARD_MIN) {
+      out.push(c);
+      continue;
+    }
+    const pieces = toFitting(c.text);
+    out.push(...(pieces.length === 1 ? [c] : respan(c, pieces)));
+  }
+  return out;
+}
 
 /** Absorb cues too brief to register, when the join still fits one cue. */
 function mergeShort(cues: PCue[]): PCue[] {
@@ -226,7 +310,8 @@ function stealTime(cues: PCue[], target: (c: PCue) => number): void {
     for (const [j, side] of [[i - 1, 'prev'], [i + 1, 'next']] as [number, string][]) {
       if (short <= 0.01 || j < 0 || j >= cues.length) continue;
       const d = cues[j];
-      const spare = Math.max(0, dur(d) - Math.max(1.2, 0.6 * needs(d)));
+      const floor = d.q ? Math.max(1.0, 0.45 * needs(d)) : Math.max(1.2, 0.6 * needs(d));
+      const spare = Math.max(0, dur(d) - floor);
       const take = Math.min(short, spare, 0.8);
       if (take <= 0.01) continue;
       if (side === 'prev') {
@@ -254,14 +339,16 @@ function stealTime(cues: PCue[], target: (c: PCue) => number): void {
 export function polishCues(input: Cue[]): Cue[] {
   let cues: PCue[] = (input as PCue[]).slice().sort((a, b) => a.start - b.start)
     .map((c) => ({ ...c, s0: c.start }));
+  cues = rebuildVerses(cues);
   for (let round = 0; round < 3; round++) {
+    cues = splitOversize(cues);
     cues = mergeShort(cues);
     dedupBoundaries(cues);
     moveDangling(cues);
     cues = mergeForDensity(cues);
     assignTiming(cues);
     stealTime(cues, (c) => c.text.length / TARGET_CPS);
-    stealTime(cues, () => HARD_MIN + 0.05);
+    stealTime(cues, () => FLOOR_TARGET);
     assignTiming(cues);
   }
   return cues.filter((c) => c.end > c.start && c.text.trim())
