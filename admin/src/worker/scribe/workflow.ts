@@ -308,10 +308,24 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               const repaired = isAudiobook
                 ? await qaPassAudiobook(env, cues as any, lang)
                 : await qaPass(env, cues, lang);
-              await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(repaired.cues), {
+              let final = repaired.cues;
+              let tightened = 0;
+              if (!isAudiobook) {
+                // Subtitles have a reading-speed limit that audiobook units do
+                // not. Cues still too dense at this point have already taken
+                // every spare moment around them, so the only lever left is
+                // wording; re-polish afterwards because shorter text changes
+                // what will fit and how long each cue needs.
+                const { condenseDense, polishCues } = await import('./translate')
+                  .then(async (m) => ({ ...m, ...(await import('./polish')) }));
+                const c = await condenseDense(env, final, lang);
+                tightened = c.fixed;
+                final = tightened ? polishCues(c.cues) : final;
+              }
+              await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(final), {
                 httpMetadata: { contentType: 'application/json' },
               });
-              return { fixes: repaired.fixes, tokens: takeUsage(), cost: takeCost() };
+              return { fixes: repaired.fixes + tightened, tokens: takeUsage(), cost: takeCost() };
             }
           );
           await addTokens(env, jobId, qa.tokens, (qa as any).cost || 0);

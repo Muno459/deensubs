@@ -569,7 +569,64 @@ export async function translateWords(
       cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + grab));
     }
   }
-  return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);
+  // Splitting above lands every cut on a real word boundary, so the timing stays
+  // tied to the speech. What is left is display polish the model is not reliable
+  // at: joining cues too brief to read, dropping a word written twice across a
+  // seam, and handing dense cues the silence beside them. It moves no cue more
+  // than half a second from where its words are spoken.
+  const { polishCues } = await import('./polish');
+  return polishCues(cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c));
+}
+
+/**
+ * Tighten the few cues still too dense to read, after timing has done all it can.
+ *
+ * Reading speed is characters over seconds. Once a cue has taken every spare
+ * moment beside it and its neighbours have none to give, the only remaining
+ * lever is wording. Measured on a real lecture that is a handful of cues and
+ * about 1.5% of the characters, so this is a small, targeted call rather than
+ * another pass over the whole file.
+ *
+ * Verses are never touched: their wording is canonical. Nothing is dropped
+ * either, only said in fewer words, and a rewrite is rejected unless it is
+ * genuinely shorter.
+ */
+export async function condenseDense(env: ScribeEnv, cues: Cue[], targetLang: string): Promise<{ cues: Cue[]; fixed: number }> {
+  const OVER = 20; // leaves headroom under the 21 CPS target
+  const out = [...cues];
+  const todo = out
+    .map((c, i) => ({ i, c }))
+    .filter(({ c }) => !(c as any).q && c.text.length / Math.max(0.3, c.end - c.start) > OVER);
+  if (!todo.length) return { cues: out, fixed: 0 };
+
+  let fixed = 0;
+  const BATCH = 25;
+  for (let k = 0; k < todo.length; k += BATCH) {
+    const batch = todo.slice(k, k + BATCH);
+    const lines = batch
+      .map(({ i, c }) => `${i}\tmax ${Math.max(12, Math.round((c.end - c.start) * TARGET_CPS))} chars\t${c.text}`)
+      .join('\n');
+    try {
+      const raw = await llmChat(env, [
+        { role: 'system', content: `You tighten subtitle lines for an Islamic lecture so they can be read in the time they are on screen. Target language: ${targetLang}. Keep the meaning, the register and every honorific (Allah ﷻ, the Prophet ﷺ, RA/AS/RH) exactly as they are. Keep transliterations (Tawhid, Sunnah, fiqh, Sharia). Do not add or remove content: say the same thing in fewer words. Return ONLY JSONL, one object per line: {"i": <id>, "t": "<shortened line>"}. Omit any line you cannot shorten without losing meaning.` },
+        { role: 'user', content: lines },
+      ], 4000, STRONG_MODEL);
+      for (const line of raw.split('\n')) {
+        const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
+        if (!t.startsWith('{')) continue;
+        try {
+          const f = JSON.parse(t);
+          const txt = typeof f.t === 'string' ? f.t.trim() : '';
+          if (typeof f.i === 'number' && out[f.i] && !(out[f.i] as any).q
+              && txt && txt.length < out[f.i].text.length) {
+            out[f.i] = { ...out[f.i], text: txt };
+            fixed++;
+          }
+        } catch { /* skip a malformed line */ }
+      }
+    } catch { /* a failed batch just leaves those cues as they were */ }
+  }
+  return { cues: out, fixed };
 }
 
 /** Netflix-grade QA repair: strong model reviews source ↔ translation in
