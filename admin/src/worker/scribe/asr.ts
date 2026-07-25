@@ -27,6 +27,38 @@ export function sttResultKey(requestId: string): string {
   return `scribe/stt-results/${requestId}.json`;
 }
 
+/** Path our HMAC-verified receiver lives on (admin.deensubs.com/hooks/elevenlabs). */
+const WEBHOOK_PATH = '/hooks/elevenlabs';
+
+/** Whether async (webhook) mode can actually deliver. Requires BOTH our signing
+ *  secret AND a webhook registered on the ElevenLabs workspace pointing at us:
+ *  webhooks are created in their dashboard (Developers > Webhooks > Transcription
+ *  completed), there is no create API, so this detects it instead of assuming.
+ *  Cached briefly in KV so it costs nothing per job, and fails closed to sync. */
+async function webhookDeliverable(env: ScribeEnv): Promise<boolean> {
+  if (!(env as any).ELEVENLABS_WEBHOOK_SECRET || !env.ELEVENLABS_API_KEY) return false;
+  const KEY = 'asr:webhook-ok';
+  try {
+    const cached = await env.MEDIA_KV?.get(KEY);
+    if (cached === '1') return true;
+    if (cached === '0') return false;
+  } catch {}
+  let ok = false;
+  try {
+    const r = await fetch('https://api.elevenlabs.io/v1/workspace/webhooks', {
+      headers: { 'xi-api-key': env.ELEVENLABS_API_KEY! },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (r.ok) {
+      const d: any = await r.json();
+      ok = (d.webhooks || []).some((w: any) =>
+        String(w.webhook_url || w.url || '').includes(WEBHOOK_PATH) && w.is_disabled !== true);
+    }
+  } catch { /* network trouble -> stay synchronous */ }
+  try { await env.MEDIA_KV?.put(KEY, ok ? '1' : '0', { expirationTtl: 300 }); } catch {}
+  return ok;
+}
+
 async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, attempts = 5, withFormats = false, forceSync = false): Promise<any> {
   // Async mode when the webhook secret is configured: the request returns
   // immediately with a transcription_id, and the result arrives EITHER via
@@ -35,9 +67,11 @@ async function sttCall(env: ScribeEnv, sourceUrl: string, pendingKey?: string, a
   // (pendingKey), so a crash, retry or resume picks up the SAME in-flight
   // transcription instead of paying for a new one.
   // forceSync bypasses the webhook entirely and reads the transcript straight
-  // from the response — the reliable path the dual-mode ASR uses (the webhook
-  // round-trip was stalling awaitResult for 40 min on some jobs).
-  const useWebhook = !forceSync && !!(env as any).ELEVENLABS_WEBHOOK_SECRET;
+  // from the response. Otherwise async mode is used ONLY when a webhook is
+  // actually registered upstream (see webhookDeliverable) — asking for
+  // webhook=true with nothing registered is what used to leave awaitResult
+  // polling for 40 minutes.
+  const useWebhook = !forceSync && (await webhookDeliverable(env));
 
   if (useWebhook && pendingKey) {
     const pending = await env.MEDIA_BUCKET.get(pendingKey);
@@ -508,9 +542,13 @@ async function unauthAsr(env: ScribeEnv, jobId: string, sourceKey: string, cfg: 
   }
 
   // Tier 4 — authenticated whole-file (paid, reliable). Last resort.
+  // Async when a webhook is registered (no wall-clock ceiling: a 8.2h file takes
+  // ~745s to transcribe, well past any synchronous deadline), synchronous
+  // otherwise. pendingKey makes an in-flight transcription resumable so a retry
+  // rejoins it instead of paying for a second one.
   if (env.ELEVENLABS_API_KEY) {
     console.log('final fallback → authenticated ElevenLabs API (whole file)');
-    return sttCall(env, url, undefined, 5, /* withFormats */ true, /* forceSync */ true);
+    return sttCall(env, url, `scribe/${jobId}/stt-pending.json`, 5, /* withFormats */ true, /* forceSync */ false);
   }
 
   throw new Error('ASR failed: Worker IP + CF pool exhausted, proxy fallback failed/absent, and no ELEVENLABS_API_KEY for the authenticated backstop');
@@ -530,9 +568,12 @@ export async function getAsrPlan(env: ScribeEnv): Promise<{ cfg: AsrConfig; mode
 
 export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, durationSec = 0): Promise<AsrResult> {
   // Dual mode (configurable in /tools):
-  //  - authenticated (API key set): the WHOLE file in ONE synchronous request
-  //    via source_url — no chunking, no webhook (the webhook round-trip was
-  //    stalling awaitResult for ~40 min and timing the step out at 2 h).
+  //  - authenticated (API key set): the WHOLE file via source_url, no chunking.
+  //    Async via webhook when one is registered upstream (which removes the
+  //    wall-clock ceiling: an 8.2 h file needs ~745 s to transcribe), otherwise
+  //    synchronous. The old "webhook stalls for 40 min" failure was simply
+  //    webhook=true with nothing registered to call us back; webhookDeliverable
+  //    now checks for that instead of assuming.
   //  - proxy (no key): FREE unauthenticated STT — the WHOLE file in ONE direct
   //    Worker fetch (no proxy, no chunking; the Worker IP isn't rate-limited and
   //    there is no ~60s cap — that was the residential proxy's idle timeout).
@@ -549,7 +590,7 @@ export async function runAsr(env: ScribeEnv, jobId: string, sourceKey: string, d
       ? await unauthAsr(env, jobId, sourceKey, cfg)
       : partial
         ? await chunkedAsr(env, jobId, sourceKey)
-        : await sttCall(env, `${CDN_BASE}/${sourceKey}`, undefined, 5, true, /* forceSync */ true);
+        : await sttCall(env, `${CDN_BASE}/${sourceKey}`, `scribe/${jobId}/stt-pending.json`, 5, true, /* forceSync */ false);
 
   const words: Word[] = data.words || [];
   if (!words.length) throw new Error('ElevenLabs returned no words');
