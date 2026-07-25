@@ -27,8 +27,12 @@ export function sttResultKey(requestId: string): string {
   return `scribe/stt-results/${requestId}.json`;
 }
 
-/** Path our HMAC-verified receiver lives on (admin.deensubs.com/hooks/elevenlabs). */
-const WEBHOOK_PATH = '/hooks/elevenlabs';
+/** Our HMAC-verified receiver. Matched EXACTLY (modulo trailing slash/space):
+ *  a near-miss url is worse than no webhook at all, because the transcript is
+ *  then never delivered and we wait out the whole poll window. A real
+ *  registration once carried a trailing comma, which 405s instead of reaching
+ *  the route, so substring matching is not good enough here. */
+const WEBHOOK_URL = 'https://admin.deensubs.com/hooks/elevenlabs';
 
 /** Whether async (webhook) mode can actually deliver. Requires BOTH our signing
  *  secret AND a webhook registered on the ElevenLabs workspace pointing at us:
@@ -52,7 +56,8 @@ async function webhookDeliverable(env: ScribeEnv): Promise<boolean> {
     if (r.ok) {
       const d: any = await r.json();
       ok = (d.webhooks || []).some((w: any) =>
-        String(w.webhook_url || w.url || '').includes(WEBHOOK_PATH) && w.is_disabled !== true);
+        String(w.webhook_url || w.url || '').trim().replace(/\/+$/, '') === WEBHOOK_URL
+        && w.is_disabled !== true && w.is_auto_disabled !== true);
     }
   } catch { /* network trouble -> stay synchronous */ }
   try { await env.MEDIA_KV?.put(KEY, ok ? '1' : '0', { expirationTtl: 300 }); } catch {}
