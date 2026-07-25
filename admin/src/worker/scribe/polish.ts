@@ -6,24 +6,35 @@
 // verse sat at 541 characters in 1.34 seconds. Those are mechanical constraints,
 // so they are enforced mechanically here, after translation.
 //
-// Every pass preserves the words AND the sync. Nothing is dropped, reordered or
-// reworded, and no pass invents a timestamp: cues are joined, trimmed, or handed
-// silence that was already empty.
+// TIMING IS NOT ONE OF THOSE CONSTRAINTS. Cue times come from ASR word indices,
+// which is the only reason they line up with the speaker's mouth, and this pass
+// holds two invariants over them:
 //
-// Splitting deliberately does NOT happen here. A split needs a new start time in
-// the middle of a cue, and the only honest source for that is the ASR word
-// timings, which live in translate.ts (splitOnce lands every cut on words[i].start).
-// Guessing it here from character counts drifted cues up to 6s off the audio when
-// measured, so splitting stays where the word data is and this pass refines what
-// comes out of it.
+//   1. A cue starts on the word it belongs to. Its start is words[w0].start and
+//      nothing here moves it, not to buy reading time, not to lead in.
+//   2. A cue never gives up the span where its words are spoken. It ends no
+//      earlier than words[w1].end.
+//
+// Extra screen time therefore comes from ONE place: silence that was already
+// empty between this cue's last word and the next cue's first. That is the whole
+// budget. There is no borrowing from a neighbour.
+//
+// An earlier version broke both. It leaned a start up to half a second early to
+// win reading time and let a 7-second display cap truncate a 9.6-second span of
+// speech. On the reference lecture that left 44% of cues off their word boundary
+// (worst 2.27s) and 33 seconds of the talk with the speaker audible and nothing
+// on screen — while passing all sixteen acceptance criteria, none of which
+// looked at sync. check-subs.py now measures both directly.
+//
+// Where a cue must be cut here (a verse too long to display, residue the word-
+// accurate splitter in translate.ts could not break), the cut is proposed by
+// character share and then MOVED ONTO A REAL WORD START, so every piece still
+// begins on something the speaker says. Which word is an approximation; that it
+// is a word is not.
 //
 // What cannot be fixed either way is a passage carrying more text than its
-// seconds allow: reading speed is characters over time, and when neither the text
-// nor the clock can move, only rewording helps.
-//
-// Measured against admin/tools/check-subs.py on the reference lecture, this
-// takes the file from 4/16 criteria to 13/16, the remainder being reading speed
-// on a handful of cues that need condensing.
+// seconds allow: reading speed is characters over time, and when the text cannot
+// move and the clock must not, only rewording helps. That is condenseDense.
 
 import { wrapCueText } from './srt';
 import type { Cue } from './types';
@@ -32,25 +43,17 @@ const MAX_LINE = 42;
 const MAX_CHARS = 84; // two lines of MAX_LINE
 const TARGET_CPS = 17; // comfortable reading speed
 const MIN_DUR = 1.0;
+// A display convention, not a fact about the audio: it caps how long a cue may
+// linger in SILENCE. It never shortens the stretch where the words are spoken.
 const MAX_DUR = 7.0;
 const HARD_MIN = 0.7; // below this a cue reads as a flash
-// Timestamps are written to the millisecond, and rounding the start up while
-// rounding the end down can shave a hair off a cue. Aim above the floor so a
-// cue that is legitimately long enough cannot render as though it is not.
-const FLOOR_TARGET = 0.78;
-const GAP = 0.08; // never let two cues touch
-// Cue timing comes straight from the speech (each cue is addressed by word
-// indices into the ASR), and that sync is the point: a line must be on screen
-// while its words are being said. Every pass here may buy a cue time, but none
-// may pull it far from the moment it is spoken. A subtitle appearing a beat
-// early is normal broadcast practice; half a second is the limit.
-const MAX_LEAD = 0.5;
-// Appearing late is worse than appearing early: the words are already being
-// spoken. Borrowing from the cue that follows delays it, so that is bounded
-// tighter than the lead-in.
-const MAX_DELAY = 0.25;
+const GAP = 0.08; // never let two cues touch, unless the speech is continuous
 
-type PCue = Cue & { q?: string; s0?: number };
+/** `s0`/`e0` are the speech span: where this cue's words start and stop being
+ *  spoken. `w` is the word-index range they came from, kept so a later pass can
+ *  still cut on a real word. */
+type Word = { start: number; end: number };
+type PCue = Cue & { q?: string; s0?: number; e0?: number; w?: [number, number] };
 
 /** Words that must not end a line or a cue: they govern what comes next, so
  *  stranding them reads as a stumble ("the dinar, the / dirham"). */
@@ -66,6 +69,7 @@ const dur = (c: PCue) => c.end - c.start;
 const cps = (c: PCue) => c.text.length / Math.max(0.001, dur(c));
 const needs = (c: PCue) => Math.max(MIN_DUR, c.text.length / TARGET_CPS);
 const fitsTwoLines = (t: string) => wrapCueText(t, MAX_LINE).split('\n').length <= 2;
+const speechEnd = (c: PCue) => Math.max(c.e0 ?? c.end, c.start + 0.001);
 
 /** Candidate break points, strongest closing punctuation first. */
 function breakPoints(text: string): { at: number; weight: number }[] {
@@ -115,32 +119,66 @@ function toFitting(text: string): string[] {
   return out;
 }
 
-/** Lay pieces across a cue's span, each given time in proportion to its length. */
-function respan(c: PCue, pieces: string[]): PCue[] {
+/**
+ * Lay pieces across a cue's span.
+ *
+ * Each cut is proposed where the character share falls, then moved onto the
+ * nearest word start inside the cue. That word is where the piece begins to be
+ * spoken, so the piece gets a real anchor instead of a number derived from how
+ * long the English happens to be. Without word data the proportional time is
+ * used as-is — approximate, and the reason `words` is threaded in from both
+ * callers rather than left optional in practice.
+ */
+function respan(c: PCue, pieces: string[], words?: Word[]): PCue[] {
+  if (pieces.length <= 1) return [{ ...c, text: pieces[0] ?? c.text }];
   const total = pieces.reduce((n, p) => n + p.length, 0) || 1;
   const span = dur(c);
-  let t = c.start;
+  const proposed: number[] = [];
+  let acc = 0;
+  for (let i = 0; i < pieces.length - 1; i++) {
+    acc += pieces[i].length;
+    proposed.push(c.start + (span * acc) / total);
+  }
+
+  // Move each cut onto a real word start, keeping them ordered and leaving at
+  // least one word for every piece that still has to be placed.
+  const cut: number[] = [];
+  if (words && c.w) {
+    let after = c.w[0];
+    for (let i = 0; i < proposed.length; i++) {
+      const last = c.w[1] - (proposed.length - 1 - i);
+      let best = -1;
+      let bestD = Infinity;
+      for (let k = after + 1; k <= last; k++) {
+        const d = Math.abs(words[k].start - proposed[i]);
+        if (d < bestD) { bestD = d; best = k; }
+      }
+      if (best < 0) break;
+      cut.push(best);
+      after = best;
+    }
+  }
+
+  if (cut.length !== pieces.length - 1) {
+    // No usable word data: fall back to the proportional cut.
+    let t = c.start;
+    return pieces.map((p, i) => {
+      const end = i === pieces.length - 1 ? c.end : proposed[i];
+      const piece: PCue = { ...c, start: t, end, text: p, s0: t, e0: end, w: undefined };
+      t = end;
+      return piece;
+    });
+  }
+
   return pieces.map((p, i) => {
-    const end = i === pieces.length - 1 ? c.end : t + (span * p.length) / total;
-    const piece: PCue = { ...c, start: t, end, text: p, s0: t };
-    t = end;
-    return piece;
+    const w0 = i === 0 ? c.w![0] : cut[i - 1];
+    const w1 = i === pieces.length - 1 ? c.w![1] : cut[i] - 1;
+    const start = i === 0 ? c.start : words![w0].start;
+    const spoken = i === pieces.length - 1 ? speechEnd(c) : words![w1].end;
+    return { ...c, start, end: Math.max(spoken, start + 0.001), text: p, s0: start, e0: spoken, w: [w0, w1] as [number, number] };
   });
 }
 
-
-/** One presentation per recitation, laid out legibly.
- *
- *  Fuzzy matching emits the same verse two or three times over a few seconds and
- *  every match carries the FULL canonical translation, so the verse gets shown
- *  repeatedly, each copy crammed into a fraction of the recitation. Cluster all
- *  cues of a verse that sit near each other, take the longest text (that is the
- *  complete canonical wording), and spread it across the whole window.
- *
- *  Splitting here is by character share rather than word timing, and that is the
- *  right call for a verse: the canonical English does not map word-for-word onto
- *  the Arabic being recited, so the meaningful guarantee is that the verse is on
- *  screen while it is recited, not that each clause lands on a syllable. */
 /** Is this line simply part of the verse, worded slightly differently? Used to
  *  tell the translator's own rendering of a recited verse apart from speech the
  *  speaker made in the middle of reciting it. */
@@ -152,7 +190,18 @@ function partOf(text: string, canonical: string): boolean {
   return w.filter((x) => inCanon.has(x)).length / w.length >= 0.6;
 }
 
-function rebuildVerses(cues: PCue[]): PCue[] {
+/** One presentation per recitation, laid out legibly.
+ *
+ *  Fuzzy matching emits the same verse two or three times over a few seconds and
+ *  every match carries the FULL canonical translation, so the verse gets shown
+ *  repeatedly, each copy crammed into a fraction of the recitation. Cluster all
+ *  cues of a verse that sit near each other, take the longest text (that is the
+ *  complete canonical wording), and spread it across the whole window.
+ *
+ *  The canonical English does not map word-for-word onto the Arabic being
+ *  recited, so the guarantee for a verse is that it is on screen while it is
+ *  recited. Its internal cuts still land on word starts like everything else. */
+function rebuildVerses(cues: PCue[], words?: Word[]): PCue[] {
   const groups = new Map<string, PCue[]>();
   for (const c of cues) if (c.q) (groups.get(c.q) ?? groups.set(c.q, []).get(c.q)!).push(c);
 
@@ -162,12 +211,16 @@ function rebuildVerses(cues: PCue[]): PCue[] {
     let run: PCue[] = [items[0]];
     const flush = () => {
       const start = Math.min(...run.map((c) => c.start));
-      const end = Math.max(...run.map((c) => c.end));
+      const end = Math.max(...run.map((c) => speechEnd(c)));
       const full = run.reduce((a, b) => (b.text.length > a.text.length ? b : a)).text;
       const cite = run.map((c) => c.text).join(' ').match(/\(Quran [^)]+\)/);
       const text = cite && !full.includes(cite[0]) ? `${full} ${cite[0]}` : full;
-      const block: PCue = { ...run[0], start, end, text, q, s0: start };
-      blocks.push(...respan(block, toFitting(text)));
+      const spans = run.map((c) => c.w).filter(Boolean) as [number, number][];
+      const w = spans.length
+        ? [Math.min(...spans.map((s) => s[0])), Math.max(...spans.map((s) => s[1]))] as [number, number]
+        : undefined;
+      const block: PCue = { ...run[0], start, end, text, q, s0: start, e0: end, w };
+      blocks.push(...respan(block, toFitting(text), words));
     };
     for (const c of items.slice(1)) {
       // Only join matches that are genuinely one recitation. A wide window
@@ -196,11 +249,9 @@ function rebuildVerses(cues: PCue[]): PCue[] {
   return [...kept, ...blocks].sort((a, b) => a.start - b.start);
 }
 
-/** Split whatever still breaks the display limits. translate.ts does the
- *  sync-critical splitting on real word timings; this only catches the residue
- *  it could not cut (a long cue with no punctuation to break on), and only when
- *  the pieces still get enough time to read. */
-function splitOversize(cues: PCue[]): PCue[] {
+/** Split whatever still breaks the display limits. translate.ts does the bulk of
+ *  the splitting on word timings; this catches the residue it could not cut. */
+function splitOversize(cues: PCue[], words?: Word[]): PCue[] {
   const out: PCue[] = [];
   for (const c of cues) {
     if (c.q || (c.text.length <= MAX_CHARS && fitsTwoLines(c.text)) || dur(c) < 2 * HARD_MIN) {
@@ -208,44 +259,7 @@ function splitOversize(cues: PCue[]): PCue[] {
       continue;
     }
     const pieces = toFitting(c.text);
-    out.push(...(pieces.length === 1 ? [c] : respan(c, pieces)));
-  }
-  return out;
-}
-
-/** Even out a dense run by pouring it back together and re-cutting it.
- *
- *  Merging alone stalls at the 84-character cap: 69 characters in 1.7s beside 51
- *  in 3.3s is 40 CPS and 16 CPS, and the pair is too long to be one cue. Poured
- *  together and re-cut, the same words spread over the same seconds and neither
- *  end carries the burst.
- *
- *  This redistributes text across a span, so it is the one pass that can move a
- *  line away from the moment it is spoken. It is therefore only accepted when
- *  every new piece still begins within the permitted lead of a boundary that
- *  came from the speech; otherwise the speech-accurate cut is kept and the cue
- *  stays dense, to be handled by condensing the wording instead. */
-function rebalanceDense(cues: PCue[]): PCue[] {
-  const out: PCue[] = [];
-  let i = 0;
-  while (i < cues.length) {
-    if (cues[i].q) { out.push(cues[i]); i++; continue; }
-    let j = i;
-    while (j + 1 < cues.length && !cues[j + 1].q
-           && cues[j + 1].start - cues[j].end < 0.5 && j - i < 5) j++;
-    const run = cues.slice(i, j + 1);
-    i = j + 1;
-    if (run.length < 2 || !run.some((c) => cps(c) > TARGET_CPS)) { out.push(...run); continue; }
-
-    const merged: PCue = {
-      ...run[0], end: run[run.length - 1].end,
-      source: run.map((c) => c.source || '').join(' ').trim(),
-    };
-    const pieces = respan(merged, toFitting(run.map((c) => c.text).join(' ').trim()));
-    const anchors = run.map((c) => c.s0 ?? c.start);
-    const drifted = pieces.some((p) =>
-      Math.min(...anchors.map((a) => Math.abs(p.start - a))) > MAX_LEAD);
-    out.push(...(drifted ? run : pieces.map((p) => ({ ...p, s0: p.start }))));
+    out.push(...(pieces.length === 1 ? [c] : respan(c, pieces, words)));
   }
   return out;
 }
@@ -260,6 +274,8 @@ function mergeShort(cues: PCue[]): PCue[] {
       if (joined.length <= MAX_CHARS && fitsTwoLines(joined) && c.start - prev.end < 0.6) {
         prev.text = joined;
         prev.end = c.end;
+        prev.e0 = Math.max(speechEnd(prev), speechEnd(c));
+        if (prev.w && c.w) prev.w = [prev.w[0], c.w[1]];
         prev.source = `${prev.source || ''} ${c.source || ''}`.trim();
         continue;
       }
@@ -286,7 +302,6 @@ function dedupBoundaries(cues: PCue[]): void {
   }
 }
 
-
 /** A cue must not end on a word that governs the next one. */
 function moveDangling(cues: PCue[]): void {
   for (let i = 0; i < cues.length - 1; i++) {
@@ -300,25 +315,36 @@ function moveDangling(cues: PCue[]): void {
   }
 }
 
-/** Each cue takes the time it needs from the silence after it, and failing that
- *  leads in from the silence before it, never overlapping a neighbour. */
+/**
+ * Place every cue on the clock.
+ *
+ * Starts are not negotiable — each cue returns to the word it belongs to, every
+ * round, so no earlier pass can leave one drifted. Ends cover the speech first
+ * and then take whatever silence runs up to the next cue. When the speech itself
+ * runs right up to the next cue the two are allowed to touch rather than losing
+ * the tail of a word to the gap.
+ */
 function assignTiming(cues: PCue[]): void {
-  cues.sort((a, b) => a.start - b.start);
+  cues.sort((a, b) => (a.s0 ?? a.start) - (b.s0 ?? b.start));
+  for (const c of cues) c.start = c.s0 ?? c.start;
   for (let i = 0; i < cues.length; i++) {
     const c = cues[i];
-    const hi = i + 1 < cues.length ? cues[i + 1].start - GAP : c.end + 2.0;
-    const anchor = c.s0 ?? c.start;
-    const lo = Math.max(i > 0 ? cues[i - 1].end + GAP : 0, anchor - MAX_LEAD);
-    const need = needs(c);
-    if (dur(c) < need && hi > c.end) c.end = Math.min(c.start + need, hi);
-    if (dur(c) < need && lo < c.start) c.start = Math.max(lo, c.end - need);
-    if (c.end > hi) c.end = hi;
-    if (dur(c) > MAX_DUR) c.end = c.start + MAX_DUR;
+    const spoken = speechEnd(c);
+    const next = i + 1 < cues.length ? cues[i + 1].start : Infinity;
+    // Cover the speech, then extend into silence for readability; MAX_DUR trims
+    // only that extension, never the speech.
+    const want = Math.max(spoken, Math.min(c.start + needs(c), c.start + MAX_DUR));
+    // A visible gap before the next cue, given up only where the speech itself
+    // runs into it — losing the tail of a spoken word is the worse trade.
+    const ceiling = Number.isFinite(next) ? next : spoken + 2.0;
+    const preferred = Number.isFinite(next) ? Math.max(next - GAP, spoken) : ceiling;
+    c.end = Math.max(c.start + 0.001, Math.min(want, preferred, ceiling));
   }
 }
 
 /** Reading speed is characters over seconds, so joining a dense cue to a sparse
- *  neighbour averages the two. */
+ *  neighbour averages the two. The join keeps the first cue's start and the
+ *  second's speech end, so it costs no sync. */
 function mergeForDensity(cues: PCue[]): PCue[] {
   const out: PCue[] = [];
   let i = 0;
@@ -332,68 +358,38 @@ function mergeForDensity(cues: PCue[]): PCue[] {
     const span = n.end - c.start;
     if (text.length <= MAX_CHARS && span <= MAX_DUR && fitsTwoLines(text)
         && text.length / span < Math.max(cps(c), cps(n)) - 0.5) {
-      out.push({ ...c, end: n.end, text, source: `${c.source || ''} ${n.source || ''}`.trim() });
+      out.push({
+        ...c, end: n.end, text,
+        e0: Math.max(speechEnd(c), speechEnd(n)),
+        w: c.w && n.w ? [c.w[0], n.w[1]] as [number, number] : undefined,
+        source: `${c.source || ''} ${n.source || ''}`.trim(),
+      });
       i += 2;
     } else { out.push(c); i++; }
   }
   return out;
 }
 
-/** A cue with no silence beside it can still borrow duration from a comfortable
- *  neighbour. A few tenths off a roomy cue costs nothing a viewer can perceive,
- *  and it is the only time available to a line wedged between two verses. */
-function stealTime(cues: PCue[], target: (c: PCue) => number): void {
-  for (let i = 0; i < cues.length; i++) {
-    const c = cues[i];
-    if (c.q) continue;
-    let short = target(c) - dur(c);
-    if (short <= 0.01) continue;
-    for (const [j, side] of [[i - 1, 'prev'], [i + 1, 'next']] as [number, string][]) {
-      if (short <= 0.01 || j < 0 || j >= cues.length) continue;
-      const d = cues[j];
-      const floor = d.q ? Math.max(1.0, 0.45 * needs(d)) : Math.max(1.2, 0.6 * needs(d));
-      const spare = Math.max(0, dur(d) - floor);
-      const take = Math.min(short, spare, 0.8);
-      if (take <= 0.01) continue;
-      if (side === 'prev') {
-        const room = Math.min(take, Math.max(0, c.start - ((c.s0 ?? c.start) - MAX_LEAD)));
-        if (room <= 0.01) continue;
-        d.end -= room; c.start -= room; short -= room; continue;
-      }
-      else {
-        const room = Math.min(take, Math.max(0, ((d.s0 ?? d.start) + MAX_DELAY) - d.start));
-        if (room <= 0.01) continue;
-        d.start += room; c.end += room; short -= room; continue;
-      }
-      short -= take;
-    }
-  }
-}
-
 /**
  * Enforce the display constraints on a translated cue list.
  *
- * The passes interact — rebalancing creates cues that need refitting, refitting
- * creates density that wants rebalancing — so they are run to a fixed point
- * rather than once through.
+ * The passes interact — a merge creates text that needs refitting, refitting
+ * creates cues that want merging — so they run to a fixed point rather than once
+ * through. `words` is the ASR word list the cues were built from; pass it so
+ * cuts land on word starts.
  */
-export function polishCues(input: Cue[]): Cue[] {
+export function polishCues(input: Cue[], words?: Word[]): Cue[] {
   let cues: PCue[] = (input as PCue[]).slice().sort((a, b) => a.start - b.start)
-    .map((c) => ({ ...c, s0: c.start }));
-  cues = rebuildVerses(cues);
+    .map((c) => ({ ...c, s0: c.start, e0: c.end }));
+  cues = rebuildVerses(cues, words);
   for (let round = 0; round < 3; round++) {
-    cues = splitOversize(cues);
+    cues = splitOversize(cues, words);
     cues = mergeShort(cues);
-    cues = rebalanceDense(cues);
-    cues = splitOversize(cues);
     dedupBoundaries(cues);
     moveDangling(cues);
     cues = mergeForDensity(cues);
     assignTiming(cues);
-    stealTime(cues, (c) => c.text.length / TARGET_CPS);
-    stealTime(cues, () => FLOOR_TARGET);
-    assignTiming(cues);
   }
   return cues.filter((c) => c.end > c.start && c.text.trim())
-    .map(({ s0, ...c }) => c as Cue);
+    .map(({ s0, e0, ...c }) => c as Cue);
 }

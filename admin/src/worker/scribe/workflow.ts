@@ -325,6 +325,10 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
                 // what will fit and how long each cue needs.
                 const { condenseDense, polishCues } = await import('./translate')
                   .then(async (m) => ({ ...m, ...(await import('./polish')) }));
+                // Polish cuts oversize cues, and a cut needs a real word start
+                // or the line stops matching the speaker's mouth, so the word
+                // list is reloaded here rather than letting it guess.
+                const asrWords = (await loadAsr(env, asr.asrKey)).words;
                 // Shortening a cue changes what fits and how long its neighbours
                 // need, so polish has to run again — which can push a different
                 // cue back over the limit. Two rounds converges, and the second
@@ -334,7 +338,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
                   const c = await condenseDense(env, final, lang);
                   if (!c.fixed) break;
                   tightened += c.fixed;
-                  final = polishCues(c.cues);
+                  final = polishCues(c.cues, asrWords);
                 }
               }
               await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(final), {

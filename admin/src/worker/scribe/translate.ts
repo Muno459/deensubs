@@ -572,10 +572,11 @@ export async function translateWords(
   // Splitting above lands every cut on a real word boundary, so the timing stays
   // tied to the speech. What is left is display polish the model is not reliable
   // at: joining cues too brief to read, dropping a word written twice across a
-  // seam, and handing dense cues the silence beside them. It moves no cue more
-  // than half a second from where its words are spoken.
+  // seam, and handing dense cues the silence beside them. The word list goes
+  // with the cues so it can cut on a word too, and the `w` spans are kept on the
+  // way out so the QA re-polish still has them.
   const { polishCues } = await import('./polish');
-  return polishCues(cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c));
+  return polishCues(cues.filter((c) => c.end > c.start && c.text.trim()), words);
 }
 
 /**

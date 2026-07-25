@@ -6,9 +6,22 @@ Frozen success criteria for DeenSubs subtitles. These are the definition of
 pipeline currently produces. Run against a job's rendered SRT plus its
 cues.json (which carries the `q` verse keys the SRT cannot express).
 
-    python3 check-subs.py subs.srt cues.json
+    python3 check-subs.py subs.srt cues.json asr.json
 
 Exits non-zero if any criterion fails.
+
+Sync is checked against the ASR, not against the pipeline
+-------------------------------------------------------
+The first sixteen criteria are all about text: how wide a line is, how fast it
+reads, whether a verse repeats. A file can satisfy every one of them and still
+be unwatchable, and one did: 44% of its cues started somewhere other than the
+word they belonged to, and 33 seconds of the lecture played with the speaker
+audible and nothing on screen. Nobody noticed until someone watched it.
+
+So sync is measured here directly against the word timings, independently of
+whatever the pipeline believes. A cue must begin on a word start (T1), and no
+stretch of speech may go uncovered (T2). asr.json is required rather than
+optional, because "not checked" must never render as "passed".
 
 Why the thresholds are what they are
 ------------------------------------
@@ -23,6 +36,7 @@ either mangling scripture or desyncing it from the audio. So verses are required
 to be shown ONCE, laid out legibly, and given every second of screen time that
 is actually available - not to hit a speed they physically cannot hit.
 """
+import bisect
 import json
 import re
 import sys
@@ -36,6 +50,9 @@ MIN_DUR = 1.0
 MAX_DUR = 7.0
 HARD_MIN_DUR = 0.7
 BASELINE_BOUNDARY_DUPS = 19  # measured on the pre-change baseline; must not regress
+ANCHOR_TOL = 0.002        # a cue start must BE a word start, not sit near one
+HOLE_TOL = 0.5            # speech on screen for nobody, in seconds
+LOITER_MAX = 2.0          # how long a cue may sit on screen after its last word
 
 CLING = set(
     "a an the and or but nor so yet of in on at to for with from by as is was are were be been "
@@ -65,9 +82,12 @@ def is_cling(word):
     return re.sub(r"[^a-z']", "", word.lower()) in CLING
 
 
-def main(srt_path, cues_path):
+def main(srt_path, cues_path, asr_path):
     srt = parse_srt(srt_path)
     cues = json.load(open(cues_path, encoding="utf-8"))
+    asr = json.load(open(asr_path, encoding="utf-8"))
+    words = [w for w in (asr.get("words") or asr) if (w.get("text") or "").strip()]
+    word_starts = sorted({round(w["start"], 3) for w in words})
 
     # Pair the SRT cues with their cues.json twins so verse cues (identified by
     # `q`) can be judged separately. The SRT is rendered from the cue list in
@@ -112,12 +132,32 @@ def main(srt_path, cues_path):
     check("S4b", f"speech: no cue over {SPEECH_CPS_HARD} CPS", worst <= SPEECH_CPS_HARD,
           f"worst {worst:.0f} CPS")
 
+    # A cue is "too long" when it OVERSTAYS, not when the speaker simply keeps
+    # talking. Capping raw duration is how a 7s display convention came to
+    # truncate a 9.6s span of speech and leave a hole in the middle of a
+    # sentence, so what is measured here is the silent tail: how long a line sits
+    # on screen after its last word was said.
+    ends = sorted(w["end"] for w in words)
+    starts_only = [w["start"] for w in words]
+
+    def silent_tail(c):
+        i = bisect.bisect_left(starts_only, c["start"] - 1e-6)
+        last = c["start"]
+        while i < len(words) and words[i]["start"] < c["end"] - 1e-6:
+            last = max(last, words[i]["end"])
+            i += 1
+        return max(0.0, c["end"] - last)
+
+    tails = [(c, silent_tail(c)) for c in speech]
     dur = [(c, c["end"] - c["start"]) for c in speech]
-    outside = [c for c, d in dur if d < MIN_DUR or d > MAX_DUR]
+    outside = [c for c, d in dur if d < MIN_DUR] + [c for c, t in tails if t > LOITER_MAX]
     tooshort = [c for c, d in dur if d < HARD_MIN_DUR]
-    check("S5a", f"speech: >=98% of cues {MIN_DUR}-{MAX_DUR}s",
+    longest = max((d for _, d in dur), default=0)
+    worst_tail = max((t for _, t in tails), default=0)
+    check("S5a", f"speech: >=98% of cues >= {MIN_DUR}s and idle <= {LOITER_MAX}s after their last word",
           pct(len(speech) - len(outside), len(speech)) >= 98.0,
-          f"{len(outside)} outside ({pct(len(outside), len(speech)):.1f}%)")
+          f"{len(outside)} outside ({pct(len(outside), len(speech)):.1f}%), "
+          f"worst idle {worst_tail:.2f}s, longest cue {longest:.1f}s")
     check("S5b", f"speech: no cue under {HARD_MIN_DUR}s", not tooshort, f"{len(tooshort)} cues")
 
     dangling = [c for c in speech if c["text"] and is_cling(c["text"].split()[-1])]
@@ -170,6 +210,48 @@ def main(srt_path, cues_path):
     check("V4", "verses: dense cues use the silence available to them", not lazy,
           f"{len(lazy)} cues stop early")
 
+    # ---- sync, measured against the ASR ----------------------------------
+    starts = word_starts
+
+    def nearest(vals, x):
+        i = bisect.bisect_left(vals, x)
+        return min((abs(vals[j] - x) for j in (i - 1, i, i + 1) if 0 <= j < len(vals)), default=1e9)
+
+    off = [(c, nearest(starts, c["start"])) for c in srt]
+    drifted = [(d, c) for c, d in off if d > ANCHOR_TOL]
+    worst_off = max((d for _, d in off), default=0)
+    check("T1", "every cue starts on a spoken word", not drifted,
+          f"{len(drifted)} off-anchor ({pct(len(drifted), len(srt)):.1f}%), worst {worst_off:.3f}s")
+
+    # Uncovered speech: a word said while no cue is on screen.
+    spans = []
+    for c in sorted(srt, key=lambda c: c["start"]):
+        if spans and c["start"] <= spans[-1][1] + 1e-6:
+            spans[-1][1] = max(spans[-1][1], c["end"])
+        else:
+            spans.append([c["start"], c["end"]])
+    heads = [s[0] for s in spans]
+
+    def on_screen(t):
+        i = bisect.bisect_right(heads, t) - 1
+        return i >= 0 and spans[i][0] - 1e-6 <= t <= spans[i][1] + 1e-6
+
+    holes = []
+    for w in words:
+        if on_screen(w["start"]) or on_screen(w["end"]):
+            continue
+        if holes and w["start"] - holes[-1][1] < 0.4:
+            holes[-1][1] = w["end"]
+        else:
+            holes.append([w["start"], w["end"]])
+    holes = [h for h in holes if h[1] - h[0] >= HOLE_TOL]
+    lost = sum(h[1] - h[0] for h in holes)
+    worst_hole = max((h[1] - h[0] for h in holes), default=0)
+    check("T2", f"no speech left uncovered for {HOLE_TOL}s or more", not holes,
+          f"{len(holes)} holes, {lost:.1f}s lost, worst {worst_hole:.2f}s"
+          + (f" at {int(max(holes, key=lambda h: h[1]-h[0])[0])//60}:"
+             f"{int(max(holes, key=lambda h: h[1]-h[0])[0])%60:02d}" if holes else ""))
+
     # ---- global ----------------------------------------------------------
     ov = [i for i in range(len(srt) - 1) if srt[i]["end"] > srt[i + 1]["start"] + 0.001]
     check("G1", "no overlapping cues", not ov, f"{len(ov)} overlaps")
@@ -201,7 +283,7 @@ def main(srt_path, cues_path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 4:
         print(__doc__)
         sys.exit(2)
-    sys.exit(main(sys.argv[1], sys.argv[2]))
+    sys.exit(main(sys.argv[1], sys.argv[2], sys.argv[3]))
