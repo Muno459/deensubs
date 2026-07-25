@@ -616,11 +616,13 @@ function ConvertToAudiobook({ job }: { job: any }) {
   );
 }
 
-function JobDetail({ job }: { job: any }) {
+function JobDetail({ job, onChanged }: { job: any; onChanged?: () => void }) {
   const [tab, setTab] = useState<'overview' | 'preview'>('overview');
   const [srt, setSrt] = useState<string | null>(null);
   const [dub, setDub] = useState<any>({ status: job.dub_status || 'none', key: job.dub_key });
   const [dubBusy, setDubBusy] = useState(false);
+  const [reOpen, setReOpen] = useState(false);
+  const [reBusy, setReBusy] = useState(false);
   const toast = useToast();
 
   // Poll dubbing progress while active
@@ -805,18 +807,12 @@ function JobDetail({ job }: { job: any }) {
           )}
           {job.status === 'done' && (
             <button
-              onClick={async () => {
-                if (!confirm('Re-translate with the current quality pipeline? Existing subtitles for this job are replaced (download + transcript reused).')) return;
-                try {
-                  await api(`/api/scribe/${job.id}/retranslate-all`, { method: 'POST' });
-                  toast.push('Re-translation started');
-                } catch (e: any) {
-                  toast.push(e.message, 'error');
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97]"
+              disabled={reBusy}
+              onClick={() => setReOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97] disabled:opacity-50"
             >
-              <Icon name="refresh" className="h-3 w-3" /> Re-translate
+              {reBusy ? <Spinner className="h-3 w-3" /> : <Icon name="refresh" className="h-3 w-3" />}
+              {reBusy ? 'Starting...' : 'Re-translate'}
             </button>
           )}
           {job.srt_key && (
@@ -855,6 +851,65 @@ function JobDetail({ job }: { job: any }) {
     </div>
       )}
       <PublishModal job={job} open={publishOpen} onClose={() => setPublishOpen(false)} />
+
+      <Modal open={reOpen} onClose={() => setReOpen(false)} title="Re-translate this job">
+        <p className="text-[13px] leading-relaxed text-muted">
+          Segments and translates again with the current pipeline. The video and the
+          ElevenLabs transcript are reused, so this costs translation only, never a
+          re-download or re-transcription.
+        </p>
+        <div className="mt-3 grid gap-2 text-[12px] sm:grid-cols-2">
+          <div className="rounded-lg border border-hairline bg-soft p-3">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">Reused, free</div>
+            <ul className="space-y-0.5 text-muted">
+              <li>Downloaded video</li>
+              <li>Transcript ({job.cue_count ? 'already transcribed' : 'asr.json'})</li>
+            </ul>
+          </div>
+          <div className="rounded-lg border border-hairline bg-soft p-3">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">Replaced</div>
+            <ul className="space-y-0.5 text-muted">
+              <li>Cues and subtitles{job.srt_langs ? ` (${(JSON.parse(job.srt_langs || '[]') || []).join(', ') || job.target_lang})` : ''}</li>
+              <li>Transcript exports and chapters</li>
+              <li>Quality report</li>
+            </ul>
+          </div>
+        </div>
+        {job.published_video_id || job.srt_key ? (
+          <p className="mt-3 text-[12px] text-amber-300/90">
+            This job is already published. The live subtitles change as soon as the
+            re-translation finishes.
+          </p>
+        ) : null}
+        <div className="mt-4 flex items-center gap-2">
+          <Button
+            disabled={reBusy}
+            onClick={async () => {
+              setReBusy(true);
+              try {
+                await api(`/api/scribe/${job.id}/retranslate-all`, { method: 'POST' });
+                setReOpen(false);
+                toast.push('Re-translation started');
+                // Without this the jobs list still says "done", so the poller
+                // (gated on anything running) never starts and the stage bar
+                // sits frozen until a manual refresh.
+                onChanged?.();
+              } catch (e: any) {
+                toast.push(e.message, 'error');
+              }
+              setReBusy(false);
+            }}
+          >
+            {reBusy ? 'Starting...' : 'Re-translate'}
+          </Button>
+          <button
+            onClick={() => setReOpen(false)}
+            className="rounded-lg border border-hairline bg-soft px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-cream"
+          >
+            Cancel
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -1362,7 +1417,7 @@ export default function Scribe() {
                     className="overflow-hidden"
                   >
                     <div className="px-4 pb-4">
-                      <JobDetail job={j} />
+                      <JobDetail job={j} onChanged={refetch} />
                     </div>
                   </motion.div>
                 )}
