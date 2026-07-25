@@ -67,11 +67,12 @@ RULES:
 - Segment at natural boundaries: sentence ends, pauses (marked [GAP]), speaker changes (marked [SPEAKER]).
 - Each cue: ideally 1.5-7 seconds of speech, translation at most 2 lines x 42 characters (~84 chars). NEVER exceed 84 characters — split into another cue instead.
 
-SEGMENT ON MEANING, NOT ON LENGTH. Every cue must be a self-contained unit a viewer can read in one glance:
-- End a cue at a clause or sentence boundary. Do not end one mid-clause and let it dangle into the next.
+SEGMENT ON MEANING AND DELIVERY, NOT ON LENGTH. Every cue must be a self-contained unit a viewer can read in one glance. Judge a boundary by all of these together, not by character count:
+- Where the speaker pauses or draws breath ([GAP] markers, and the audio itself when you are given it). This is the strongest signal.
+- Where the grammar closes: end at a clause or sentence boundary, never mid-clause dangling into the next cue.
 - NEVER end a cue on a word that governs what follows: an article (a, the), preposition (of, in, to, for, with, from, by), conjunction (and, or, but), auxiliary (is, was, has), or a relative (that, which, who). Move that word to the next cue.
 - Keep together what cannot be understood apart: a verb and its object, a name and its title, a number and its unit, a quotation and the verb introducing it.
-- Prefer a slightly short cue with a clean edge over a full one that breaks awkwardly.
+- Prefer a slightly short cue with a clean edge over a full one that breaks awkwardly. Length is a limit to respect, never a target to fill.
 - Translate to ${targetLang}. Translate ALL meaningful content faithfully — never paraphrase away or condense meaning.
 - Clean speech artifacts: drop stutters, false starts, and filler sounds from the translation (their word indices still belong to the cue covering that span).
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
@@ -203,9 +204,18 @@ export async function windowAudio(env: ScribeEnv, opts: AudioOpts, startSec: num
   }
 }
 
-/** Appended to the system prompt ONLY when the window's audio is attached. */
-export const AUDIO_NOTE =
-  '\n- You are ALSO given the actual audio of this passage (it begins at the first listed word). Listen to it: tone, pauses, emphasis and recitation style should inform both your wording and where you segment. The numbered words remain the authoritative transcript.';
+/** Appended to the system prompt ONLY when the window's audio is attached.
+ *  Where a cue should break is a question about speech, not about text, and the
+ *  model can hear the answer: breaths and held pauses mark real boundaries that
+ *  punctuation and word timings only approximate. So when audio is present it
+ *  outranks the textual heuristics for cut placement. */
+export const AUDIO_NOTE = `
+- You are ALSO given the actual audio of this passage (it begins at the first listed word). The numbered words stay the authoritative transcript, but the AUDIO is the authority on WHERE TO CUT.
+- Put cue boundaries where the speaker actually breaks: a breath, a held pause, the voice falling to close a thought or lifting to open a new one. Never cut while the speaker is still mid-flow just because the text reached its character budget; end the cue earlier, at the last real break.
+- A phrase delivered in one continuous breath belongs in one cue. If it is too long for one cue, split it at the speaker's own internal pause, never at the midpoint of the text.
+- Keep an emphasised or stressed word together with the phrase it belongs to.
+- Recitation (Quran, hadith, du'a) is phrased by the reciter's stops, which do not line up with English sentence punctuation. Follow what you hear.
+- The [GAP] markers are a rough hint derived from timings. Trust the audio over them.`;
 
 export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000, model?: string): Promise<string> {
   const base = (env.SCRIBE_LLM_URL || '').replace(/\/$/, '');
