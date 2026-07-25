@@ -62,7 +62,21 @@ function dechunk(a: Uint8Array): Uint8Array {
   return concat(out);
 }
 type HttpResp = { status: number; headers: Record<string, string>; setCookies: string[]; body: string };
-function parseHttp(raw: Uint8Array): HttpResp {
+
+/** Inflate a gzip/deflate response body. Workers ship DecompressionStream, so
+ *  supporting this costs nothing and it is worth a lot here: these requests ride
+ *  a METERED residential proxy, and the watch page compresses roughly 9x while
+ *  the /player JSON compresses roughly 5x. */
+async function inflate(bytes: Uint8Array, encoding?: string): Promise<Uint8Array> {
+  const enc = (encoding || '').toLowerCase();
+  const fmt = enc.includes('gzip') ? 'gzip' : enc.includes('deflate') ? 'deflate' : null;
+  if (!fmt) return bytes;
+  const stream = new Response(bytes as any).body!.pipeThrough(new DecompressionStream(fmt));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+type RawResp = { status: number; headers: Record<string, string>; setCookies: string[]; bodyBytes: Uint8Array };
+function parseHttp(raw: Uint8Array): RawResp {
   let sep = -1;
   for (let i = 0; i + 3 < raw.length; i++) if (raw[i] === 13 && raw[i + 1] === 10 && raw[i + 2] === 13 && raw[i + 3] === 10) { sep = i; break; }
   if (sep < 0) throw new Error('no header end');
@@ -72,7 +86,7 @@ function parseHttp(raw: Uint8Array): HttpResp {
   for (let i = 1; i < lines.length; i++) { const idx = lines[i].indexOf(':'); if (idx < 0) continue; const k = lines[i].slice(0, idx).trim().toLowerCase(); const v = lines[i].slice(idx + 1).trim(); if (k === 'set-cookie') setCookies.push(v); else headers[k] = v; }
   const chunked = /chunked/i.test(headers['transfer-encoding'] || '');
   const bodyBytes = chunked ? dechunk(raw.slice(sep + 4)) : raw.slice(sep + 4);
-  return { status, headers, setCookies, body: new TextDecoder().decode(bodyBytes) };
+  return { status, headers, setCookies, bodyBytes };
 }
 async function proxyHttps(proxyUrl: string, method: string, urlStr: string, extraHeaders: Record<string, string>, body?: string): Promise<HttpResp> {
   const proxy = parseProxy(proxyUrl);
@@ -85,14 +99,18 @@ async function proxyHttps(proxyUrl: string, method: string, urlStr: string, extr
     const tls = new Tls13(reader, writer, u.hostname, leftover);
     await tls.handshake();
     const bodyBytes = body ? enc.encode(body) : null;
-    let head = `${method} ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}\r\nConnection: close\r\nAccept-Encoding: identity\r\n`;
+    // gzip, not identity: this rides a metered residential proxy, and the watch
+    // page alone drops from ~830 KB to ~90 KB. inflate() undoes it below.
+    let head = `${method} ${u.pathname}${u.search} HTTP/1.1\r\nHost: ${u.hostname}\r\nConnection: close\r\nAccept-Encoding: gzip, deflate\r\n`;
     for (const [k, v] of Object.entries(extraHeaders)) head += `${k}: ${v}\r\n`;
     if (bodyBytes) head += `Content-Length: ${bodyBytes.length}\r\n`;
     head += '\r\n';
     await tls.write(bodyBytes ? concat([enc.encode(head), bodyBytes]) : enc.encode(head));
     const chunks: Uint8Array[] = [];
     for (;;) { const c = await tls.read(); if (c === null) break; chunks.push(c); }
-    return parseHttp(concat(chunks));
+    const r = parseHttp(concat(chunks));
+    const inflated = await inflate(r.bodyBytes, r.headers['content-encoding']);
+    return { status: r.status, headers: r.headers, setCookies: r.setCookies, body: new TextDecoder().decode(inflated) };
   } finally { try { await socket.close(); } catch {} }
 }
 

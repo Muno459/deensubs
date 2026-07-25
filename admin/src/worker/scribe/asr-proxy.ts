@@ -146,15 +146,27 @@ function dechunk(a: Uint8Array): Uint8Array {
   return concat(out);
 }
 
-function parseHttp(raw: Uint8Array): { status: number; body: string } {
+/** Inflate a gzip/deflate body (Workers ship DecompressionStream). Worth it here:
+ *  the transcript JSON is the only large thing crossing the metered proxy, and it
+ *  is ~2.7 MB uncompressed for a 90-minute file. */
+async function inflate(bytes: Uint8Array, encoding?: string): Promise<Uint8Array> {
+  const enc = (encoding || '').toLowerCase();
+  const fmt = enc.includes('gzip') ? 'gzip' : enc.includes('deflate') ? 'deflate' : null;
+  if (!fmt) return bytes;
+  const stream = new Response(bytes as any).body!.pipeThrough(new DecompressionStream(fmt));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function parseHttp(raw: Uint8Array): Promise<{ status: number; body: string }> {
   let sep = -1;
   for (let i = 0; i + 3 < raw.length; i++) if (raw[i] === 13 && raw[i + 1] === 10 && raw[i + 2] === 13 && raw[i + 3] === 10) { sep = i; break; }
   if (sep < 0) throw new Error('http: no header terminator');
   const head = new TextDecoder().decode(raw.slice(0, sep));
   const status = parseInt(head.split('\r\n')[0].split(' ')[1] || '0', 10);
   const chunked = /transfer-encoding:\s*chunked/i.test(head);
-  const body = raw.slice(sep + 4);
-  return { status, body: new TextDecoder().decode(chunked ? dechunk(body) : body) };
+  const encoding = (head.match(/content-encoding:\s*([^\r\n]+)/i) || [])[1];
+  const raw_body = chunked ? dechunk(raw.slice(sep + 4)) : raw.slice(sep + 4);
+  return { status, body: new TextDecoder().decode(await inflate(raw_body, encoding)) };
 }
 
 /** One transcription request through a proxy: raw socket → SOCKS5 CONNECT →
@@ -176,6 +188,7 @@ export async function proxyStt(proxyUrl: string, sourceUrl: string): Promise<any
     });
     const head =
       `POST ${STT_PATH} HTTP/1.1\r\nHost: ${STT_HOST}\r\nConnection: close\r\naccept: */*\r\n` +
+      `accept-encoding: gzip, deflate\r\n` +
       `origin: https://elevenlabs.io\r\nreferer: https://elevenlabs.io/\r\n` +
       `user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36\r\n` +
       `content-type: ${contentType}\r\ncontent-length: ${body.length}\r\n\r\n`;
@@ -183,7 +196,7 @@ export async function proxyStt(proxyUrl: string, sourceUrl: string): Promise<any
 
     const chunks: Uint8Array[] = [];
     for (;;) { const c = await tls.read(); if (c === null) break; chunks.push(c); }
-    const { status, body: text } = parseHttp(concat(chunks));
+    const { status, body: text } = await parseHttp(concat(chunks));
     if (status !== 200) {
       const rateLimited = status === 429 || status === 401 || /rate limit|quota|too many/i.test(text);
       const err: any = new Error(`ElevenLabs unauth STT HTTP ${status}: ${text.slice(0, 160)}`);
