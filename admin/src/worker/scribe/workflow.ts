@@ -2,7 +2,7 @@
 // Heavy artifacts live in R2; stage timestamps + cost telemetry in D1.
 
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
-import { download, needsBrowser, acquireDownloadSlot, releaseDownloadSlot } from './download';
+import { download, needsBrowser } from './download';
 import { runAsr, loadAsr } from './asr';
 import { translateWords, qaPass, takeUsage, takeCost } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
@@ -78,38 +78,11 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         return 'ok';
       });
       await markStage(env, jobId, 'download');
-      // Downloads run via Browser Rendering (a headless Chrome on a CF IP mints
-      // the direct URLs; the Worker range-streams them to R2). The companion
-      // download offload and the yt-dlp proxy container have been retired.
-      // Browser Rendering has a concurrency cap, so exactly ONE job downloads at
-      // a time — queue as many as you like; the rest wait here (cheap workflow
-      // sleeps). Cached resumes skip the queue entirely.
-      // Browser Rendering downloads need no serialization — the slot existed
-      // to protect shared SOCKS proxies, which no longer participate. Playlist
-      // imports now download fully in parallel.
-      const slotGated = false && needsBrowser(url) && !(await step.do('download-cached-check', async () => {
-        const row: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-        return !!(row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key)));
-      }));
-      if (slotGated) {
-        // Re-check for the file on EVERY poll: a companion may upload it while
-        // we queue, and 200 waiters funneling through a serial slot just to
-        // discover a no-op starves the whole pipeline. (Step results are
-        // journaled: prior boolean falses read as neither token and simply
-        // fall through to the next poll.)
-        for (let w = 0; ; w++) {
-          const st: any = await step.do(`download-slot-${w}`, async () => {
-            const row: any = await env.DB.prepare('SELECT source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
-            if (row?.source_key && (await env.MEDIA_BUCKET.head(row.source_key))) return 'have-file';
-            return (await acquireDownloadSlot(env, jobId)) ? 'got-slot' : 'wait';
-          });
-          if (st === 'have-file' || st === 'got-slot' || st === true) break;
-          if (w >= 360) throw new Error('download slot never freed after 6h — check the queue');
-          try {
-            await (step as any).waitForEvent(`download-slot-ev-${w}`, { type: 'download-complete', timeout: '60 seconds' });
-          } catch { /* timeout: poll the slot again */ }
-        }
-      }
+      // Downloads are Worker-native: the /player extraction goes through the
+      // proxy, then the media is pulled straight to R2 in parallel ranges.
+      // Nothing is serialized, so playlist imports download fully in parallel.
+      // The old single-slot gate existed to protect shared SOCKS proxies, which
+      // no longer carry any media.
       // Retries are patient on purpose: a big playlist batch can exhaust the
       // container max_instances cap, and jobs must wait out the contention
       // (~35 min of linear backoff) rather than fail.
@@ -187,11 +160,6 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
             return muxWorkerNative(env, jobId, (dl as any).videoKey, (dl as any).audioKey);
           })
         : null;
-      if (slotGated) {
-        await step.do('download-slot-release', async () => {
-          await releaseDownloadSlot(env, jobId);
-        });
-      }
       const row: any = await env.DB.prepare('SELECT title, channel, thumb_url, yt_id, orig_description, channel_image_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
       const ytId = row?.yt_id || (dl as any).ytId ||
         (url.match(/(?:youtube\.com\/watch\?[^#]*v=|youtu\.be\/|youtube\.com\/(?:shorts|live|embed)\/)([\w-]{11})/) || [])[1] || null;
