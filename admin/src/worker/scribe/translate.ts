@@ -17,6 +17,12 @@ export type CleanWord = { i: number; text: string; start: number; end: number; s
 // 1.3s recitation span stayed one 541-character cue at ~400 CPS.
 const MAX_CUE_CHARS = 84; // 2 lines x 42
 const TARGET_CPS = 17;
+// Splitting divides the cue's TIME as well as its text, so it only helps when
+// every piece still gets long enough to be read. A canonical verse pinned to a
+// 1s recitation span has no time to divide: cutting it produced 0.04s slivers at
+// 800+ CPS, strictly worse than the one dense cue it came from. Below this,
+// leave the cue whole and let the reading-speed pass borrow following silence.
+const MIN_PIECE_SEC = 1.2;
 
 const WINDOW_SIZE = 180; // words per LLM call — bigger windows = fewer calls; hole-filling catches drops
 const WINDOW_LOOKAHEAD = 30; // stretch to a natural boundary
@@ -376,6 +382,29 @@ export async function translateWords(
   // International translation and citation. The LLM never sees these spans.
   let quotes: QuranQuote[] = [];
   try { quotes = await findQuranQuotes(env, words); } catch {}
+
+  // A verse recited over several seconds, or broken by an ASR error mid-way,
+  // can match as two or three separate quotes — and each match carries the FULL
+  // canonical translation, so the whole verse gets shown repeatedly, each copy
+  // crammed into a fraction of its recitation (541 chars in 1.3s = 400 CPS).
+  // Merge adjacent quotes that are the SAME single verse so the text appears
+  // once, spanning the whole recitation; splitLocked then breaks it into
+  // readable pieces. Multi-verse quotes (distinct keys) are left untouched.
+  quotes.sort((a, b) => a.wStart - b.wStart);
+  const mergedQ: QuranQuote[] = [];
+  for (const q of quotes) {
+    const p = mergedQ[mergedQ.length - 1];
+    if (p && p.verses.length === 1 && q.verses.length === 1
+        && p.verses[0].key === q.verses[0].key && q.wStart - p.wEnd <= 8) {
+      p.wEnd = Math.max(p.wEnd, q.wEnd);
+      p.verses[0].wEnd = Math.max(p.verses[0].wEnd, q.verses[0].wEnd);
+      p.matched += q.matched;
+    } else {
+      mergedQ.push(q);
+    }
+  }
+  quotes = mergedQ;
+
   const lockedCues: WCue[] = [];
   for (const qt of quotes) {
     const cite = citeQuote(qt.verses);
@@ -462,6 +491,7 @@ export async function translateWords(
   const splitLocked = (cue: WCue): WCue[] => {
     const dur = cue.end - cue.start;
     if ((dur <= 12 && cue.text.length <= MAX_CUE_CHARS) || cue.w[1] - cue.w[0] < 2) return [cue];
+    if (dur < MIN_PIECE_SEC * 2) return [cue]; // no time to divide
     const text = cue.text;
     const marks = [...text.matchAll(/[.!?؟…,;:—]\s+/g)].map((m) => m.index! + m[0].length);
     if (!marks.length) return [cue];
@@ -480,6 +510,7 @@ export async function translateWords(
     if (cue.q) return splitLocked(cue);
     const dur = cue.end - cue.start;
     if ((dur <= 8.5 && cue.text.length <= MAX_CUE_CHARS) || cue.w[1] - cue.w[0] < 2) return [cue];
+    if (dur < MIN_PIECE_SEC * 2) return [cue]; // no time to divide
     const text = cue.text;
     const marks = [...text.matchAll(/[.!?؟…,;:]\s+/g)].map((m) => m.index! + m[0].length);
     const mid = text.length / 2;
@@ -522,10 +553,16 @@ export async function translateWords(
     const cue = cues[i];
     const next = cues[i + 1];
     const dur = cue.end - cue.start;
-    if (cue.text.length / dur > 17) {
-      const need = cue.start + cue.text.length / 17;
+    if (cue.text.length / dur > TARGET_CPS) {
+      const need = cue.start + cue.text.length / TARGET_CPS;
       const limit = next ? next.start - 0.08 : cue.end + 2.0;
-      cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + 3.0));
+      // A locked verse carries canonical wording that cannot be condensed and,
+      // when only part of it was recited, far more text than its span can hold.
+      // Time is the only lever left, so let it take whatever silence follows
+      // instead of the 3s a normal cue may borrow. `limit` still forbids
+      // overlapping the next cue either way.
+      const grab = cue.q ? 12.0 : 3.0;
+      cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + grab));
     }
   }
   return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);
