@@ -1576,7 +1576,7 @@ app.post('/api/thumbs/detect', async (c) => {
 
 // ---- Scribe publish flow (job → site video, elite path) ----
 
-import { bakeThumbVariants, generateThumbCandidates, publishScribeJob } from './scribe/publish';
+import { bakeThumbVariants, generateThumbCandidates, publishScribeJob, updatePublishedSubtitles } from './scribe/publish';
 
 app.post('/api/scribe/:id/thumbs', async (c) => {
   try {
@@ -1679,6 +1679,25 @@ app.post('/api/scribe/:id/publish', async (c) => {
     c.executionCtx.waitUntil(
       c.env.DB.prepare('INSERT INTO admin_logs (admin_id, action, target, details) VALUES (?, ?, ?, ?)')
         .bind(user?.id || 0, 'publish_video', result.slug, `from scribe job ${c.req.param('id')}`).run()
+    );
+    return c.json(result);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 400);
+  }
+});
+
+/**
+ * Push a re-translated job's subtitles onto the video it already published as.
+ * Publish refuses to run twice (the slug exists), so without this a retranslate
+ * has nowhere to go and the site keeps serving the subtitles it shipped with.
+ */
+app.post('/api/scribe/:id/republish-subs', async (c) => {
+  try {
+    const result = await updatePublishedSubtitles(c.env as any, c.req.param('id'), c.executionCtx);
+    const user = c.get('user');
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare('INSERT INTO admin_logs (admin_id, action, target, details) VALUES (?, ?, ?, ?)')
+        .bind(user?.id || 0, 'update_subtitles', result.slug, `${result.replaced} -> ${result.srt_key} (${result.cues} cues)`).run()
     );
     return c.json(result);
   } catch (err: any) {

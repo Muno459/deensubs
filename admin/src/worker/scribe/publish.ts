@@ -43,6 +43,103 @@ async function copyObject(env: PublishEnv, from: string, to: string): Promise<vo
   await streamToR2(env.MEDIA_BUCKET, to, obj.body, obj.httpMetadata?.contentType || 'application/octet-stream');
 }
 
+/**
+ * Ship a re-translated job's subtitles to the video it was already published as.
+ *
+ * The player loads /api/vtt/{srt_key}, which the site serves with
+ * `max-age=2592000, immutable` on top of a day-long KV cache. Overwriting
+ * subs/{slug}.srt in place is therefore invisible for up to a month: the URL
+ * did not change, so nothing revalidates. The only reliable way to ship new
+ * subtitles is to change the key, so each update lands on subs/{slug}.v{n}.srt
+ * and the videos row is pointed at it.
+ *
+ * The unversioned original is never deleted (it is the rollback), and at most
+ * one versioned file is kept behind the current one, so repeated retranslates
+ * do not pile up in the bucket.
+ */
+export async function updatePublishedSubtitles(
+  env: PublishEnv,
+  jobId: string,
+  ctx?: { waitUntil(p: Promise<any>): void }
+): Promise<{ slug: string; srt_key: string; srt_ar_key: string | null; cues: number; replaced: string }> {
+  const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+  if (!job) throw new Error('job not found');
+  if (!job.srt_key) throw new Error('job has no subtitles yet');
+  const slug: string | null = job.published_slug;
+  if (!slug) throw new Error('this job was never published — use Publish instead');
+  const video: any = await env.DB.prepare('SELECT id, srt_key, srt_ar_key FROM videos WHERE slug = ?').bind(slug).first();
+  if (!video) throw new Error(`no published video for slug ${slug}`);
+
+  // Next version, read off whatever the row currently points at.
+  const prev: string = video.srt_key || `subs/${slug}.srt`;
+  const version = (parseInt((prev.match(/\.v(\d+)\.srt$/) || [])[1] || '1', 10) || 1) + 1;
+  const srtKey = `subs/${slug}.v${version}.srt`;
+  await copyObject(env, job.srt_key, srtKey);
+
+  const isArabicSource = (job.language_code || '').startsWith('ar');
+  const srtArKey = isArabicSource && job.srt_source_key ? `subs/${slug}-ar.v${version}.srt` : video.srt_ar_key || null;
+  if (isArabicSource && job.srt_source_key) await copyObject(env, job.srt_source_key, srtArKey as string);
+
+  let langs: string[] = [];
+  try { langs = JSON.parse(job.target_langs || '[]'); } catch {}
+  for (const lang of langs.slice(1)) {
+    await copyObject(env, `scribe/${jobId}/${lang}.srt`, `subs/${slug}.${lang}.v${version}.srt`).catch(() => {});
+  }
+
+  await env.DB.prepare('UPDATE videos SET srt_key = ?, srt_ar_key = ? WHERE id = ?')
+    .bind(srtKey, srtArKey, video.id).run();
+
+  const cleanupAndReindex = async () => {
+    // Drop the superseded versioned files (never the unversioned baseline).
+    for (const old of [video.srt_key, video.srt_ar_key]) {
+      if (old && /\.v\d+\.srt$/.test(old)) await env.MEDIA_BUCKET.delete(old).catch(() => {});
+    }
+    for (const lang of langs.slice(1)) {
+      const old = `subs/${slug}.${lang}.v${version - 1}.srt`;
+      if (version > 2) await env.MEDIA_BUCKET.delete(old).catch(() => {});
+    }
+    // Transcript search indexes the cue text, so it goes stale with the cues.
+    try {
+      const cuesObj = await env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
+      if (cuesObj) {
+        const cues: any[] = await cuesObj.json();
+        await env.DB.prepare('DELETE FROM cues_fts WHERE slug = ?').bind(slug).run().catch(() => {});
+        for (let i = 0; i < cues.length; i += 40) {
+          const batch = cues.slice(i, i + 40);
+          const stmt = env.DB.prepare('INSERT INTO cues_fts (slug, start, text, source) VALUES (?,?,?,?)');
+          await env.DB.batch(batch.map((cu) => stmt.bind(slug, Math.round(cu.start), cu.text, cu.source || '')));
+        }
+        if (env.AI && env.VECTORIZE) {
+          for (let i = 0; i < cues.length; i += 50) {
+            const batch = cues.slice(i, i + 50);
+            const emb: any = await env.AI.run('@cf/baai/bge-m3', { text: batch.map((cu) => cu.text) });
+            const vectors = (emb.data || []).map((v: number[], j: number) => ({
+              id: `${slug}#${i + j}`,
+              values: v,
+              metadata: { slug, title: job.title || slug, start: Math.round(batch[j].start), text: batch[j].text.slice(0, 200) },
+            }));
+            if (vectors.length) await env.VECTORIZE.upsert(vectors);
+          }
+        }
+        // A shorter cue list leaves orphaned vectors behind the new tail.
+        if (env.VECTORIZE) {
+          const stale: string[] = [];
+          for (let i = cues.length; i < cues.length + 400; i++) stale.push(`${slug}#${i}`);
+          await env.VECTORIZE.deleteByIds(stale).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.log('cue reindex failed (non-fatal):', (err as any)?.message);
+    }
+    const keys = await env.CACHE.list();
+    for (const k of keys.keys) await env.CACHE.delete(k.name).catch(() => {});
+  };
+  if (ctx) ctx.waitUntil(cleanupAndReindex());
+  else await cleanupAndReindex();
+
+  return { slug, srt_key: srtKey, srt_ar_key: srtArKey, cues: job.cue_count || 0, replaced: prev };
+}
+
 /** Ask the container for candidate thumbnail frames; store them under the job. */
 export async function generateThumbCandidates(env: PublishEnv, jobId: string, refresh = false): Promise<{ key: string; ts: number }[]> {
   const manifestKey = `scribe/${jobId}/thumbs.json`;

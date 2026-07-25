@@ -623,6 +623,7 @@ function JobDetail({ job, onChanged }: { job: any; onChanged?: () => void }) {
   const [dubBusy, setDubBusy] = useState(false);
   const [reOpen, setReOpen] = useState(false);
   const [reBusy, setReBusy] = useState(false);
+  const [pushingSubs, setPushingSubs] = useState(false);
   const toast = useToast();
 
   // Poll dubbing progress while active
@@ -731,10 +732,29 @@ function JobDetail({ job, onChanged }: { job: any; onChanged?: () => void }) {
           )}
           {job.status === 'done' && isVideoSource && <ConvertToAudiobook job={job} />}
           {job.status === 'done' && job.published_slug && (
-            <a href={`https://deensubs.com/watch/${job.published_slug}`} target="_blank" rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 transition-all hover:bg-emerald-500/20 active:scale-[0.97]">
-              <Icon name="external" className="h-3 w-3" /> Published — /watch/{job.published_slug}
-            </a>
+            <>
+              <a href={`https://deensubs.com/watch/${job.published_slug}`} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 transition-all hover:bg-emerald-500/20 active:scale-[0.97]">
+                <Icon name="external" className="h-3 w-3" /> Published — /watch/{job.published_slug}
+              </a>
+              <button
+                disabled={pushingSubs}
+                title="Copy this job's current subtitles onto the live video. Needed after a re-translation or a subtitle edit: the player caches by URL, so nothing reaches viewers until the key changes."
+                onClick={async () => {
+                  setPushingSubs(true);
+                  try {
+                    const r = await api(`/api/scribe/${job.id}/republish-subs`, { method: 'POST' });
+                    toast.push(`Live now: ${r.cues} cues on /watch/${r.slug}`);
+                  } catch (e: any) {
+                    toast.push(e.message, 'error');
+                  }
+                  setPushingSubs(false);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-soft px-2.5 py-1.5 text-[11px] font-medium text-cream/80 transition-all hover:bg-hover active:scale-[0.97] disabled:opacity-50"
+              >
+                <Icon name="captions" className="h-3 w-3" /> {pushingSubs ? 'Pushing...' : 'Push subtitles live'}
+              </button>
+            </>
           )}
           {job.status === 'done' && !job.published_slug && (
             isVideoSource ? (
@@ -875,10 +895,12 @@ function JobDetail({ job, onChanged }: { job: any; onChanged?: () => void }) {
             </ul>
           </div>
         </div>
-        {job.published_video_id || job.srt_key ? (
+        {job.published_slug ? (
           <p className="mt-3 text-[12px] text-amber-300/90">
-            This job is already published. The live subtitles change as soon as the
-            re-translation finishes.
+            /watch/{job.published_slug} keeps serving its current subtitles until you
+            hit <strong className="font-semibold">Push subtitles live</strong> — the
+            player caches subtitle URLs for a month, so a re-translation on its own
+            never reaches viewers. Review the result first, then push.
           </p>
         ) : null}
         <div className="mt-4 flex items-center gap-2">
