@@ -318,9 +318,17 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
                 // what will fit and how long each cue needs.
                 const { condenseDense, polishCues } = await import('./translate')
                   .then(async (m) => ({ ...m, ...(await import('./polish')) }));
-                const c = await condenseDense(env, final, lang);
-                tightened = c.fixed;
-                final = tightened ? polishCues(c.cues) : final;
+                // Shortening a cue changes what fits and how long its neighbours
+                // need, so polish has to run again — which can push a different
+                // cue back over the limit. Two rounds converges, and the second
+                // only looks at whatever is still too dense, so nothing is
+                // shortened further than it has to be.
+                for (let pass = 0; pass < 2; pass++) {
+                  const c = await condenseDense(env, final, lang);
+                  if (!c.fixed) break;
+                  tightened += c.fixed;
+                  final = polishCues(c.cues);
+                }
               }
               await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(final), {
                 httpMetadata: { contentType: 'application/json' },

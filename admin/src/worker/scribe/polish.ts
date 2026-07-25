@@ -178,7 +178,10 @@ function rebuildVerses(cues: PCue[]): PCue[] {
       const between = cues.filter((x) => !x.q
         && x.start >= run[run.length - 1].end - 0.01 && x.end <= c.start + 0.01);
       const allVerse = between.every((x) => partOf(x.text, canon));
-      if (gap <= 8 && allVerse) run.push(c);
+      // The containment test already proves everything between the two matches
+      // is the verse itself, so the window can be generous without swallowing
+      // speech: what it joins is one recitation the matcher happened to split.
+      if (gap <= 14 && allVerse) run.push(c);
       else { flush(); run = [c]; }
     }
     flush();

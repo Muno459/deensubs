@@ -68,7 +68,9 @@ export function wrapCueText(text: string, maxLine = 42): string {
     // function word a big penalty.
     let score = -Math.abs(l1 - half) / half;
     if (/[.!?:;,—…]$/.test(words[i])) score += 1.0;
-    if (isCling(words[i])) score -= 0.8;
+    // Breaking after a word that governs the next one reads as a stumble, so it
+    // has to lose to any alternative that fits, however lopsided that split is.
+    if (isCling(words[i])) score -= 4.0;
     if (score > bestScore) { bestScore = score; best = i; }
   }
   if (best < 0) return greedyWrap(words, maxLine); // cannot fit two lines
