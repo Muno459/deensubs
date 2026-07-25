@@ -178,10 +178,11 @@ function rebuildVerses(cues: PCue[]): PCue[] {
       const between = cues.filter((x) => !x.q
         && x.start >= run[run.length - 1].end - 0.01 && x.end <= c.start + 0.01);
       const allVerse = between.every((x) => partOf(x.text, canon));
-      // The containment test already proves everything between the two matches
-      // is the verse itself, so the window can be generous without swallowing
-      // speech: what it joins is one recitation the matcher happened to split.
-      if (gap <= 14 && allVerse) run.push(c);
+      // Two matches of the same verse seconds apart are one recitation, whatever
+      // sits between them: at that range it is the model's own partial rendering
+      // of the words being recited, not something the speaker stopped to say.
+      // Further apart, the containment test has to prove it before they join.
+      if (gap <= 4 || (gap <= 14 && allVerse)) run.push(c);
       else { flush(); run = [c]; }
     }
     flush();
@@ -208,6 +209,43 @@ function splitOversize(cues: PCue[]): PCue[] {
     }
     const pieces = toFitting(c.text);
     out.push(...(pieces.length === 1 ? [c] : respan(c, pieces)));
+  }
+  return out;
+}
+
+/** Even out a dense run by pouring it back together and re-cutting it.
+ *
+ *  Merging alone stalls at the 84-character cap: 69 characters in 1.7s beside 51
+ *  in 3.3s is 40 CPS and 16 CPS, and the pair is too long to be one cue. Poured
+ *  together and re-cut, the same words spread over the same seconds and neither
+ *  end carries the burst.
+ *
+ *  This redistributes text across a span, so it is the one pass that can move a
+ *  line away from the moment it is spoken. It is therefore only accepted when
+ *  every new piece still begins within the permitted lead of a boundary that
+ *  came from the speech; otherwise the speech-accurate cut is kept and the cue
+ *  stays dense, to be handled by condensing the wording instead. */
+function rebalanceDense(cues: PCue[]): PCue[] {
+  const out: PCue[] = [];
+  let i = 0;
+  while (i < cues.length) {
+    if (cues[i].q) { out.push(cues[i]); i++; continue; }
+    let j = i;
+    while (j + 1 < cues.length && !cues[j + 1].q
+           && cues[j + 1].start - cues[j].end < 0.5 && j - i < 5) j++;
+    const run = cues.slice(i, j + 1);
+    i = j + 1;
+    if (run.length < 2 || !run.some((c) => cps(c) > TARGET_CPS)) { out.push(...run); continue; }
+
+    const merged: PCue = {
+      ...run[0], end: run[run.length - 1].end,
+      source: run.map((c) => c.source || '').join(' ').trim(),
+    };
+    const pieces = respan(merged, toFitting(run.map((c) => c.text).join(' ').trim()));
+    const anchors = run.map((c) => c.s0 ?? c.start);
+    const drifted = pieces.some((p) =>
+      Math.min(...anchors.map((a) => Math.abs(p.start - a))) > MAX_LEAD);
+    out.push(...(drifted ? run : pieces.map((p) => ({ ...p, s0: p.start }))));
   }
   return out;
 }
@@ -346,6 +384,8 @@ export function polishCues(input: Cue[]): Cue[] {
   for (let round = 0; round < 3; round++) {
     cues = splitOversize(cues);
     cues = mergeShort(cues);
+    cues = rebalanceDense(cues);
+    cues = splitOversize(cues);
     dedupBoundaries(cues);
     moveDangling(cues);
     cues = mergeForDensity(cues);
