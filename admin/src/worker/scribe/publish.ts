@@ -75,6 +75,10 @@ export async function updatePublishedSubtitles(
   const version = (parseInt((prev.match(/\.v(\d+)\.srt$/) || [])[1] || '1', 10) || 1) + 1;
   const srtKey = `subs/${slug}.v${version}.srt`;
   await copyObject(env, job.srt_key, srtKey);
+  // Count what actually shipped. scribe_jobs.cue_count is written before the
+  // polish pass merges and splits cues, so it overstates the rendered file.
+  const shipped = await env.MEDIA_BUCKET.get(srtKey);
+  const cueCount = shipped ? ((await shipped.text()).match(/ --> /g) || []).length : 0;
 
   const isArabicSource = (job.language_code || '').startsWith('ar');
   const srtArKey = isArabicSource && job.srt_source_key ? `subs/${slug}-ar.v${version}.srt` : video.srt_ar_key || null;
@@ -137,7 +141,7 @@ export async function updatePublishedSubtitles(
   if (ctx) ctx.waitUntil(cleanupAndReindex());
   else await cleanupAndReindex();
 
-  return { slug, srt_key: srtKey, srt_ar_key: srtArKey, cues: job.cue_count || 0, replaced: prev };
+  return { slug, srt_key: srtKey, srt_ar_key: srtArKey, cues: cueCount, replaced: prev };
 }
 
 /** Ask the container for candidate thumbnail frames; store them under the job. */
