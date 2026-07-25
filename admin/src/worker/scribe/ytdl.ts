@@ -152,18 +152,38 @@ function pickAudio(player: any): any {
   return pool.reduce((a: any, b: any) => ((b.bitrate || 0) > (a.bitrate || 0) ? b : a));
 }
 
-/** Best H.264/avc1 video (widely compatible, clean stream-copy into mp4),
- *  highest resolution then bitrate. avc1 tops out at 1080p on YouTube. */
-function pickVideo(player: any): any {
+/** YouTube marks HDR renditions with BT.2020 primaries (transfer is PQ or HLG).
+ *  Keying on colorInfo is exact; qualityLabel ("1080p HDR") is cosmetic. */
+function isHdr(f: any): boolean {
+  return /BT2020/i.test(String(f?.colorInfo?.primaries || ''));
+}
+
+/** Best video stream, highest resolution then bitrate.
+ *
+ *  Default is avc1: 8-bit SDR, stream-copies into mp4, plays everywhere. But
+ *  avc1 is ONLY ever SDR, so on an HDR source that silently throws the HDR away
+ *  (it is not a conversion, the HDR rendition is simply never fetched).
+ *
+ *  With preserveHdr, an HDR source keeps its HDR. AV1 is preferred over VP9.2
+ *  because YouTube already ships it in mp4 (no container change for the
+ *  stream-copy mux) and it is the smaller of the two. HDR renditions cost
+ *  roughly 2x the bytes of the SDR one, which is why this is a switch. */
+function pickVideo(player: any, preserveHdr = false): any {
   const fmts = (player.streamingData?.adaptiveFormats || []).filter((f: any) => f.url && (f.mimeType || '').startsWith('video/'));
   if (!fmts.length) throw new Error('no video formats with direct URLs');
-  const avc = fmts.filter((f: any) => /avc1/.test(f.mimeType));
-  const pool = avc.length ? avc : fmts;
-  return pool.reduce((a: any, b: any) => {
+  const best = (pool: any[]) => pool.reduce((a: any, b: any) => {
     const ah = a.height || 0, bh = b.height || 0;
     if (bh !== ah) return bh > ah ? b : a;
     return (b.bitrate || 0) > (a.bitrate || 0) ? b : a;
   });
+  if (preserveHdr) {
+    const hdr = fmts.filter(isHdr);
+    const hdrMp4 = hdr.filter((f: any) => /av01/.test(f.mimeType) && /mp4/.test(f.mimeType));
+    if (hdrMp4.length) return best(hdrMp4);
+    if (hdr.length) return best(hdr); // VP9.2 webm; the mux still stream-copies
+  }
+  const avc = fmts.filter((f: any) => /avc1/.test(f.mimeType));
+  return best(avc.length ? avc : fmts);
 }
 
 // ---- direct parallel download → R2 multipart ------------------------------
@@ -289,7 +309,7 @@ async function containerMux(env: ScribeEnv, jobId: string, videoUrl: string, aud
  *  The container only muxes (no download). Throws → caller falls back. */
 export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, url: string): Promise<DownloadResult> {
   const player = await extractPlayer(env, url);
-  const vfmt = pickVideo(player);
+  const vfmt = pickVideo(player, (await getAsrConfig(env)).preserveHdr);
   const afmt = pickAudio(player);
   const vTotal = parseInt(vfmt.contentLength || '0', 10);
   const aTotal = parseInt(afmt.contentLength || '0', 10);

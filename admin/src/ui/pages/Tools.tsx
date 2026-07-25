@@ -15,6 +15,7 @@ function AsrSettings() {
   const [ytProxy, setYtProxy] = useState('');
   const [cooldown, setCooldown] = useState('3');
   const [wholeFile, setWholeFile] = useState(false);
+  const [hdr, setHdr] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
 
@@ -26,6 +27,7 @@ function AsrSettings() {
     setYtProxy(data.ytProxy || '');
     setCooldown(String(data.cooldownHours ?? 3));
     setWholeFile(!!data.proxyWholeFile);
+    setHdr(data.preserveHdr !== false);
   }, [data]);
 
   async function save() {
@@ -38,6 +40,7 @@ function AsrSettings() {
         ytProxy: ytProxy.trim(),
         cooldownHours: Number(cooldown),
         proxyWholeFile: wholeFile,
+        preserveHdr: hdr,
       }) });
       setSaved('Saved — active mode: ' + r.activeMode);
       refetch();
@@ -124,6 +127,15 @@ function AsrSettings() {
             <input className={inputCls + ' w-full font-mono'} value={cooldown} onChange={(e) => setCooldown(e.target.value)} inputMode="decimal" />
             <p className="mt-1 text-[11px] text-faint">How long a rate-limited CF egress IP is skipped before re-probe. Measured recovery ~2h; 0 disables. Cooled IPs are still re-checked before the proxy.</p>
           </div>
+          <label className="mt-3 flex items-start gap-2 text-[12px] text-cream/80">
+            <input type="checkbox" className="mt-0.5" checked={hdr} onChange={(e) => setHdr(e.target.checked)} />
+            <span>
+              Keep HDR on sources that have it
+              <span className="mt-0.5 block text-[11px] text-faint">
+                Downloads the AV1 10-bit HDR stream instead of H.264, which is SDR only. Roughly 2x the bytes, and playback needs an AV1-capable browser. SDR sources are unaffected.
+              </span>
+            </span>
+          </label>
           <label className="mt-3 flex items-start gap-2 text-[12px] text-cream/80">
             <input type="checkbox" className="mt-0.5" checked={wholeFile} onChange={(e) => setWholeFile(e.target.checked)} />
             <span>

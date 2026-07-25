@@ -40,6 +40,10 @@ export type AsrConfig = {
   // only falls back to chunking if that fails. Datacenter IPs are fine with the
   // unauth endpoint: Cloudflare's own egress IPs are datacenter ranges.
   proxyWholeFile: boolean;
+  // Keep HDR on sources that have it. Off means avc1, which is 8-bit SDR only,
+  // so an HDR source silently loses its HDR (the HDR rendition is never even
+  // fetched). On costs roughly 2x the bytes and needs an AV1-capable player.
+  preserveHdr: boolean;
 };
 
 export const DEFAULT_ASR_CONFIG: AsrConfig = {
@@ -50,6 +54,7 @@ export const DEFAULT_ASR_CONFIG: AsrConfig = {
   wsUrl: '',
   cooldownHours: 3,
   proxyWholeFile: false,
+  preserveHdr: true,
 };
 
 /** Clamp the egress-IP cooldown to [0.25h, 30d]; 0 disables it. */
@@ -78,6 +83,7 @@ export async function getAsrConfig(env: any): Promise<AsrConfig> {
         chunkMinutes: clampChunkMinutes(parsed.chunkMinutes),
         cooldownHours: clampCooldownHours(parsed.cooldownHours),
         proxyWholeFile: !!parsed.proxyWholeFile,
+        preserveHdr: parsed.preserveHdr !== false,
       };
     }
   } catch {}
@@ -94,6 +100,7 @@ export async function putAsrConfig(env: any, cfg: Partial<AsrConfig>): Promise<A
     wsUrl: (merged.wsUrl || '').trim(),
     cooldownHours: clampCooldownHours(merged.cooldownHours),
     proxyWholeFile: !!merged.proxyWholeFile,
+    preserveHdr: merged.preserveHdr !== false,
   };
   await env.MEDIA_KV?.put(KV_KEY, JSON.stringify(clean));
   return clean;
