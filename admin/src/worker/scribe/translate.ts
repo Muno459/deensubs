@@ -78,7 +78,8 @@ SEGMENT ON MEANING AND DELIVERY, NOT ON LENGTH. Every cue must be a self-contain
 - Where the grammar closes: end at a clause or sentence boundary, never mid-clause dangling into the next cue.
 - NEVER end a cue on a word that governs what follows: an article (a, the), preposition (of, in, to, for, with, from, by), conjunction (and, or, but), auxiliary (is, was, has), or a relative (that, which, who). Move that word to the next cue.
 - Keep together what cannot be understood apart: a verb and its object, a name and its title, a number and its unit, a quotation and the verb introducing it.
-- Prefer a slightly short cue with a clean edge over a full one that breaks awkwardly. Length is a limit to respect, never a target to fill.
+- DO NOT OVER-SEGMENT. Fewer, complete cues read better than many small ones. Use the full 84 characters when the thought fills them; only cut earlier when the sentence genuinely breaks there. If a piece would be under ~25 characters or under ~1.5 seconds, merge it into the neighbouring cue instead of emitting it alone.
+- Every word index appears in exactly ONE cue, and no word of the translation may appear at the end of one cue and again at the start of the next. Never repeat a word across a boundary.
 - Translate to ${targetLang}. Translate ALL meaningful content faithfully — never paraphrase away or condense meaning.
 - Clean speech artifacts: drop stutters, false starts, and filler sounds from the translation (their word indices still belong to the cue covering that span).
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
@@ -218,6 +219,7 @@ export async function windowAudio(env: ScribeEnv, opts: AudioOpts, startSec: num
 export const AUDIO_NOTE = `
 - You are ALSO given the actual audio of this passage (it begins at the first listed word). The numbered words stay the authoritative transcript, but the AUDIO is the authority on WHERE TO CUT.
 - Put cue boundaries where the speaker actually breaks: a breath, a held pause, the voice falling to close a thought or lifting to open a new one. Never cut while the speaker is still mid-flow just because the text reached its character budget; end the cue earlier, at the last real break.
+- Equally, do not invent a break the speaker did not make. If they run a phrase straight through, keep it in one cue.
 - A phrase delivered in one continuous breath belongs in one cue. If it is too long for one cue, split it at the speaker's own internal pause, never at the midpoint of the text.
 - Keep an emphasised or stressed word together with the phrase it belongs to.
 - Recitation (Quran, hadith, du'a) is phrased by the reciter's stops, which do not line up with English sentence punctuation. Follow what you hear.
@@ -509,17 +511,19 @@ export async function translateWords(
   const splitOnce = (cue: WCue): WCue[] => {
     if (cue.q) return splitLocked(cue);
     const dur = cue.end - cue.start;
+    // Too long to read in two lines, or too long on screen, is worth splitting
+    // — but only where the sentence actually allows it (see below).
     if ((dur <= 8.5 && cue.text.length <= MAX_CUE_CHARS) || cue.w[1] - cue.w[0] < 2) return [cue];
     if (dur < MIN_PIECE_SEC * 2) return [cue]; // no time to divide
     const text = cue.text;
     const marks = [...text.matchAll(/[.!?؟…,;:]\s+/g)].map((m) => m.index! + m[0].length);
     const mid = text.length / 2;
-    let splitAt = marks.length ? marks.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p)) : -1;
-    if (splitAt < 8 || text.length - splitAt < 8) {
-      const sp = [...text.matchAll(/\s+/g)].map((m) => m.index!);
-      if (!sp.length) return [cue];
-      splitAt = sp.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p)) + 1;
-    }
+    const splitAt = marks.length ? marks.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p)) : -1;
+    // No syntactic boundary means any cut lands mid-clause. Splitting at the
+    // nearest bare space (what this used to do) manufactures exactly the
+    // dangling fragments the segmentation rules exist to prevent, so a cue with
+    // nowhere clean to break is left alone.
+    if (splitAt < 8 || text.length - splitAt < 8) return [cue];
     const share = splitAt / text.length;
     const wSplit = Math.max(cue.w[0] + 1, Math.min(cue.w[1], cue.w[0] + Math.round((cue.w[1] - cue.w[0]) * share)));
     const a: WCue = {
