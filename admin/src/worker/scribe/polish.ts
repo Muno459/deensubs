@@ -302,13 +302,21 @@ function dedupBoundaries(cues: PCue[]): void {
   }
 }
 
-/** A cue must not end on a word that governs the next one. */
+/** A cue must not end on a word that governs the next one.
+ *
+ *  Moving it across the seam has to leave the next cue reading as a sentence.
+ *  Pushing "is" onto a cue that already has its own verb produces "is Taqwa is
+ *  mentioned", which is worse than the stranded word it was meant to fix, so a
+ *  word that already sits at the head of the target is left where it is. */
 function moveDangling(cues: PCue[]): void {
   for (let i = 0; i < cues.length - 1; i++) {
     const a = cues[i]; const b = cues[i + 1];
     if (a.q || b.q) continue;
     const w = a.text.split(' ');
+    const bare = (s: string) => s.toLowerCase().replace(/[^a-z']/g, '');
     while (w.length > 2 && isCling(w[w.length - 1]) && b.text.length + w[w.length - 1].length + 1 <= MAX_CHARS) {
+      const word = w[w.length - 1];
+      if (b.text.split(' ').slice(0, 3).some((x) => bare(x) === bare(word))) break;
       b.text = `${w.pop()} ${b.text}`;
       a.text = w.join(' ');
     }

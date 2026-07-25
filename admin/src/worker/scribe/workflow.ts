@@ -312,6 +312,13 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               const obj = await env.MEDIA_BUCKET.get(cuesKey);
               if (!obj) throw new Error('cues missing for QA');
               const cues = await obj.json<Cue[]>();
+              // Keep what translation produced before QA rewrites it. Without
+              // this the only surviving artifact is the finished file, and a
+              // wrong word in a cue cannot be traced to the pass that put it
+              // there — which is exactly the position a real defect left us in.
+              await env.MEDIA_BUCKET.put(`scribe/${jobId}/cues-pre-qa-${lang}.json`, JSON.stringify(cues), {
+                httpMetadata: { contentType: 'application/json' },
+              }).catch(() => {});
               const repaired = isAudiobook
                 ? await qaPassAudiobook(env, cues as any, lang)
                 : await qaPass(env, cues, lang);
