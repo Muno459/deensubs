@@ -270,7 +270,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         const cuesKey = lang === primary ? `scribe/${jobId}/cues.json` : `scribe/${jobId}/cues.${lang}.json`;
         const tr = await step.do(
           `translate-${lang}`,
-          { retries: { limit: 4, delay: '1 minute', backoff: 'exponential' }, timeout: '45 minutes' },
+          // A 69-minute lecture measured 45-51 minutes here: 37 windows, each a
+          // multimodal call carrying its slice of the audio, plus hole-filling.
+          // The old 45-minute limit sat right on that, so the step timed out and
+          // retried, and each retry re-translated the whole lecture from scratch
+          // (four of them, at roughly 1.5M tokens a go). Give it room to finish
+          // and retry fewer times, since a timeout here is expensive and a
+          // genuine failure is usually not transient.
+          { retries: { limit: 2, delay: '1 minute', backoff: 'exponential' }, timeout: '2 hours' },
           async () => {
             const existing = await env.MEDIA_BUCKET.get(cuesKey);
             if (existing) {
