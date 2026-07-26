@@ -104,7 +104,7 @@ FIT — you have the timestamps, so check this yourself
 - If a phrase would be under about a second on its own, carry it with the neighbouring thought instead of flashing it.
 
 SEGMENT ON MEANING AND DELIVERY
-- The speaker is the strongest signal: where they pause ([GAP]), draw breath, or change ([SPEAKER]). When you are given the audio, listen to where the sentence lands.
+- The speaker is the strongest signal: where they stop ([BREAK]), hesitate ([PAUSE]), draw breath, or change ([SPEAKER]). When you are given the audio, listen to where the sentence lands.
 - Do not segment by character count. The limit is a ceiling, not a target — never pad a cue toward it, and never chop a complete thought to stay under it.
 
 TRANSLATION
@@ -129,8 +129,13 @@ function windowPrompt(win: CleanWord[], prevTail: string, verseContext?: string)
   for (let k = 0; k < win.length; k++) {
     const w = win[k];
     if (k > 0) {
+      // A1 grades the model on beginning cues after a pause of 0.15s or more,
+      // but only gaps of 0.4s were ever shown to it — so most of the pauses it
+      // is asked to cut on were invisible in its input. Both tiers are marked
+      // now, named for what they are rather than as a number to be parsed.
       const gap = w.start - win[k - 1].end;
-      if (gap >= 0.4) lines.push(`[GAP ${Math.round(gap * 1000)}ms]`);
+      if (gap >= 0.6) lines.push(`[BREAK ${Math.round(gap * 1000)}ms — he stops here]`);
+      else if (gap >= 0.15) lines.push(`[PAUSE ${Math.round(gap * 1000)}ms]`);
     }
     if (w.speaker !== lastSpeaker && w.speaker) {
       lines.push(`[SPEAKER ${w.speaker}]`);
@@ -254,7 +259,7 @@ LISTEN FOR THESE, IN THIS ORDER
 - EMPHASIS. A word he stresses belongs with the phrase it is stressing. Never separate it from that phrase.
 - HESITATION. False starts, repeated words and filler are audible. Leave them out of the translation; their word indices still belong to the cue covering that span.
 - RECITATION is phrased by the reciter's stops, which do not follow English punctuation. Follow what you hear, not where a comma would go.
-- The [GAP] markers are a rough hint from the timings. Trust the audio over them, and trust both over the character count.
+- [BREAK] is where he stops; [PAUSE] is a shorter hesitation. Both are measured from the timings and are a rough hint only \u2014 trust the audio over them, and trust both over the character count.
 - CONCRETELY: at least three cues in four should begin immediately after a pause of 0.15s or longer. Pauses that long are only about one word gap in five, so this means choosing your boundaries around his breathing rather than around the text. Measured on the last version, only 57% did.
 - Speaker changes are marked [SPEAKER]. Never carry two speakers in one cue \u2014 always start a new cue at the change.`;
 
