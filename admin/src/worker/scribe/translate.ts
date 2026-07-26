@@ -912,7 +912,7 @@ HARD REQUIREMENTS — a reply breaking any of these is discarded and the origina
 - CUT WHERE HE STOPS. Every boundary you create should fall on a [PAUSE] or a [BREAK]. If the range contains as many pauses as you need boundaries and you cut somewhere else instead, the reply is rejected. Never carry two speakers in one cue: always cut at [SPEAKER].
 No commentary, no code fences, JSONL only.` },
         { role: 'user', content: body },
-      ], 8000, STRONG_MODEL);
+      ], 12000, model);
       for (const line of raw.split('\n')) {
         const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
         if (!t.startsWith('{')) continue;
