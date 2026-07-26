@@ -724,6 +724,19 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
     if (/^[,;:]/.test(x)) return true;
     return /^[a-z]/.test(x.split(/\s+/)[0]);
   };
+  // The same fault at the other end: a cue closing on a word that governs what
+  // comes next ("the dinar, the / dirham") reads as a stumble, and like an
+  // opening fragment it can only be fixed by moving the boundary, so the cue is
+  // repaired together with the one that follows it.
+  const GOVERNS = new Set(['a', 'an', 'the', 'and', 'or', 'but', 'nor', 'so', 'yet', 'of', 'in', 'on',
+    'at', 'to', 'for', 'with', 'from', 'by', 'as', 'is', 'was', 'are', 'were', 'be', 'been', 'that',
+    'which', 'who', 'whom', 'whose', 'this', 'these', 'those', 'his', 'her', 'its', 'their', 'our',
+    'your', 'my', 'not', 'no', 'if', 'when', 'while', 'than', 'then', 'into', 'upon', 'about']);
+  const endsHanging = (t: string) => {
+    const w = t.trim().split(/\s+/);
+    const last = (w[w.length - 1] || '').toLowerCase().replace(/[^a-z']/g, '');
+    return !!last && GOVERNS.has(last);
+  };
 
   // Group the work. An ill-fitting cue is re-cut on its own; a cue that reads as
   // a fragment is re-cut with the one before it. Groups that touch are merged so
@@ -735,6 +748,9 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
     if (tooBig(c) && c.w[1] > c.w[0]) groups.push([i]);
     else if (opensMid(c.text) && i > 0 && !cues[i - 1].q && cues[i - 1].w[1] + 1 === c.w[0]) {
       groups.push([i - 1, i]);
+    } else if (endsHanging(c.text) && i + 1 < cues.length && !cues[i + 1].q
+               && c.w[1] + 1 === cues[i + 1].w[0]) {
+      groups.push([i, i + 1]);
     }
   }
   const merged: number[][] = [];
@@ -769,7 +785,7 @@ Re-divide each range into cues that fit and read. Answer with ONE JSON object pe
 HARD REQUIREMENTS — a reply breaking any of these is discarded and the original kept:
 - The pieces must cover the given word range EXACTLY: the first starts at the range's first index, the last ends at its last index, each begins on the index right after the previous ends. No gaps, no overlaps, no reordering.
 - Every piece: at most 84 characters, at most 2 lines of 42, with the break given as \\n.
-- EVERY PIECE MUST READ AS A SENTENCE ON ITS OWN. None may open with a comma or a lowercase continuation of the piece before it. Reword freely to achieve this — moving the boundary is not enough, and this is the main thing being asked for. Arabic chains clauses endlessly with و; English must not. Write separate sentences.
+- EVERY PIECE MUST READ AS A SENTENCE ON ITS OWN. None may open with a comma or a lowercase continuation of the piece before it, and none may END on a word that governs the next one (an article, preposition, conjunction, auxiliary or relative pronoun). Reword freely to achieve this — moving the boundary is not enough, and this is the main thing being asked for. Arabic chains clauses endlessly with و; English must not. Write separate sentences.
 - Keep all the meaning. Keep honorifics (Allah ﷻ, the Prophet ﷺ, RA/AS/RH) and transliterations (fiqh, Sharia, Tawhid).
 - Aim for at most 17 characters per second of each piece's own duration, readable from the word timings.
 - Prefer boundaries where the speaker pauses, which the timings show as a gap between words.
