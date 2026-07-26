@@ -14,7 +14,12 @@ import type { ScribeEnv } from './types';
 import type { CleanWord } from './translate';
 
 type Verse = { k: string; ar: string; m: string; en: string };
-export type QuoteVerse = { key: string; ar: string; en: string; wStart: number; wEnd: number };
+/** `cover` is the share of the verse's own words that were recited. A lecturer
+ *  quoting a single famous clause of a long verse matches on 5 words out of 40,
+ *  and rendering the whole canonical translation across those few seconds is
+ *  unreadable — 65:2 came out as 376 characters in 3.6s. Callers use this to
+ *  decide whether the canonical text is appropriate at all. */
+export type QuoteVerse = { key: string; ar: string; en: string; wStart: number; wEnd: number; cover: number };
 export type QuranQuote = { wStart: number; wEnd: number; matched: number; verses: QuoteVerse[] };
 
 const DIACRITICS = /[ً-ٰٟـۖ-ۭ]/g;
@@ -32,7 +37,7 @@ export function normAr(w: string): string {
     .replace(/[^ء-ي]/g, '');
 }
 
-type Index = { toks: string[]; vmap: number[]; verses: Verse[]; tri: Map<string, number[]> };
+type Index = { toks: string[]; vmap: number[]; verses: Verse[]; tri: Map<string, number[]>; vlen: number[] };
 let cachedIndex: Index | null = null;
 
 async function loadIndex(env: ScribeEnv): Promise<Index> {
@@ -58,7 +63,11 @@ async function loadIndex(env: ScribeEnv): Promise<Index> {
     if (arr) arr.push(i);
     else tri.set(k, [i]);
   }
-  cachedIndex = { toks, vmap, verses, tri };
+  // How many words each verse has, so a match can report how much of the verse
+  // was actually recited rather than only how many words lined up.
+  const vlen = new Array(verses.length).fill(0);
+  for (const vi of vmap) vlen[vi]++;
+  cachedIndex = { toks, vmap, verses, tri, vlen };
   return cachedIndex;
 }
 
@@ -67,7 +76,7 @@ const MIN_MATCH = 5; // matched words to accept a quote (filters everyday phrase
 /** Find Quranic quotes in the transcript. Greedy trigram-seeded extension with
  * a small mismatch budget (ASR insertions/drops/substitutions). ~ms runtime. */
 export async function findQuranQuotes(env: ScribeEnv, words: CleanWord[]): Promise<QuranQuote[]> {
-  const { toks, vmap, verses, tri } = await loadIndex(env);
+  const { toks, vmap, verses, tri, vlen } = await loadIndex(env);
   const t = words.map((w) => normAr(w.text));
   const quotes: QuranQuote[] = [];
   let p = 0;
@@ -110,12 +119,12 @@ export async function findQuranQuotes(env: ScribeEnv, words: CleanWord[]): Promi
     }
     if (best) {
       // Group alignment by verse → per-ayah transcript spans
-      const byVerse = new Map<number, { first: number; last: number }>();
+      const byVerse = new Map<number, { first: number; last: number; hits: number }>();
       for (const [wi, ci] of best.align) {
         const vi = vmap[ci];
         const cur = byVerse.get(vi);
-        if (!cur) byVerse.set(vi, { first: wi, last: wi });
-        else cur.last = wi;
+        if (!cur) byVerse.set(vi, { first: wi, last: wi, hits: 1 });
+        else { cur.last = wi; cur.hits++; }
       }
       const vlist = [...byVerse.entries()].sort((a, b) => a[0] - b[0]);
       quotes.push({
@@ -128,6 +137,7 @@ export async function findQuranQuotes(env: ScribeEnv, words: CleanWord[]): Promi
           en: verses[vi].en,
           wStart: span.first,
           wEnd: span.last,
+          cover: vlen[vi] ? span.hits / vlen[vi] : 0,
         })),
       });
       p = best.align[best.align.length - 1][0] + 1;

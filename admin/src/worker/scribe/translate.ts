@@ -7,7 +7,7 @@
 // JSONL cues {"w":[first,last],"t":"translation"}.
 
 import type { Cue, ScribeEnv, Word } from './types';
-import { findQuranQuotes, citeQuote, type QuranQuote } from './quran';
+import { findQuranQuotes, citeQuote, type QuranQuote, type QuoteVerse } from './quran';
 
 export type CleanWord = { i: number; text: string; start: number; end: number; speaker: string; chars?: { start: number; end: number }[] };
 
@@ -22,6 +22,10 @@ const TARGET_CPS = 17;
 // 1s recitation span has no time to divide: cutting it produced 0.04s slivers at
 // 800+ CPS, strictly worse than the one dense cue it came from. Below this,
 // leave the cue whole and let the reading-speed pass borrow following silence.
+/** How much of a verse must actually have been recited before its canonical
+ *  translation is shown. Below this the speaker quoted a clause, not the verse,
+ *  and the official text would be far more words than the seconds can hold. */
+const MIN_VERSE_COVER = 0.6;
 const MIN_PIECE_SEC = 1.2;
 
 const WINDOW_SIZE = 180; // words per LLM call — bigger windows = fewer calls; hole-filling catches drops
@@ -407,17 +411,32 @@ export async function translateWords(
   }
   quotes = mergedQ;
 
+  // A verse only earns its canonical translation when it was actually recited.
+  // Lecturers quote one famous clause of a long verse constantly, and locking
+  // the whole official text onto those few seconds is unreadable: 65:2 arrived
+  // as 376 characters over 3.6s, 104 CPS, and no amount of timing fixes that
+  // because the text cannot be shortened. Below the threshold the words go back
+  // to the translator like any other speech, and the citation is appended
+  // afterwards so the reference is not lost.
   const lockedCues: WCue[] = [];
+  const fragments: { wStart: number; wEnd: number; cite: string }[] = [];
+  const lockedVerses: QuoteVerse[] = [];
   for (const qt of quotes) {
-    const cite = citeQuote(qt.verses);
-    qt.verses.forEach((v, vi) => {
+    const full = qt.verses.filter((v) => v.cover >= MIN_VERSE_COVER);
+    for (const v of qt.verses) {
+      if (v.cover < MIN_VERSE_COVER) fragments.push({ wStart: v.wStart, wEnd: v.wEnd, cite: v.key });
+    }
+    if (!full.length) continue;
+    const cite = citeQuote(full);
+    full.forEach((v, vi) => {
       const first = words[v.wStart];
       const last = words[v.wEnd];
       if (!first || !last) return;
+      lockedVerses.push(v);
       lockedCues.push({
         start: first.start,
         end: Math.max(last.end, first.start + 0.6),
-        text: `“${v.en}”` + (vi === qt.verses.length - 1 ? ` (Quran ${cite})` : ''),
+        text: `“${v.en}”` + (vi === full.length - 1 ? ` (Quran ${cite})` : ''),
         source: v.ar,
         w: [v.wStart, v.wEnd],
         q: v.key,
@@ -425,8 +444,10 @@ export async function translateWords(
     });
   }
 
-  // LLM windows cover only the unlocked ranges
-  const lockedSpans = quotes.map((q) => [q.wStart, q.wEnd] as [number, number]).sort((a, b) => a[0] - b[0]);
+  // LLM windows cover only the unlocked ranges. Spans come from the verses that
+  // actually locked, so a fragment's words fall into a free range and get
+  // translated instead of going out with no cue at all.
+  const lockedSpans = lockedVerses.map((v) => [v.wStart, v.wEnd] as [number, number]).sort((a, b) => a[0] - b[0]);
   const freeRanges: [number, number][] = [];
   let cursor = 0;
   for (const [a, b] of lockedSpans) {
@@ -487,6 +508,14 @@ export async function translateWords(
   }
   cues.push(...lockedCues);
   cues.sort((a, b) => a.start - b.start);
+
+  // A verse quoted in part was translated as ordinary speech, so the reference
+  // has to be put back by hand. It goes on the last cue covering the quoted
+  // words, which is where a reader expects a citation to sit.
+  for (const f of fragments) {
+    const hit = cues.filter((c) => !c.q && c.w[0] <= f.wEnd && c.w[1] >= f.wStart).pop();
+    if (hit && !hit.text.includes('(Quran ')) hit.text = `${hit.text} (Quran ${f.cite})`;
+  }
 
   // Split cues longer than ~8.5s at sentence/clause boundaries, timing the
   // split at the proportional source-word boundary

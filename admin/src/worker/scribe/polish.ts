@@ -48,6 +48,10 @@ const MIN_DUR = 1.0;
 const MAX_DUR = 7.0;
 const HARD_MIN = 0.7; // below this a cue reads as a flash
 const GAP = 0.08; // never let two cues touch, unless the speech is continuous
+// How far past its recitation a verse may spread into following silence. A
+// canonical translation cannot be shortened, so when only part of the verse was
+// recited, time is the only thing that can give.
+const VERSE_GRAB = 12.0;
 
 /** `s0`/`e0` are the speech span: where this cue's words start and stop being
  *  spoken. `w` is the word-index range they came from, kept so a later pass can
@@ -142,40 +146,53 @@ function respan(c: PCue, pieces: string[], words?: Word[]): PCue[] {
 
   // Move each cut onto a real word start, keeping them ordered and leaving at
   // least one word for every piece that still has to be placed.
-  const cut: number[] = [];
+  //
+  // A partly recited verse still carries the WHOLE canonical translation, so
+  // there are routinely more pieces than there are words to hang them on. When
+  // that happens the words run out partway through: everything up to that point
+  // still gets a real anchor, and only the tail — text the speaker never said,
+  // which therefore has no word to start on — is placed proportionally. Giving
+  // up on the whole cue the moment one cut had nowhere to go was what left five
+  // pieces of verse 65:2 floating off their words.
+  const cut: (number | null)[] = new Array(pieces.length - 1).fill(null);
   if (words && c.w) {
     let after = c.w[0];
-    for (let i = 0; i < proposed.length; i++) {
-      const last = c.w[1] - (proposed.length - 1 - i);
+    for (let i = 0; i < cut.length; i++) {
+      const last = c.w[1] - (cut.length - 1 - i);
       let best = -1;
       let bestD = Infinity;
       for (let k = after + 1; k <= last; k++) {
         const d = Math.abs(words[k].start - proposed[i]);
         if (d < bestD) { bestD = d; best = k; }
       }
-      if (best < 0) break;
-      cut.push(best);
+      if (best < 0) break; // out of words; the rest fall back
+      cut[i] = best;
       after = best;
     }
   }
 
-  if (cut.length !== pieces.length - 1) {
-    // No usable word data: fall back to the proportional cut.
-    let t = c.start;
-    return pieces.map((p, i) => {
-      const end = i === pieces.length - 1 ? c.end : proposed[i];
-      const piece: PCue = { ...c, start: t, end, text: p, s0: t, e0: end, w: undefined };
-      t = end;
-      return piece;
-    });
+  // Piece boundaries as times, forced to increase so nothing inverts.
+  const bound: number[] = [c.start];
+  for (let i = 0; i < cut.length; i++) {
+    const k = cut[i];
+    const t = k != null && words ? words[k].start : proposed[i];
+    bound.push(Math.max(t, bound[i] + 0.05));
   }
 
+  const last = pieces.length - 1;
   return pieces.map((p, i) => {
-    const w0 = i === 0 ? c.w![0] : cut[i - 1];
-    const w1 = i === pieces.length - 1 ? c.w![1] : cut[i] - 1;
-    const start = i === 0 ? c.start : words![w0].start;
-    const spoken = i === pieces.length - 1 ? speechEnd(c) : words![w1].end;
-    return { ...c, start, end: Math.max(spoken, start + 0.001), text: p, s0: start, e0: spoken, w: [w0, w1] as [number, number] };
+    const start = bound[i];
+    const spoken = i === last
+      ? speechEnd(c)
+      : (cut[i] != null && words ? words[cut[i]! - 1].end : bound[i + 1]);
+    const end = i === last ? Math.max(c.end, spoken) : bound[i + 1];
+    const w0 = i === 0 ? c.w?.[0] : cut[i - 1] ?? undefined;
+    const w1 = i === last ? c.w?.[1] : (cut[i] != null ? cut[i]! - 1 : undefined);
+    return {
+      ...c, start, end: Math.max(end, start + 0.001), text: p, s0: start,
+      e0: Math.max(Math.min(spoken, end), start + 0.001),
+      w: w0 != null && w1 != null && w1 >= w0 ? [w0, w1] as [number, number] : undefined,
+    };
   });
 }
 
@@ -252,7 +269,20 @@ function rebuildVerses(cues: PCue[], words?: Word[]): PCue[] {
       const w = spans.length
         ? [Math.min(...spans.map((s) => s[0])), Math.max(...spans.map((s) => s[1]))] as [number, number]
         : undefined;
-      const block: PCue = { ...run[0], start, end, text, q, s0: start, e0: end, w };
+      // A verse recited in part still carries its whole canonical translation,
+      // so the recitation window is routinely far too short to read it in: verse
+      // 18:28 came out as pieces of a tenth of a second. Spread the block across
+      // the silence that follows as well, up to what it needs and never into the
+      // next cue. `e0` stays at the recitation, so this only ever claims time
+      // nobody was speaking.
+      const after = cues.reduce(
+        (min, x) => (x.start > end + 0.01 && !run.includes(x) ? Math.min(min, x.start) : min),
+        Infinity);
+      const room = Math.min(
+        Number.isFinite(after) ? after - GAP : end + VERSE_GRAB,
+        start + text.length / TARGET_CPS,
+        end + VERSE_GRAB);
+      const block: PCue = { ...run[0], start, end: Math.max(end, room), text, q, s0: start, e0: end, w };
       windows.push({ start, end, text });
       blocks.push(...respan(block, toFitting(text), words));
     };
