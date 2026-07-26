@@ -102,14 +102,18 @@ SEGMENTING
 - Cut at natural boundaries: sentence ends, clause breaks, pauses. [PAUSE] and [BREAK] mark where he stops — prefer cutting there.
 - Never cut mid-phrase, or between a name and its honorific. Never split across speakers ([SPEAKER]).
 - Every word index in the assigned range appears in exactly one cue. No gaps, no overlaps. A skipped range reaches the viewer untranslated.
+- Never repeat wording across a boundary. If a phrase ends one cue it does not begin the next.
 
 TRANSLATING
-- End each cue on terminal punctuation (. ? !), not on a comma. A cue is read on its own, so it has to finish a thought.
+- THE MOST IMPORTANT RULE: every cue ends on . ? or ! — never on a comma, and never mid-clause. A viewer sees one cue at a time, so each one has to finish a thought. Half the cues in the last attempt ended on a comma; that is the single thing to get right here.
+- Duration gives way to this. A cue running 8 or 9 seconds that ends on a full stop is better than a 3-second one ending on a comma. You have up to three lines, so use them.
+- When an Arabic sentence is too long for one cue, do not slice it — rewrite it as two English sentences, each complete. "وأيضا كذلك من الأسباب التي تعين على الحياة الطيبة، تحقيق التوحيد" is two cues: "Among the means to a good life is Tawhid." then the next thought, not "Among the means that help," followed by "attaining a good life is Tawhid."
 - Translate ALL meaningful content: every idea, name, number, title. Do not paraphrase or condense. Three ideas in the Arabic are three in the translation.
 - Each line at most 42 characters. At most two lines.
 - Clean up ASR artifacts: stutters, false starts, filler. Never drop meaningful content for brevity.
 
 SELF-CHECK BEFORE YOU EMIT A CUE
+- Read the line back. Does it end on . ? or ! and read as a whole sentence? If not, extend it to the end of the thought or reword it so it stands alone.
 - If a cue covers 7+ seconds and your translation is under 40 characters, you have skipped something. Re-read the words and say all of it.
 - If a cue covers under 2 seconds and your translation is over 60 characters, nobody can read it. Use fewer words or move a clause to the next cue.
 
@@ -120,7 +124,7 @@ ISLAMIC CONVENTIONS
     prophets (AS)     ← عليه السلام
     companions (RA)   ← رضي الله عنه/عنها/عنهم
     scholars (RH)     ← رحمه الله، رحمها الله
-- Quranic verses: established translation wording, in quotes, kept in one cue where it fits.
+- Quranic verses: established translation wording, in quotes. KEEP A RECITED VERSE IN AS FEW CUES AS IT ALLOWS — one if it fits, two or three for a long one. Do not give each clause its own cue: a verse recited over eight seconds became five cues of 1.3s and 0.7s, each unreadable, and part of it appeared twice. Divide the verse across the WHOLE span he recites it over, not clause by clause.
 - Transliterate rather than translate: fatwa, mufti, Sharia, fiqh, usul al-fiqh, madhhab, Tawhid, Sunnah, dhikr, taqwa.
 
 Output compact JSONL only. No newlines inside a JSON object. No commentary, no code fences.`;
@@ -331,15 +335,25 @@ function parseCues(raw: string, win: CleanWord[]): { w: [number, number]; t: str
 }
 
 // Escalation + QA model: bulk runs on cheap gemini, sonnet handles the hard parts
-// One model does everything in this pipeline. The repair and QA passes used to
-// reach for a slower, pricier one on the theory that touch-ups deserve the best;
-// measured, that is what turned a two-and-a-half minute translate step into
-// forty. Quality here is held by validation — a reply that does not tile the
-// word range, fit its own seconds or cut at his pauses is discarded whichever
-// model wrote it — so the fast model is the right one throughout.
+// Flash does the volume work: every translation window, and the hole-filling.
+// Putting the slow models on that path is what turned a two-and-a-half minute
+// step into forty.
+//
+// Two places earn a better model because they are rare and they decide quality.
+// The third rung of the ladder only fires when flash has failed a window twice,
+// which is a handful of windows in a lecture. And the review pass sees only the
+// cues that measured badly — fifty or so — and its judgement is the last thing
+// between the translation and the viewer: whether a name was dropped, whether a
+// line reads, whether an honorific survived.
 const FLASH = 'ag/gemini-3.6-flash-tiered';
-const STRONG_MODEL = FLASH;
-const QA_MODEL = FLASH;
+const STRONG_MODEL = 'ag/claude-sonnet-4-6';
+const REVIEW_MODEL = 'ag/claude-opus-4-6-thinking';
+/** Above this share of cues flagged, the fault is upstream: the translation is
+ *  producing bad cues wholesale and no amount of per-cue rewriting fixes that. */
+const REVIEW_ALARM = 0.35;
+/** And the work is bounded regardless, so one bad run cannot cost an hour. */
+const REVIEW_CAP = 150;
+const QA_MODEL = REVIEW_MODEL;
 
 /** Uncovered index ranges within [lo,hi] given parsed cues. */
 function computeHoles(cues: { w: [number, number] }[], lo: number, hi: number): [number, number][] {
@@ -388,7 +402,10 @@ async function translateWindow(
   // primary (Gemini) attempts — the strong fallback sends the exact
   // text-only request the pipeline always sent.
   let cues: { w: [number, number]; t: string }[] = [];
+  const tWinStart = Date.now();
+  let attempts = 0;
   for (const model of [undefined, undefined, STRONG_MODEL]) {
+    attempts++;
     const withAudio = !!audio && model === undefined;
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT(targetLang) + (withAudio ? AUDIO_NOTE : '') },
@@ -407,6 +424,7 @@ async function translateWindow(
     }
   }
   if (!cues.length) throw new Error(`window ${lo}-${hi} failed on all models`);
+  const tMain = Date.now();
 
   // Hole-filling: translate what the model skipped instead of stretching timing.
   // This is the pipeline's most important loop and it was the quietest. What it
@@ -432,6 +450,7 @@ async function translateWindow(
       } catch {}
     }
   }
+  console.log(`T win ${lo}-${hi}: main ${((tMain - tWinStart) / 1000).toFixed(1)}s (${attempts} tries), holes ${((Date.now() - tMain) / 1000).toFixed(1)}s`);
   const left = computeHoles(cues, lo, hi).filter(([a, b]) => b - a + 1 >= 3);
   if (left.length) {
     const words = left.reduce((n, [a, b]) => n + (b - a + 1), 0);
@@ -540,9 +559,11 @@ export async function translateWords(
       batch.map(async (win, j) => {
         const prev = windows[i + j - 1];
         const prevTail = prev ? prev.slice(-12).map((w) => w.text).join(' ') : '';
+        const tAud = Date.now();
         const audio = audioOpts
           ? await windowAudio(env, audioOpts, win[0].start, win[win.length - 1].end)
           : null;
+        console.log(`T audio ${win[0].i}: ${((Date.now() - tAud) / 1000).toFixed(1)}s`);
         return translateWindow(env, targetLang, win, prevTail, audio, windowVerse[i + j]);
       })
     );
@@ -695,8 +716,12 @@ function cueFlags(text: string, seconds: number, arabic: string): string[] {
   const flat = text.replace(/\n/g, ' ').trim();
   const cps = flat.length / Math.max(0.3, seconds);
   const flags: string[] = [];
-  if (cps > 30) flags.push(`CPS ${Math.round(cps)} — MUST fix`);
-  else if (cps > 21) flags.push(`CPS ${Math.round(cps)}`);
+  // Only flag reading speed when it is genuinely unreadable. Flagging everything
+  // over 21 sent 74% of the cues for review, and the instruction for that band
+  // is "use judgement, skip if shortening loses meaning" — so most came back
+  // untouched and the round trip bought nothing but wall time. Dense speech is
+  // dense; the ones worth a rewrite are the ones nobody could read.
+  if (cps > 30) flags.push(`CPS ${Math.round(cps)} — too fast to read`);
   // Long on the clock and short on the page is the signature of dropped content.
   if (seconds > 3 && cps < 8) flags.push(`only ${flat.length} characters for ${seconds.toFixed(1)}s of speech — content missing`);
   if (/[,;:]$/.test(flat)) flags.push('ends on a comma');
@@ -732,9 +757,32 @@ export async function reviewCues(
   words?: CleanWord[]
 ): Promise<{ cues: Cue[]; fixed: number }> {
   const out = [...cues];
-  const flagged = out.map((c, i) => ({ i, c, flags: cueFlags(c.text, c.end - c.start, c.source || '') }))
+  const all = out.map((c, i) => ({ i, c, flags: cueFlags(c.text, c.end - c.start, c.source || '') }))
     .filter((x) => x.flags.length && !x.c.q);
-  if (!flagged.length) return { cues: out, fixed: 0 };
+  if (!all.length) return { cues: out, fixed: 0 };
+
+  // A review pass is for the exceptions. When it is looking at half the file,
+  // the translation went wrong and rewriting cue by cue is both the wrong fix
+  // and enormously slow — that is how a four-minute job became twenty. So the
+  // rate is checked before any work is done, and the work is bounded either way.
+  const rate = all.length / Math.max(1, out.filter((c) => !c.q).length);
+  if (rate > REVIEW_ALARM) {
+    console.log(`review: ALARM — ${(rate * 100).toFixed(0)}% of cues flagged `
+      + `(${all.length}/${out.length}). That is a translation problem, not a cue problem; `
+      + `reviewing only the worst ${REVIEW_CAP}.`);
+  }
+  // Worst first, so a cap removes the least important work: content that was
+  // left out, then cues nobody can read, then how they read.
+  const weight = (f: string[]) =>
+    (f.some((x) => x.includes('content missing')) ? 100 : 0)
+    + (f.some((x) => x.includes('lines')) ? 50 : 0)
+    + (f.some((x) => x.includes('honorific')) ? 40 : 0)
+    + (f.some((x) => x.includes('CPS')) ? 20 : 0)
+    + f.length;
+  const flagged = all.sort((a, b) => weight(b.flags) - weight(a.flags)).slice(0, REVIEW_CAP);
+  if (flagged.length < all.length) {
+    console.log(`review: ${all.length} flagged, capped to ${flagged.length}`);
+  }
 
   let fixed = 0;
   const splits = new Map<number, Cue[]>();
@@ -750,8 +798,7 @@ export async function reviewCues(
 
 WHAT TO DO
 - CONTENT MISSING: the Arabic says something the English does not. Put it back. Names, titles, honorific chains, numbers and lists are content.
-- CPS over 30: must be fixed. Say the same thing in fewer words.
-- CPS 21-30: use judgement; leave it if shortening would lose meaning.
+- CPS flagged: too fast to read. Say the same thing in fewer words, but never by dropping a name, a number or a clause — if it cannot be shortened without losing content, leave it.
 - ENDS ON A COMMA, or OPENS MID-SENTENCE: rewrite so the cue reads as a sentence on its own.
 - LINE TOO LONG or MORE THAN TWO LINES: rebreak between l1 and l2, or say it shorter.
 - ENDS ON a preposition or conjunction: rephrase so it does not.
@@ -773,7 +820,7 @@ Some cues carry more than two lines can hold. Shortening them would mean droppin
 The word range is printed with each cue. Your pieces must start at its first index, end at its last, and each begin one after the previous ends. Split only where the sentence allows it.
 Emit nothing else — no commentary, no code fences.` },
         { role: 'user', content: body },
-      ], 8000);
+      ], 8000, REVIEW_MODEL);
       for (const line of raw.split('\n')) {
         const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
         if (!t.startsWith('{')) continue;
@@ -791,6 +838,14 @@ Emit nothing else — no commentary, no code fences.` },
           let ok = parts.length > 1 && parts[0].w[0] === src.w[0] && parts[parts.length - 1].w[1] === src.w[1];
           for (let n = 1; ok && n < parts.length; n++) if (parts[n].w[0] !== parts[n - 1].w[1] + 1) ok = false;
           for (const p of parts) if (ok && !(words[p.w[0]] && words[p.w[1]])) ok = false;
+          // A split may not manufacture a flash. One came back at 40ms holding
+          // "From the Prophet ﷺ:" — 380 characters a second, on screen for one
+          // frame. Every piece has to be readable or the cue stays whole.
+          for (const p of parts) {
+            if (!ok) break;
+            const span = words[p.w[1]].end - words[p.w[0]].start;
+            if (span < 0.7) ok = false;
+          }
           if (ok) {
             splits.set(idx, parts.map((p: any) => {
               const a = words[p.w[0]];

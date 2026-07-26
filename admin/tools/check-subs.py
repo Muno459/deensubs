@@ -111,6 +111,12 @@ def main(srt_path, cues_path, asr_path):
         for s in srt:
             s["q"], s["source"] = qmap.get(round(s["start"], 2), (None, ""))
 
+    # Nothing is a "locked" verse cue any more — the model decides where to use
+    # canonical wording — so a verse is identified by the citation it carries.
+    CITED = re.compile(r"\(Quran \d")
+    for c in srt:
+        if not c.get("q") and CITED.search(c["text"]):
+            c["q"] = CITED.search(c["text"]).group(0)
     speech = [c for c in srt if not c["q"]]
     verses = [c for c in srt if c["q"]]
     results = []
