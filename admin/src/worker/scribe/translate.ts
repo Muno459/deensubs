@@ -834,8 +834,9 @@ HARD REQUIREMENTS — a reply breaking any of these is discarded and the origina
 - Every piece: at most 84 characters, at most 2 lines of 42, with the break given as \\n.
 - EVERY PIECE MUST READ AS A SENTENCE ON ITS OWN. None may open with a comma or a lowercase continuation of the piece before it, and none may END on a word that governs the next one (an article, preposition, conjunction, auxiliary or relative pronoun). Reword freely to achieve this — moving the boundary is not enough, and this is the main thing being asked for. Arabic chains clauses endlessly with و; English must not. Write separate sentences.
 - Keep all the meaning. Where the Arabic says صلى الله عليه وسلم, سبحانه وتعالى, رضي الله عنه, رحمه الله or عليه السلام, the translation must carry it — as ﷺ, ﷻ, (RA), (RH), (AS) or spelled out. Keep transliterations (fiqh, Sharia, Tawhid).
-- Aim for at most 17 characters per second of each piece's own duration, readable from the word timings.
-- Prefer boundaries at [PAUSE] and [BREAK], which is where he actually stops. Never carry two speakers in one cue: always cut at [SPEAKER].
+- EVERY PIECE MUST FIT ITS OWN SECONDS. Its duration is its last word's end minus its first word's start, both given below. At most 17 characters per second of that, and never fewer than 0.7 seconds of speech for a piece. A piece carrying more words than its span can hold is rejected outright — if the wording will not fit, use fewer words, not a shorter span.
+- Never repeat a word across a boundary: the last words of one piece must not be the first words of the next.
+- CUT WHERE HE STOPS. Every boundary you create should fall on a [PAUSE] or a [BREAK]. If the range contains as many pauses as you need boundaries and you cut somewhere else instead, the reply is rejected. Never carry two speakers in one cue: always cut at [SPEAKER].
 No commentary, no code fences, JSONL only.` },
         { role: 'user', content: body },
       ], 8000, STRONG_MODEL);
@@ -859,6 +860,42 @@ No commentary, no code fences, JSONL only.` },
           const [x, y] = parts[n].w;
           if (!(Number.isInteger(x) && Number.isInteger(y) && y >= x)) ok = false;
           else if (n > 0 && x !== parts[n - 1].w[1] + 1) ok = false;
+        }
+        if (!ok) continue;
+        // A re-cut may reword, so a piece can come back carrying more text than
+        // its own seconds can hold. Measured: splitting fixed the fragments and
+        // took the worst reading speed from 35 to 300 characters per second,
+        // because nothing checked that each piece still fits the time it owns.
+        // Every piece is now checked against its own span, and a boundary may
+        // not repeat a word across itself.
+        const bare = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, '').trim().split(/\s+/);
+        for (let n = 0; ok && n < parts.length; n++) {
+          const a = words[parts[n].w[0]];
+          const b = words[parts[n].w[1]];
+          const span = Math.max(0.05, b.end - a.start);
+          const txt = parts[n].t.replace(/\n/g, ' ').trim();
+          if (span < 0.7 && parts.length > 1) ok = false;
+          else if (txt.length / span > TARGET_CPS + 5) ok = false;
+          else if (n > 0) {
+            const prev = bare(parts[n - 1].t);
+            const cur = bare(txt);
+            for (let k = Math.min(3, prev.length, cur.length); k > 0; k--) {
+              if (prev.slice(-k).join(' ') === cur.slice(0, k).join(' ')) { ok = false; break; }
+            }
+          }
+        }
+        // And it must cut where he actually stops. Adding boundaries anywhere
+        // else is why splitting made the pause alignment worse rather than
+        // better: the reply has to use at least as many real pauses as it has
+        // boundaries, unless the range simply does not contain that many.
+        if (ok && parts.length > 1) {
+          let avail = 0;
+          for (let k = src.w[0] + 1; k <= tail.w[1]; k++) {
+            if (words[k].start - words[k - 1].end >= 0.15) avail++;
+          }
+          const bounds = parts.slice(1).map((p: any) => p.w[0]);
+          const onPause = bounds.filter((b: number) => b > 0 && words[b].start - words[b - 1].end >= 0.15).length;
+          if (onPause < Math.min(bounds.length, avail)) ok = false;
         }
         if (!ok) continue;
         replaced.set(g.idx[0], parts.map((p: any) => {
