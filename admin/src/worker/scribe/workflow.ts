@@ -4,7 +4,7 @@
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
 import { download, needsBrowser } from './download';
 import { runAsr, loadAsr } from './asr';
-import { translateWords, qaPass, takeUsage, takeCost } from './translate';
+import { translateWords, reviewCues, takeUsage, takeCost } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
 import { generateChapters, generateMetaAndChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
@@ -319,30 +319,23 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               await env.MEDIA_BUCKET.put(`scribe/${jobId}/cues-pre-qa-${lang}.json`, JSON.stringify(cues), {
                 httpMetadata: { contentType: 'application/json' },
               }).catch(() => {});
+              // ONE review pass for subtitles. Code measures each cue — reading
+              // speed, line width, a comma at the end, a dropped honorific, a
+              // translation too short for the seconds it covers — and the model
+              // rewrites only the wording of the ones that need it. It cannot
+              // move a boundary, so nothing here can cost sync. This replaces a
+              // general QA pass plus a condense pass plus four rounds of
+              // re-cutting: three passes over the same cues, each able to undo
+              // the last.
               const repaired = isAudiobook
                 ? await qaPassAudiobook(env, cues as any, lang)
-                : await qaPass(env, cues, lang);
-              let final = repaired.cues;
-              let tightened = 0;
-              if (!isAudiobook) {
-                // Subtitles have a reading-speed limit that audiobook units do
-                // not, and it is the one display limit nothing can be moved to
-                // satisfy: a cue is on screen exactly as long as its words are
-                // spoken. When the text will not fit those seconds, only shorter
-                // wording helps — so the model shortens it, and nothing here
-                // edits the result.
-                const { condenseDense } = await import('./translate');
-                for (let pass = 0; pass < 4; pass++) {
-                  const c = await condenseDense(env, final, lang);
-                  if (!c.fixed) break;
-                  tightened += c.fixed;
-                  final = c.cues;
-                }
-              }
+                : await reviewCues(env, cues, lang);
+              const final = repaired.cues;
+              const tightened = 0;
               await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(final), {
                 httpMetadata: { contentType: 'application/json' },
               });
-              return { fixes: repaired.fixes + tightened, tokens: takeUsage(), cost: takeCost() };
+              return { fixes: ((repaired as any).fixes ?? (repaired as any).fixed ?? 0) + tightened, tokens: takeUsage(), cost: takeCost() };
             }
           );
           await addTokens(env, jobId, qa.tokens, (qa as any).cost || 0);

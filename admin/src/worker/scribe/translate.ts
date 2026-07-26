@@ -15,6 +15,7 @@ export type CleanWord = { i: number; text: string; start: number; end: number; s
 // time it is on screen. Splitting used to trigger on DURATION alone, which made
 // a short-but-text-heavy cue unreachable: a whole canonical verse pinned to a
 // 1.3s recitation span stayed one 541-character cue at ~400 CPS.
+const MAX_LINE = 42;
 const MAX_CUE_CHARS = 84; // 2 lines x 42
 const TARGET_CPS = 17;
 // Splitting divides the cue's TIME as well as its text, so it only helps when
@@ -82,24 +83,46 @@ export function makeWindows(words: CleanWord[]): CleanWord[][] {
 // So this asks for coverage, faithfulness and sensible boundaries, and nothing
 // else. Readability is repaired afterwards by refitCues, one cue at a time,
 // where the model has attention to spare for it.
-const SYSTEM_PROMPT = (targetLang: string) => `You translate an Islamic lecture into subtitle cues. You are given numbered words with timestamps from speech recognition.
+// Modelled on the scribe pipeline, which does the same job without a repair
+// layer. Two ideas carry it: the model returns the two LINES it wants shown, so
+// nothing here has to wrap text; and the constraints are stated as self-checks
+// the model can apply while writing, rather than as detectors that find faults
+// afterwards and hand them back.
+const SYSTEM_PROMPT = (targetLang: string) => `You are a professional subtitle translator into ${targetLang}. You receive numbered Arabic words with timestamps and speaker labels. You segment AND translate in one pass, the way a human subtitler does.
 
-OUTPUT — one JSON object per line, nothing else. No prose, no numbering, no code fences:
-{"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"t":"translation of those words"}
+FOR EACH CUE output one compact JSON line:
+{"w":[0,5],"l1":"We praise Allah ﷻ","l2":"for this blessed gathering."}
+{"w":[6,12],"l1":"And this purposeful seminar."}
 
-THE TWO RULES THAT MATTER
-1. COVER EVERY WORD INDEX, in order, exactly once, with no gaps. If the list runs from 40 to 224, your first cue starts at 40, your last ends at 224, and each cue starts one after the previous ends. A skipped range is the worst thing you can do here: those words reach the viewer untranslated.
-2. SAY EVERYTHING HE SAYS. Never summarise, never compress. Names, titles, honorific chains, numbers and lists are content: "\u0635\u0627\u062d\u0628 \u0627\u0644\u0633\u0645\u0648 \u0627\u0644\u0645\u0644\u0643\u064a \u0627\u0644\u0623\u0645\u064a\u0631 \u062e\u0627\u0644\u062f \u0628\u0646 \u0633\u0644\u0645\u0627\u0646" is "His Royal Highness Prince Khalid bin Salman". Only stutters, false starts and repeated words are dropped; their indices still belong to the cue covering that span.
+w = [first, last] word index, inclusive. l1 = line 1, l2 = line 2 (optional).
 
-SEGMENTATION
-- End a cue where the sentence or clause closes, and start the next where the next thought starts. Roughly 1-7 seconds and at most ~84 characters each, but coverage matters more than either — if in doubt, emit the cue.
-- Cut where the speaker pauses: [PAUSE] and [BREAK] mark those. Never carry two speakers in one cue: always cut at [SPEAKER].
+SEGMENTING
+- Each cue is consecutive words forming one subtitle. Aim for 1-7 seconds.
+- Cut at natural boundaries: sentence ends, clause breaks, pauses. [PAUSE] and [BREAK] mark where he stops — prefer cutting there.
+- Never cut mid-phrase, or between a name and its honorific. Never split across speakers ([SPEAKER]).
+- Every word index in the assigned range appears in exactly one cue. No gaps, no overlaps. A skipped range reaches the viewer untranslated.
 
-LANGUAGE
-- Translate to ${targetLang}.
-- Honorifics: Allah \ufdfb, the Prophet Muhammad \ufdfa, companions (RA), earlier prophets (AS), scholars (RH). Where the Arabic has one, the translation has one.
-- Keep transliterations: fatwa, mufti, Sharia, fiqh, usul al-fiqh, madhhab, Tawhid, Sunnah.
-- Proper nouns in standard English transliteration.`;
+TRANSLATING
+- End each cue on terminal punctuation (. ? !), not on a comma. A cue is read on its own, so it has to finish a thought.
+- Translate ALL meaningful content: every idea, name, number, title. Do not paraphrase or condense. Three ideas in the Arabic are three in the translation.
+- Each line at most 42 characters. At most two lines.
+- Clean up ASR artifacts: stutters, false starts, filler. Never drop meaningful content for brevity.
+
+SELF-CHECK BEFORE YOU EMIT A CUE
+- If a cue covers 7+ seconds and your translation is under 40 characters, you have skipped something. Re-read the words and say all of it.
+- If a cue covers under 2 seconds and your translation is over 60 characters, nobody can read it. Use fewer words or move a clause to the next cue.
+
+ISLAMIC CONVENTIONS
+- Render these as symbols, do not translate the Arabic phrase:
+    Allah ﷻ           ← سبحانه وتعالى، تبارك وتعالى، عز وجل، جل جلاله
+    the Prophet ﷺ     ← صلى الله عليه وسلم، عليه الصلاة والسلام
+    prophets (AS)     ← عليه السلام
+    companions (RA)   ← رضي الله عنه/عنها/عنهم
+    scholars (RH)     ← رحمه الله، رحمها الله
+- Quranic verses: established translation wording, in quotes, kept in one cue where it fits.
+- Transliterate rather than translate: fatwa, mufti, Sharia, fiqh, usul al-fiqh, madhhab, Tawhid, Sunnah, dhikr, taqwa.
+
+Output compact JSONL only. No newlines inside a JSON object. No commentary, no code fences.`;
 
 function windowPrompt(win: CleanWord[], prevTail: string, verseContext?: string): string {
   const lines: string[] = [];
@@ -291,7 +314,13 @@ function parseCues(raw: string, win: CleanWord[]): { w: [number, number]; t: str
     if (!line.startsWith('{')) continue;
     try {
       const obj = JSON.parse(line);
-      if (!Array.isArray(obj.w) || obj.w.length !== 2 || typeof obj.t !== 'string') continue;
+      // The model returns the two lines it wants shown; `t` stays accepted so an
+      // older reply shape still parses.
+      const l1 = typeof obj.l1 === 'string' ? obj.l1.trim() : '';
+      const l2 = typeof obj.l2 === 'string' ? obj.l2.trim() : '';
+      const joined = l1 && l2 ? `${l1}\n${l2}` : l1 || (typeof obj.t === 'string' ? obj.t : '');
+      if (!Array.isArray(obj.w) || obj.w.length !== 2 || !joined) continue;
+      obj.t = joined;
       let [a, b] = obj.w.map((n: any) => Math.round(Number(n)));
       if (isNaN(a) || isNaN(b)) continue;
       a = Math.max(lo, Math.min(a, hi));
@@ -655,14 +684,10 @@ export async function translateWords(
   // answer failed validation, goes to the strong one on the last round. Running
   // everything through the strong model was what made this step cost more than
   // the translation it repairs.
-  // Four rounds, because the faults feed each other: restoring a dropped name
-  // makes a cue too long, and splitting it is another round's work. Three left
-  // the repaired ones oversize because there was no round after the repair.
-  for (let round = 0; round < 4; round++) {
-    const r = await refitCues(env, cues, words, targetLang, round === 3 ? STRONG_MODEL : undefined);
-    cues = r.cues as WCue[];
-    if (!r.fixed) break;
-  }
+  // Nothing re-cuts these. The word ranges the model chose are the timing, and
+  // they are final here — readability is handled by reviewCues afterwards, which
+  // rewrites wording and never touches a boundary.
+
 
   // Netflix-style post pass: ordered, non-overlapping, breathable
   cues.sort((a, b) => a.start - b.start);
@@ -750,356 +775,110 @@ export async function translateWords(
  * they were, a cue that reads poorly being a lesser fault than one that has lost
  * its place in the audio.
  */
-export async function refitCues<T extends Cue & { w: [number, number] }>(
+/**
+ * One pass over the finished cues: code measures, the model rewrites the text.
+ *
+ * This replaces a repair layer that had grown six detectors, five validation
+ * rules and four rounds of re-cutting word ranges. Re-cutting is what made all
+ * that necessary — once a pass may move a cue's boundaries it can also break its
+ * sync, so every reply had to be proved to tile the original range, fit its own
+ * seconds and land on a pause.
+ *
+ * So this pass does not touch boundaries. A cue's word range, and therefore its
+ * timing, is fixed the moment translation returns it. All that can change is the
+ * wording, which is the only thing a language model is actually better at than a
+ * measurement. Anything it cannot fix stays as it is and shows up in the report.
+ */
+function cueFlags(text: string, seconds: number, arabic: string): string[] {
+  const flat = text.replace(/\n/g, ' ').trim();
+  const cps = flat.length / Math.max(0.3, seconds);
+  const flags: string[] = [];
+  if (cps > 30) flags.push(`CPS ${Math.round(cps)} — MUST fix`);
+  else if (cps > 21) flags.push(`CPS ${Math.round(cps)}`);
+  // Long on the clock and short on the page is the signature of dropped content.
+  if (seconds > 3 && cps < 8) flags.push(`only ${flat.length} characters for ${seconds.toFixed(1)}s of speech — content missing`);
+  if (/[,;:]$/.test(flat)) flags.push('ends on a comma');
+  for (const [i, line] of text.split('\n').entries()) {
+    if (line.trim().length > MAX_LINE) flags.push(`line ${i + 1} is ${line.trim().length} characters`);
+  }
+  if (text.split('\n').length > 2) flags.push('more than two lines');
+  const last = flat.replace(/[.,!?;:"'\u201d\u2019]+$/, '').split(/\s+/).pop()?.toLowerCase() || '';
+  if (DANGLERS.has(last)) flags.push(`ends on "${last}"`);
+  if (/^[a-z,;:]/.test(flat)) flags.push('opens mid-sentence');
+  if (arabic && /صلى الله عليه وسلم|عليه الصلاة والسلام/.test(arabic) && !/ﷺ|peace be upon him/i.test(text)) flags.push('honorific ﷺ dropped');
+  if (arabic && /سبحانه وتعالى|تبارك وتعالى|عز وجل|جل جلاله/.test(arabic) && !/ﷻ|Glorified|Exalted|Almighty/i.test(text)) flags.push('honorific ﷻ dropped');
+  return flags;
+}
+
+const DANGLERS = new Set(['the', 'a', 'an', 'of', 'in', 'and', 'or', 'but', 'with', 'for', 'to',
+  'that', 'which', 'who', 'is', 'was', 'are', 'were', 'from', 'by', 'as', 'on', 'at', 'this', 'his',
+  'her', 'their', 'its', 'not', 'if', 'when', 'while', 'then', 'into', 'upon']);
+
+export async function reviewCues(
   env: ScribeEnv,
-  cues: T[],
-  words: CleanWord[],
-  targetLang: string,
-  model?: string
-): Promise<{ cues: T[]; fixed: number }> {
-  const twoLines = (t: string) => {
-    const ls = t.split('\n');
-    return ls.length <= 2 && ls.every((l) => l.length <= 42);
-  };
-  const tooBig = (c: T) => c.text.length > MAX_CUE_CHARS || !twoLines(c.text)
-    || c.text.length / Math.max(0.3, c.end - c.start) > TARGET_CPS + 4;
-  const opensMid = (t: string) => {
-    const x = t.trim().replace(/^["\u201c\u201d'\-\u2013\u2014\u2026\s]+/, '');
-    if (!x) return false;
-    if (/^[,;:]/.test(x)) return true;
-    return /^[a-z]/.test(x.split(/\s+/)[0]);
-  };
-  // The same fault at the other end: a cue closing on a word that governs what
-  // comes next ("the dinar, the / dirham") reads as a stumble, and like an
-  // opening fragment it can only be fixed by moving the boundary, so the cue is
-  // repaired together with the one that follows it.
-  const GOVERNS = new Set(['a', 'an', 'the', 'and', 'or', 'but', 'nor', 'so', 'yet', 'of', 'in', 'on',
-    'at', 'to', 'for', 'with', 'from', 'by', 'as', 'is', 'was', 'are', 'were', 'be', 'been', 'that',
-    'which', 'who', 'whom', 'whose', 'this', 'these', 'those', 'his', 'her', 'its', 'their', 'our',
-    'your', 'my', 'not', 'no', 'if', 'when', 'while', 'than', 'then', 'into', 'upon', 'about']);
-  // Honorifics are substantive here, not decoration: the ﷺ after the Prophet's
-  // name is part of the sentence to this audience. Each Arabic form has accepted
-  // English renderings, and a cue whose Arabic carries one but whose translation
-  // does not is sent back to be said properly.
-  const HONORIFICS: [string[], string[]][] = [
-    [['صلى الله عليه وسلم', 'عليه الصلاة والسلام'], ['ﷺ', 'peace be upon him', 'blessings and peace']],
-    [['سبحانه وتعالى', 'تبارك وتعالى', 'عز وجل', 'جل جلاله'], ['ﷻ', 'glorified and exalted', 'exalted be he', 'the most high', 'almighty']],
-    [['رضي الله عنهما', 'رضي الله عنهم', 'رضي الله عنها', 'رضي الله عنه'], ['(ra)', 'ra)', 'may allah be pleased']],
-    [['رحمه الله', 'رحمها الله'], ['(rh)', 'rh)', 'may allah have mercy']],
-    [['عليهم السلام', 'عليه السلام'], ['(as)', 'as)', 'peace be upon him', 'peace be upon them']],
-  ];
-  // Content quietly left out. Ten seconds of Arabic rendered as six English
-  // words is not concise, it is incomplete: the cue at 4:07 said "His Royal
-  // Highness Prince Khalid bin Salman" and the subtitle stopped at "the Minister
-  // of Defense". English runs a steady length against its Arabic across a whole
-  // lecture, so a cue far under that is one that dropped something. Honorific
-  // phrases are collapsed first, being long in Arabic and one glyph in English.
-  const AR_HONORIFIC = ['صلى الله عليه وسلم', 'عليه الصلاة والسلام', 'رضي الله عنهما', 'رضي الله عنهم',
-    'رضي الله عنها', 'رضي الله عنه', 'سبحانه وتعالى', 'تبارك وتعالى', 'عليهم السلام', 'عليه السلام',
-    'رحمه الله', 'رحمها الله', 'عز وجل', 'جل جلاله'];
-  const arLen = (t: string) => {
-    let x = t;
-    for (const h of AR_HONORIFIC) x = x.split(h).join('*');
-    return x.length;
-  };
-  const ratios = cues.filter((c) => !c.q && (c.source || '').trim())
-    .map((c) => c.text.length / Math.max(1, arLen(c.source))).sort((a, b) => a - b);
-  const medianRatio = ratios.length ? ratios[Math.floor(ratios.length / 2)] : 1.4;
-  const dropsContent = (c: T) => {
-    const ar = arLen(c.source || '');
-    if (ar < 30) return false; // too short to judge
-    // 0.7 rather than something looser: at 0.6 this catches 32 cues on the
-    // reference lecture and at 0.7 it catches 73, covering six minutes of
-    // speech that reached the screen thinner than it was spoken.
-    return c.text.length / ar < medianRatio * 0.7;
-  };
-  const dropsHonorific = (c: T) => {
-    const src = c.source || '';
-    const en = c.text.toLowerCase();
-    return HONORIFICS.some(([ar, forms]) => ar.some((a) => src.includes(a)) && !forms.some((f) => en.includes(f)));
-  };
-  const endsHanging = (t: string) => {
-    const w = t.trim().split(/\s+/);
-    const last = (w[w.length - 1] || '').toLowerCase().replace(/[^a-z']/g, '');
-    return !!last && GOVERNS.has(last);
-  };
+  cues: Cue[],
+  targetLang: string
+): Promise<{ cues: Cue[]; fixed: number }> {
+  const out = [...cues];
+  const flagged = out.map((c, i) => ({ i, c, flags: cueFlags(c.text, c.end - c.start, c.source || '') }))
+    .filter((x) => x.flags.length && !x.c.q);
+  if (!flagged.length) return { cues: out, fixed: 0 };
 
-  // Group the work. An ill-fitting cue is re-cut on its own; a cue that reads as
-  // a fragment is re-cut with the one before it. Groups that touch are merged so
-  // no cue is sent twice in one round.
-  // Each group carries WHY it is being sent back. Handing the model a set of
-  // cues and a list of rules leaves it to work out which rule each one breaks;
-  // naming the fault is the difference between "make these better" and a task.
-  const groups: { idx: number[]; why: string[] }[] = [];
-  const add = (idx: number[], why: string) => groups.push({ idx, why: [why] });
-  for (let i = 0; i < cues.length; i++) {
-    const c = cues[i];
-    if (c.q || c.w[1] < c.w[0]) continue;
-    if (c.end - c.start > 10 && c.w[1] > c.w[0] + 3) {
-      add([i], `one cue is holding ${(c.end - c.start).toFixed(0)} seconds of speech — that is a paragraph, not a subtitle; it must become several cues covering everything said`);
-    } else if (tooBig(c) && c.w[1] > c.w[0]) {
-      add([i], c.text.length > MAX_CUE_CHARS
-        ? `too long: ${c.text.replace(/\n/g, ' ').length} characters against a limit of ${MAX_CUE_CHARS}`
-        : !twoLines(c.text) ? 'will not fit two lines of 42 characters'
-        : `too fast to read: ${Math.round(c.text.length / Math.max(0.3, c.end - c.start))} characters per second`);
-    } else if (opensMid(c.text) && i > 0 && !cues[i - 1].q && cues[i - 1].w[1] + 1 === c.w[0]) {
-      add([i - 1, i], 'the second cue opens as a fragment of the first — it does not read on its own');
-    } else if (endsHanging(c.text) && i + 1 < cues.length && !cues[i + 1].q
-               && c.w[1] + 1 === cues[i + 1].w[0]) {
-      add([i, i + 1], 'the first cue ends on a word that governs the next one');
-    } else if (dropsHonorific(c)) {
-      add([i], 'the Arabic carries an honorific that the translation drops');
-    } else if (dropsContent(c)) {
-      add([i], `the translation leaves out part of what is said: ${(c.source || '').length} characters of Arabic rendered as ${c.text.length} of ${targetLang}, against about ${Math.round(medianRatio * arLen(c.source || ''))} for this speaker`);
-    }
-  }
-  const merged: { idx: number[]; why: string[] }[] = [];
-  for (const g of groups) {
-    const last = merged[merged.length - 1];
-    if (last && g.idx[0] <= last.idx[last.idx.length - 1]) {
-      for (const i of g.idx) if (!last.idx.includes(i)) last.idx.push(i);
-      for (const w of g.why) if (!last.why.includes(w)) last.why.push(w);
-    } else merged.push({ idx: [...g.idx], why: [...g.why] });
-  }
-  if (!merged.length) return { cues, fixed: 0 };
-
-  const replaced = new Map<number, T[]>();
-  // Why a reply was thrown away. Without this the pass reports "38 sent, 14
-  // accepted" and there is no way to tell an unreasonable rule from a model
-  // that cannot follow a reasonable one.
-  const reject = { tile: 0, fit: 0, dup: 0, pause: 0, shape: 0 };
-  // Six. Twenty was tried to cut the request count and the model could not hold
-  // it: measured, batches of twenty came back with eight objects, or none at all
-  // and a paragraph of reasoning, or the input echoed. Batches of three came back
-  // complete. The request count was never the problem — the slow model was, and
-  // that is fixed separately, so these can stay small and go out together.
-  const BATCH = 6;
-  // Each batch is an independent request, so they go out together. Run one at
-  // a time this took longer than the translation itself: a lecture produces a
-  // few hundred groups and three rounds of them serially is hundreds of
-  // sequential calls.
-  const jobs: { idx: number[]; why: string[] }[][] = [];
-  for (let k = 0; k < merged.length; k += BATCH) jobs.push(merged.slice(k, k + BATCH));
-  const runBatch = async (batch: { idx: number[]; why: string[] }[]) => {
-    const body = batch.map((gr) => {
-      const g = gr.idx;
-      const first = cues[g[0]];
-      const last = cues[g[g.length - 1]];
-      // Same markers the translation window carries, so a re-cut can respect the
-      // speaker changes and the pauses it is being asked to cut on.
-      const slice = words.slice(first.w[0], last.w[1] + 1);
-      let spk = slice[0]?.speaker || '';
-      const ws = slice.map((w, n) => {
-        const bits: string[] = [];
-        if (n > 0) {
-          const gap = w.start - slice[n - 1].end;
-          if (gap >= 0.6) bits.push(`[BREAK ${Math.round(gap * 1000)}ms]`);
-          else if (gap >= 0.15) bits.push(`[PAUSE ${Math.round(gap * 1000)}ms]`);
-        }
-        if (w.speaker && w.speaker !== spk) { bits.push(`[SPEAKER ${w.speaker}]`); spk = w.speaker; }
-        bits.push(`${w.i}\t${w.start.toFixed(2)}-${w.end.toFixed(2)}\t${w.text}`);
-        return bits.join('\n');
-      }).join('\n');
-      const cur = g.map((i) => `  [${cues[i].text.replace(/\n/g, ' ').length} chars] ${cues[i].text.replace(/\n/g, ' ')}`).join('\n');
-      const secs = (last.end - first.start).toFixed(1);
-      return `### ${g[0]}\nProblem: ${gr.why.join('; ')}\nCurrent ${g.length === 1 ? 'cue' : 'cues'} over ${secs}s:\n${cur}\nWords ${first.w[0]}-${last.w[1]}:\n${ws}`;
-    }).join('\n\n');
+  let fixed = 0;
+  const BATCH = 12;
+  const runBatch = async (batch: typeof flagged) => {
+    const body = batch.map(({ i, c, flags }) =>
+      `Cue ${i} [${(c.end - c.start).toFixed(1)}s]\n  PROBLEM: ${flags.join('; ')}\n  AR: "${(c.source || '').replace(/\n/g, ' ')}"\n  EN: "${c.text.replace(/\n/g, ' | ')}"`
+    ).join('\n\n');
     try {
       const raw = await llmChat(env, [
-        { role: 'system', content: `You re-cut subtitle cues for an Islamic lecture. Each block gives you a range of transcribed words and the cue or cues currently covering it, which are either too long to display or do not read as sentences. Target language: ${targetLang}.
+        { role: 'system', content: `You are a subtitle accuracy checker for ${targetLang} subtitles of an Islamic lecture. You receive cues with the problems found in them, and you rewrite the wording only. The timing is fixed and is not yours to change.
 
-Re-divide each range into cues that fit and read. Answer with ONE JSON object per line:
-{"id": <the ### number>, "cues": [{"w":[FIRST,LAST],"t":"line one\\nline two"}, ...]}
+WHAT TO DO
+- CONTENT MISSING: the Arabic says something the English does not. Put it back. Names, titles, honorific chains, numbers and lists are content.
+- CPS over 30: must be fixed. Say the same thing in fewer words.
+- CPS 21-30: use judgement; leave it if shortening would lose meaning.
+- ENDS ON A COMMA, or OPENS MID-SENTENCE: rewrite so the cue reads as a sentence on its own.
+- LINE TOO LONG or MORE THAN TWO LINES: rebreak between l1 and l2, or say it shorter.
+- ENDS ON a preposition or conjunction: rephrase so it does not.
+- HONORIFIC DROPPED: put ﷺ or ﷻ where the Arabic has it.
 
-HARD REQUIREMENTS — a reply breaking any of these is discarded and the original kept:
-- The pieces must cover the given word range EXACTLY: the first starts at the range's first index, the last ends at its last index, each begins on the index right after the previous ends. No gaps, no overlaps, no reordering.
-- Every piece: at most 84 characters, at most 2 lines of 42, with the break given as \\n.
-- EVERY PIECE MUST READ AS A SENTENCE ON ITS OWN. None may open with a comma or a lowercase continuation of the piece before it, and none may END on a word that governs the next one (an article, preposition, conjunction, auxiliary or relative pronoun). Reword freely to achieve this — moving the boundary is not enough, and this is the main thing being asked for. Arabic chains clauses endlessly with و; English must not. Write separate sentences.
-- SAY EVERYTHING THE ARABIC SAYS. Names, titles and numbers are content: a cue whose words take ten seconds cannot be six English words. Where the Arabic says صلى الله عليه وسلم, سبحانه وتعالى, رضي الله عنه, رحمه الله or عليه السلام, the translation must carry it — as ﷺ, ﷻ, (RA), (RH), (AS) or spelled out. Keep transliterations (fiqh, Sharia, Tawhid).
-- EVERY PIECE MUST FIT ITS OWN SECONDS. Its duration is its last word's end minus its first word's start, both given below. At most 17 characters per second of that, and never fewer than 0.7 seconds of speech for a piece. A piece carrying more words than its span can hold is rejected outright — if the wording will not fit, use fewer words, not a shorter span.
-- Never repeat a word across a boundary: the last words of one piece must not be the first words of the next.
-- CUT WHERE HE STOPS. Every boundary you create should fall on a [PAUSE] or a [BREAK]. If the range contains as many pauses as you need boundaries and you cut somewhere else instead, the reply is rejected. Never carry two speakers in one cue: always cut at [SPEAKER].
-OUTPUT DISCIPLINE — this is not optional:
-- Emit exactly one JSON object per ### block, on its own line, in the order given.
-- Emit nothing else. No reasoning, no restating the problem, no repeating the word list, no code fences, no blank lines, no prose before or after.
-- If you cannot improve a block, still emit a line for it with its cues unchanged.` },
+RULES
+- Never drop words or honorifics (ﷺ ﷻ RA AS RH).
+- Keep transliterations: fiqh, Sharia, Tawhid, Sunnah, dhikr, taqwa.
+- Each line at most ${MAX_LINE} characters, at most two lines.
+- You cannot split a cue or move its boundaries. If the text will not fit the seconds it has, say it in fewer words.
+
+OUTPUT compact JSONL, one line per cue you change:
+{"cue":5,"l1":"fixed line one","l2":"line two"}
+{"cue":12,"skip":true}
+Emit nothing else — no commentary, no code fences.` },
         { role: 'user', content: body },
-      ], 12000, model);
-      const objLines = raw.split('\n').filter((l) => l.trim().replace(/^```(json)?/, '').trim().startsWith('{')).length;
-      console.log(`refit batch: ${batch.length} asked, ${objLines} objects back, ${raw.length} chars; head=${raw.slice(0, 160).replace(/\n/g, ' | ')}`);
+      ], 8000);
       for (const line of raw.split('\n')) {
         const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
         if (!t.startsWith('{')) continue;
         let f: any;
         try { f = JSON.parse(t); } catch { continue; }
-        // The id comes back as a number or a string depending on the model's
-        // mood; a strict mismatch here would silently discard every repair.
-        const id = Number(f.id);
-        const g = merged.find((x) => x.idx[0] === id);
-        const list = Array.isArray(f.cues) ? f.cues : Array.isArray(f.pieces) ? f.pieces : null;
-        if (!g || !list || !list.length) { reject.shape++; continue; }
-        const src = cues[g.idx[0]];
-        const tail = cues[g.idx[g.idx.length - 1]];
-        const parts = list.filter((p: any) => Array.isArray(p.w) && typeof p.t === 'string' && p.t.trim());
-        if (!parts.length) continue;
-        let ok = parts[0].w[0] === src.w[0] && parts[parts.length - 1].w[1] === tail.w[1];
-        for (let n = 0; ok && n < parts.length; n++) {
-          const [x, y] = parts[n].w;
-          if (!(Number.isInteger(x) && Number.isInteger(y) && y >= x)) ok = false;
-          else if (n > 0 && x !== parts[n - 1].w[1] + 1) ok = false;
-        }
-        if (!ok) { reject.tile++; continue; }
-        // A re-cut may reword, so a piece can come back carrying more text than
-        // its own seconds can hold. Measured: splitting fixed the fragments and
-        // took the worst reading speed from 35 to 300 characters per second,
-        // because nothing checked that each piece still fits the time it owns.
-        // Every piece is now checked against its own span, and a boundary may
-        // not repeat a word across itself.
-        const bare = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, '').trim().split(/\s+/);
-        for (let n = 0; ok && n < parts.length; n++) {
-          const a = words[parts[n].w[0]];
-          const b = words[parts[n].w[1]];
-          const span = Math.max(0.05, b.end - a.start);
-          const txt = parts[n].t.replace(/\n/g, ' ').trim();
-          if (span < 0.7 && parts.length > 1) { ok = false; reject.fit++; }
-          else if (txt.length / span > TARGET_CPS + 5) { ok = false; reject.fit++; }
-          else if (n > 0) {
-            const prev = bare(parts[n - 1].t);
-            const cur = bare(txt);
-            for (let k = Math.min(3, prev.length, cur.length); k > 0; k--) {
-              if (prev.slice(-k).join(' ') === cur.slice(0, k).join(' ')) { ok = false; reject.dup++; break; }
-            }
-          }
-        }
-        // And it must cut where he actually stops. Adding boundaries anywhere
-        // else is why splitting made the pause alignment worse rather than
-        // better: the reply has to use at least as many real pauses as it has
-        // boundaries, unless the range simply does not contain that many.
-        if (ok && parts.length > 1) {
-          let avail = 0;
-          for (let k = src.w[0] + 1; k <= tail.w[1]; k++) {
-            if (words[k].start - words[k - 1].end >= 0.15) avail++;
-          }
-          const bounds = parts.slice(1).map((p: any) => p.w[0]);
-          const onPause = bounds.filter((b: number) => b > 0 && words[b].start - words[b - 1].end >= 0.15).length;
-          if (onPause < Math.min(bounds.length, avail)) { ok = false; reject.pause++; }
-        }
-        if (!ok) continue;
-        replaced.set(g.idx[0], parts.map((p: any) => {
-          const a = words[p.w[0]];
-          const b = words[p.w[1]];
-          return {
-            ...src,
-            start: a.start,
-            end: Math.max(b.end, a.start + 0.6),
-            text: p.t.trim(),
-            source: words.slice(p.w[0], p.w[1] + 1).map((w) => w.text).join(' '),
-            w: [p.w[0], p.w[1]] as [number, number],
-          } as T;
-        }));
+        const idx = Number(f.cue);
+        if (!Number.isInteger(idx) || !out[idx] || out[idx].q || f.skip) continue;
+        const l1 = typeof f.l1 === 'string' ? f.l1.trim() : '';
+        const l2 = typeof f.l2 === 'string' ? f.l2.trim() : '';
+        const text = l1 && l2 ? `${l1}\n${l2}` : l1;
+        if (!text) continue;
+        out[idx] = { ...out[idx], text };
+        fixed++;
       }
     } catch (err) {
-      console.log('refit batch failed (non-fatal):', (err as any)?.message);
+      console.log('review batch failed (non-fatal):', (err as any)?.message);
     }
   };
+  const jobs: (typeof flagged)[] = [];
+  for (let k = 0; k < flagged.length; k += BATCH) jobs.push(flagged.slice(k, k + BATCH));
   for (let i = 0; i < jobs.length; i += CONCURRENCY) {
     await Promise.all(jobs.slice(i, i + CONCURRENCY).map(runBatch));
   }
-  console.log(`refit: ${merged.length} sent, ${replaced.size} accepted; rejected `
-    + `tile=${reject.tile} fit=${reject.fit} dup=${reject.dup} pause=${reject.pause} shape=${reject.shape}`);
-  if (!replaced.size) return { cues, fixed: 0 };
-
-  const drop = new Set<number>();
-  for (const g of merged) if (replaced.has(g.idx[0])) for (const i of g.idx) drop.add(i);
-  const result: T[] = [];
-  for (let i = 0; i < cues.length; i++) {
-    const r = replaced.get(i);
-    if (r) result.push(...r);
-    else if (!drop.has(i)) result.push(cues[i]);
-  }
-  return { cues: result, fixed: replaced.size };
-}
-
-export async function condenseDense(env: ScribeEnv, cues: Cue[], targetLang: string): Promise<{ cues: Cue[]; fixed: number }> {
-  const OVER = 20; // leaves headroom under the 21 CPS target
-  const out = [...cues];
-  const todo = out
-    .map((c, i) => ({ i, c }))
-    .filter(({ c }) => !(c as any).q && c.text.length / Math.max(0.3, c.end - c.start) > OVER);
-  if (!todo.length) return { cues: out, fixed: 0 };
-
-  let fixed = 0;
-  const BATCH = 25;
-  for (let k = 0; k < todo.length; k += BATCH) {
-    const batch = todo.slice(k, k + BATCH);
-    const lines = batch
-      .map(({ i, c }) => `${i}\tmax ${Math.max(12, Math.round((c.end - c.start) * TARGET_CPS))} chars\t${flat(c.text)}`)
-      .join('\n');
-    try {
-      const raw = await llmChat(env, [
-        { role: 'system', content: `You tighten subtitle lines for an Islamic lecture so they can be read in the time they are on screen. Target language: ${targetLang}. Keep the meaning, the register and every honorific (Allah ﷻ, the Prophet ﷺ, RA/AS/RH) exactly as they are. Keep transliterations (Tawhid, Sunnah, fiqh, Sharia). Do not add or remove content: say the same thing in fewer words. The shortened line must still read as a sentence on its own \u2014 never leave it opening with a comma or a lowercase continuation, and never strip an honorific to save characters. Return ONLY JSONL, one object per line: {"i": <id>, "t": "<shortened line>"}. Omit any line you cannot shorten without losing meaning.` },
-        { role: 'user', content: lines },
-      ], 4000, STRONG_MODEL);
-      for (const line of raw.split('\n')) {
-        const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
-        if (!t.startsWith('{')) continue;
-        try {
-          const f = JSON.parse(t);
-          const txt = typeof f.t === 'string' ? f.t.trim() : '';
-          if (typeof f.i === 'number' && out[f.i] && !(out[f.i] as any).q
-              && txt && txt.length < out[f.i].text.length) {
-            out[f.i] = { ...out[f.i], text: txt };
-            fixed++;
-          }
-        } catch { /* skip a malformed line */ }
-      }
-    } catch { /* a failed batch just leaves those cues as they were */ }
-  }
+  console.log(`review: ${flagged.length} cues flagged, ${fixed} rewritten`);
   return { cues: out, fixed };
 }
 
-/** Netflix-grade QA repair: strong model reviews source ↔ translation in
- * batches and fixes mistranslation, dropped content, over-long lines, and
- * reading-speed violations. Returns the repaired cue list. */
-export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): Promise<{ cues: Cue[]; fixes: number }> {
-  const BATCH = 40;
-  let fixes = 0;
-  const out = [...cues];
-  const jobs: Promise<void>[] = [];
-  const runBatch = async (offset: number) => {
-    const batch = out.slice(offset, offset + BATCH);
-    const lines = batch.map((c, i) => {
-      if ((c as any).q) return null; // canonical verse cue — locked
-      const dur = Math.max(0.3, c.end - c.start);
-      const cps = Math.round(c.text.length / dur);
-      const flag = cps > 20 ? ` [CPS ${cps} TOO FAST — condense]` : '';
-      return `${offset + i}\nSRC: ${c.source}\nTRN: ${flat(c.text)}${flag}`;
-    }).filter(Boolean).join('\n\n');
-    if (!lines) return;
-    try {
-      const raw = await llmChat(env, [
-        { role: 'system', content: `You are a Netflix-standard subtitle QA reviewer for Islamic lectures (${targetLang} target). Review source↔translation pairs. Your FIRST job is completeness: if the Arabic says something the translation does not, put it back. Names, titles, honorific chains, numbers and lists are content — "صاحب السمو الملكي الأمير خالد بن سلمان" must reach the viewer as "His Royal Highness Prince Khalid bin Salman", not disappear. A long line of Arabic rendered as a handful of English words has left something out. Then fix mistranslation, awkward phrasing, reading speed and honorifics. Output ONLY JSONL fixes for cues that need them:
-{"i": cueNumber, "t": "corrected translation"}
-Rules: max ~84 chars, keep honorifics (Allah  ﷻ, Prophet ﷺ, RA/AS/RH) — never drop one, keep transliterations (fiqh, Sharia...), Quran quotes in established translation wording. Every cue you rewrite must read as a sentence on its own: never leave it opening with a comma or a lowercase continuation of the cue before it. If a cue is fine, output nothing for it. No commentary.` },
-        { role: 'user', content: lines },
-      ], 8000, QA_MODEL);
-      for (const line of raw.split('\n')) {
-        const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
-        if (!t.startsWith('{')) continue;
-        try {
-          const f = JSON.parse(t);
-          if (typeof f.i === 'number' && typeof f.t === 'string' && out[f.i] && !(out[f.i] as any).q && f.t.trim()) {
-            out[f.i] = { ...out[f.i], text: f.t.trim() };
-            fixes++;
-          }
-        } catch {}
-      }
-    } catch {}
-  };
-  for (let i = 0; i < out.length; i += BATCH * 8) {
-    const group = [];
-    for (let j = i; j < Math.min(i + BATCH * 8, out.length); j += BATCH) group.push(runBatch(j));
-    await Promise.all(group);
-  }
-  return { cues: out, fixes };
-}
