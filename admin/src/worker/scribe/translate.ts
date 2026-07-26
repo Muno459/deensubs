@@ -834,11 +834,15 @@ No commentary, no code fences, JSONL only.` },
         if (!t.startsWith('{')) continue;
         let f: any;
         try { f = JSON.parse(t); } catch { continue; }
-        const g = merged.find((x) => x[0] === f.id);
-        if (!g || !Array.isArray(f.cues) || !f.cues.length) continue;
+        // The id comes back as a number or a string depending on the model's
+        // mood; a strict mismatch here would silently discard every repair.
+        const id = Number(f.id);
+        const g = merged.find((x) => x[0] === id);
+        const list = Array.isArray(f.cues) ? f.cues : Array.isArray(f.pieces) ? f.pieces : null;
+        if (!g || !list || !list.length) continue;
         const src = cues[g[0]];
         const tail = cues[g[g.length - 1]];
-        const parts = f.cues.filter((p: any) => Array.isArray(p.w) && typeof p.t === 'string' && p.t.trim());
+        const parts = list.filter((p: any) => Array.isArray(p.w) && typeof p.t === 'string' && p.t.trim());
         if (!parts.length) continue;
         let ok = parts[0].w[0] === src.w[0] && parts[parts.length - 1].w[1] === tail.w[1];
         for (let n = 0; ok && n < parts.length; n++) {
@@ -867,6 +871,7 @@ No commentary, no code fences, JSONL only.` },
   for (let i = 0; i < jobs.length; i += CONCURRENCY) {
     await Promise.all(jobs.slice(i, i + CONCURRENCY).map(runBatch));
   }
+  console.log(`refit: ${merged.length} groups sent, ${replaced.size} accepted`);
   if (!replaced.size) return { cues, fixed: 0 };
 
   const drop = new Set<number>();
