@@ -42,7 +42,7 @@ import re
 import sys
 
 MAX_LINE = 42
-MAX_LINES = 2
+MAX_LINES = 3            # three lines are fine on the player; losing content to fit is not
 MAX_CHARS = 84
 SPEECH_CPS_OK = 21.0      # target reading speed
 SPEECH_CPS_HARD = 30.0    # no speech cue may exceed this
@@ -57,7 +57,7 @@ OPENING_MAX = 8.0         # percent of cues allowed to open on a continuation
 PAUSE_MIN = 0.15          # an inter-word gap this long is a real break in delivery
 PAUSE_TARGET = 75.0       # percent of cues that must begin after one
 DRIFT_MAX = 2.0           # percent of cues whose text may not match their own audio
-FAITHFUL_MIN = 0.7        # a cue under this share of the file's usual EN/AR ratio dropped content
+FAITHFUL_MIN = 0.45       # only an outlier alarm: length cannot tell compact from incomplete
 MAX_CUE_SECONDS = 15.0    # beyond this a cue has swallowed a passage, not covered a sentence
 SPEAKER_MAX = 2.0         # percent of cues that may span a change of speaker
 
@@ -295,6 +295,16 @@ def main(srt_path, cues_path, asr_path):
               pct(len(drift), len(pairs)) <= DRIFT_MAX,
               f"{len(drift)} ({pct(len(drift), len(pairs)):.1f}%), median ratio {med:.2f}")
 
+        # Read the cues this flagged and most were good translations, not
+        # omissions: Arabic repeats itself ("the point that follows this point")
+        # and compact English is what we want. Worse, it cannot separate the two
+        # — a cue that genuinely dropped a man's name scored 0.72 while faithful
+        # ones scored 0.675 and 0.79. Length says nothing about completeness.
+        #
+        # So this is now only an outlier alarm: it catches the case where a cue
+        # carries almost nothing for a long stretch of speech, which is a real
+        # and visible failure, and leaves the judgement of "is anything missing"
+        # to the review pass, which reads the Arabic against the English.
         judged = [(r, c) for r, c in pairs if ar_len(c.get("source") or "") >= 30]
         thin = [c for r, c in judged if r < med * FAITHFUL_MIN]
         lost = sum(c["end"] - c["start"] for c in thin)

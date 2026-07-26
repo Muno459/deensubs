@@ -327,15 +327,35 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               // general QA pass plus a condense pass plus four rounds of
               // re-cutting: three passes over the same cues, each able to undo
               // the last.
-              const repaired = isAudiobook
-                ? await qaPassAudiobook(env, cues as any, lang)
-                : await reviewCues(env, cues, lang);
-              const final = repaired.cues;
-              const tightened = 0;
+              let final = cues;
+              let tightened = 0;
+              if (isAudiobook) {
+                const r = await qaPassAudiobook(env, cues as any, lang);
+                final = r.cues as any;
+                tightened = r.fixes;
+              } else {
+                // Twice. The first pass fixes most of what is flagged; a rewrite
+                // can still come back over the line limit, and re-measuring is
+                // free. This is safe to repeat in a way the old re-cutting loop
+                // was not: it only touches cues that are still flagged and never
+                // moves a boundary, so a second pass cannot disturb a cue that
+                // is already right.
+                // The word list goes with it: the one thing this pass may do to
+                // a boundary is split a cue that cannot be shown without losing
+                // content, and a split has to land on a real word.
+                const { cleanWords } = await import('./translate');
+                const revWords = cleanWords((await loadAsr(env, asr.asrKey)).words);
+                for (let pass = 0; pass < 2; pass++) {
+                  const r = await reviewCues(env, final, lang, revWords);
+                  final = r.cues;
+                  tightened += r.fixed;
+                  if (!r.fixed) break;
+                }
+              }
               await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(final), {
                 httpMetadata: { contentType: 'application/json' },
               });
-              return { fixes: ((repaired as any).fixes ?? (repaired as any).fixed ?? 0) + tightened, tokens: takeUsage(), cost: takeCost() };
+              return { fixes: tightened, tokens: takeUsage(), cost: takeCost() };
             }
           );
           await addTokens(env, jobId, qa.tokens, (qa as any).cost || 0);

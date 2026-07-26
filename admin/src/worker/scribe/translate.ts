@@ -8,6 +8,7 @@
 
 import type { Cue, ScribeEnv, Word } from './types';
 import { findQuranQuotes, citeQuote, type QuranQuote, type QuoteVerse } from './quran';
+import { wrapCueText } from './srt';
 
 export type CleanWord = { i: number; text: string; start: number; end: number; speaker: string; chars?: { start: number; end: number }[] };
 
@@ -130,12 +131,9 @@ function windowPrompt(win: CleanWord[], prevTail: string, verseContext?: string)
   // speaker recites, then explains. The verse itself is a locked cue the model
   // never translates, but without it here the explanation loses its referent.
   if (verseContext) {
-    // Two different notes arrive here. One is the verse just recited, which is
-    // background and must not be repeated. The other is a verse recited only in
-    // part INSIDE this window, which must be translated, in the wording given.
-    lines.push(verseContext.includes('PARTLY RECITED BELOW')
-      ? verseContext
-      : `The speaker has just recited this Quran passage, and the words below explain it. Use it to resolve pronouns and references. Do NOT translate or repeat it: ${verseContext}`, '');
+    // Only one kind of note now: candidate verses for this passage, with the
+    // canonical wording, for the model to use or ignore.
+    lines.push(verseContext, '');
   }
   if (prevTail) lines.push(`Previous cue for context (already translated, do NOT repeat): ${prevTail}`, '');
   lines.push('Words:');
@@ -487,80 +485,50 @@ export async function translateWords(
   // because the text cannot be shortened. Below the threshold the words go back
   // to the translator like any other speech, and the citation is appended
   // afterwards so the reference is not lost.
-  const lockedCues: WCue[] = [];
-  const fragments: { wStart: number; wEnd: number; cite: string }[] = [];
-  const lockedVerses: QuoteVerse[] = [];
-  for (const qt of quotes) {
-    const full = qt.verses.filter((v) => v.cover >= MIN_VERSE_COVER);
-    for (const v of qt.verses) {
-      if (v.cover < MIN_VERSE_COVER) fragments.push({ wStart: v.wStart, wEnd: v.wEnd, cite: v.key });
-    }
-    if (!full.length) continue;
-    const cite = citeQuote(full);
-    full.forEach((v, vi) => {
-      const first = words[v.wStart];
-      const last = words[v.wEnd];
-      if (!first || !last) return;
-      lockedVerses.push(v);
-      lockedCues.push({
-        start: first.start,
-        end: Math.max(last.end, first.start + 0.6),
-        text: `“${v.en}”` + (vi === full.length - 1 ? ` (Quran ${cite})` : ''),
-        source: v.ar,
-        w: [v.wStart, v.wEnd],
-        q: v.key,
-      });
-    });
-  }
+  // The matcher proposes, the model decides.
+  //
+  // Deciding mechanically cannot work, because whether a phrase is RECITATION or
+  // ordinary speech is a judgement about what the speaker is doing. Fuzzy
+  // matching put "بسم الله الرحمن الرحيم" on screen as canonical verse 1:1 while
+  // he was simply beginning a sentence, and stamped "(Quran 1:2)" onto "Praise
+  // be to Allah, Who knows the measure of the oceans" — a khutbah opening that
+  // is not in the Qur'an at all. Chasing that with coverage thresholds and a
+  // list of everyday verses was guessing at the same judgement from outside.
+  //
+  // So nothing is locked and no range is withheld from the model. Each candidate
+  // rides along with its window carrying the Saheeh International wording, and
+  // the model uses it only where he is actually reciting. The wording still
+  // comes from the corpus, so a real recitation is verbatim rather than a
+  // paraphrase — the model only chooses whether to reach for it.
+  const allCandidates = quotes.flatMap((qt) => qt.verses.map((v) => ({
+    key: v.key, en: v.en, wStart: v.wStart, wEnd: v.wEnd,
+  }))).sort((a, b) => a.wStart - b.wStart);
 
-  // LLM windows cover only the unlocked ranges. Spans come from the verses that
-  // actually locked, so a fragment's words fall into a free range and get
-  // translated instead of going out with no cue at all.
-  const lockedSpans = lockedVerses.map((v) => [v.wStart, v.wEnd] as [number, number]).sort((a, b) => a[0] - b[0]);
-  const freeRanges: [number, number][] = [];
-  let cursor = 0;
-  for (const [a, b] of lockedSpans) {
-    if (a > cursor) freeRanges.push([cursor, a - 1]);
-    cursor = Math.max(cursor, b + 1);
-  }
-  if (cursor < words.length) freeRanges.push([cursor, words.length - 1]);
-  // The verse recited immediately before a range is context for the passage
-  // that follows it, so tag the first window of that range with it.
-  const verseBefore = new Map<number, string>();
-  for (const q of quotes) {
-    const cite = citeQuote(q.verses);
-    verseBefore.set(q.wEnd + 1, `${q.verses.map((v) => `“${v.en}”`).join(' ')} (Quran ${cite})`.slice(0, 1200));
-  }
-  // A verse recited only in part is translated here like ordinary speech, and
-  // the model has no way to know it is handling Qur'an: "ألا بذكر الله تطمئن
-  // القلوب" came back as "Hearts find rest." The canonical wording of the whole
-  // ayah travels with the window so the recited clause can be rendered in its
-  // own register — and completely.
-  const fragmentNote = (win: CleanWord[]): string | undefined => {
+  const verseNote = (win: CleanWord[]): string | undefined => {
     const lo = win[0].i;
     const hi = win[win.length - 1].i;
-    const hits = fragments.filter((f) => f.wEnd >= lo && f.wStart <= hi);
-    if (!hits.length) return undefined;
     const seen = new Set<string>();
     const lines: string[] = [];
-    for (const f of hits) {
-      if (seen.has(f.cite)) continue;
-      seen.add(f.cite);
-      const v = quotes.flatMap((q) => q.verses).find((x) => x.key === f.cite);
-      if (v) lines.push(`Quran ${f.cite}: “${v.en}”`);
+    for (const c of allCandidates) {
+      if (c.wEnd < lo || c.wStart > hi || seen.has(c.key)) continue;
+      seen.add(c.key);
+      lines.push(`  words ${c.wStart}-${c.wEnd} resemble Quran ${c.key}: "${c.en}"`);
     }
-    return lines.length ? lines.join('\n').slice(0, 1400) : undefined;
+    if (!lines.length) return undefined;
+    return `POSSIBLE QURAN IN THIS PASSAGE — you decide which of these he is actually reciting:\n${lines.join('\n')}\n`
+      + `If he IS reciting one, use that wording exactly as given above and end the cue with (Quran KEY). Split a long one across cues if it needs it, keeping the wording.\n`
+      + `If he is only using a common phrase — بسم الله, الحمد لله, سبحان الله and the like open sentences all the time — translate it plainly with NO citation. A speaker beginning a talk with بسم الله is not reciting al-Fatiha.`;
   };
+
+  // Every word goes to the model now; nothing is held back.
+  const freeRanges: [number, number][] = [[0, words.length - 1]];
 
   const windows: CleanWord[][] = [];
   const windowVerse: (string | undefined)[] = [];
   for (const [a, b] of freeRanges) {
     makeWindows(words.slice(a, b + 1)).forEach((w, i) => {
       windows.push(w);
-      const before = i === 0 ? verseBefore.get(a) : undefined;
-      const frag = fragmentNote(w);
-      windowVerse.push([before, frag && `PARTLY RECITED BELOW — render the recited words in this wording, in full:\n${frag}`]
-        .filter(Boolean).join('\n\n') || undefined);
+      windowVerse.push(verseNote(w));
     });
   }
 
@@ -599,74 +567,8 @@ export async function translateWords(
       });
     }
   }
-  cues.push(...lockedCues);
   cues.sort((a, b) => a.start - b.start);
 
-  // A verse quoted in part was translated as ordinary speech, so the reference
-  // has to be put back by hand. It goes on the last cue covering the quoted
-  // words, which is where a reader expects a citation to sit.
-  for (const f of fragments) {
-    const hit = cues.filter((c) => !c.q && c.w[0] <= f.wEnd && c.w[1] >= f.wStart).pop();
-    if (hit && !hit.text.includes('(Quran ')) hit.text = `${hit.text} (Quran ${f.cite})`;
-  }
-
-  // Split cues longer than ~8.5s at sentence/clause boundaries, timing the
-  // split at the proportional source-word boundary
-  const splitLocked = (cue: WCue): WCue[] => {
-    const dur = cue.end - cue.start;
-    // A verse is cut whenever it will not fit on screen, whatever its duration.
-    // Gating that on 12 seconds left eleven canonical cues over the character
-    // limit: the recitation was quick, the official translation was not.
-    if (dur <= 12 && cue.text.length <= MAX_CUE_CHARS) return [cue];
-    // A whole ayah recited quickly is long text over a short span — 1:7 came out
-    // at 136 characters in 2.89s. Two cues of 68 read; one of 136 does not fit
-    // the screen at all, so the comfortable minimum gives way when the text will
-    // otherwise overflow. Below 1.2s there is no room for two cues either way.
-    const mustFit = cue.text.length > MAX_CUE_CHARS;
-    if (!mustFit && dur < MIN_PIECE_SEC * 2) return [cue];
-    if (dur < 1.2) return [cue]; // no time to divide at all
-    const text = cue.text;
-    const marks = [...text.matchAll(/[.!?؟…,;:—]\s+/g)].map((m) => m.index! + m[0].length);
-    // Canonical wording is continuous and cannot be reworded, so when it offers
-    // no punctuation near the middle it is still better carried over two cues
-    // than spilling off the screen. This fallback is for scripture only; the
-    // model's own sentences are never cut here.
-    const usable = marks.filter((m) => m >= 10 && text.length - m >= 10);
-    let splitAt: number;
-    if (usable.length) {
-      const mid = text.length / 2;
-      splitAt = usable.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p));
-    } else {
-      const sp = [...text.matchAll(/\s+/g)].map((m) => m.index! + m[0].length)
-        .filter((m) => m >= 10 && text.length - m >= 10);
-      if (!sp.length) return [cue];
-      const mid = text.length / 2;
-      splitAt = sp.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p));
-    }
-    const share = splitAt / text.length;
-    const srcWords = cue.source.split(' ');
-    const sSplit = Math.max(1, Math.min(srcWords.length - 1, Math.round(srcWords.length * share)));
-    let a: WCue;
-    let b: WCue;
-    if (cue.w[1] > cue.w[0]) {
-      const wSplit = Math.max(cue.w[0] + 1, Math.min(cue.w[1], cue.w[0] + Math.round((cue.w[1] - cue.w[0]) * share)));
-      a = { ...cue, end: words[wSplit - 1].end, w: [cue.w[0], wSplit - 1], text: text.slice(0, splitAt).trim(), source: srcWords.slice(0, sSplit).join(' ') };
-      b = { ...cue, start: words[wSplit].start, w: [wSplit, cue.w[1]], text: text.slice(splitAt).trim(), source: srcWords.slice(sSplit).join(' ') };
-    } else {
-      // One word of recitation carrying a long ayah: there is no second word to
-      // cut on, so the span itself is divided by character share.
-      const at = cue.start + dur * share;
-      a = { ...cue, end: at, text: text.slice(0, splitAt).trim(), source: srcWords.slice(0, sSplit).join(' ') };
-      b = { ...cue, start: at, text: text.slice(splitAt).trim(), source: srcWords.slice(sSplit).join(' ') };
-    }
-    return [...splitLocked(a), ...splitLocked(b)];
-  };
-  // Only canonical verses are cut here. Their text is inserted by us, the model
-  // never sees it, and a fully recited verse is far longer than one cue can
-  // hold. Everything the model wrote keeps the segmentation the model chose:
-  // re-cutting it at commas is what produced cues opening "and a sun in broad
-  // daylight." — a sentence sliced into boxes rather than a subtitle.
-  cues = cues.flatMap((c) => (c.q ? splitLocked(c) : [c]));
 
   // Repair first, then time. The only display limit a prompt cannot carry on its
   // own is the character count — a model cannot count characters — so cues that
@@ -718,7 +620,7 @@ export async function translateWords(
       cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + grab));
     }
   }
-  return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);
+  return cues.filter((c) => c.end > c.start && c.text.trim());
 }
 
 /**
@@ -798,10 +700,19 @@ function cueFlags(text: string, seconds: number, arabic: string): string[] {
   // Long on the clock and short on the page is the signature of dropped content.
   if (seconds > 3 && cps < 8) flags.push(`only ${flat.length} characters for ${seconds.toFixed(1)}s of speech — content missing`);
   if (/[,;:]$/.test(flat)) flags.push('ends on a comma');
-  for (const [i, line] of text.split('\n').entries()) {
-    if (line.trim().length > MAX_LINE) flags.push(`line ${i + 1} is ${line.trim().length} characters`);
+  // The real limit is not a character count, it is whether the words divide into
+  // two lines of 42. "He is thanked for his great efforts serving this sector and
+  // this blessed ministry." is 82 characters — inside any total-length rule — and
+  // there is no word boundary that splits it into two lines that fit, so it
+  // renders as three. Ask the renderer rather than guessing.
+  // Three lines are acceptable on the player, so this is not a line-count rule.
+  // What matters is that a cue at the ceiling starts dropping content to fit —
+  // "Sheikh Dr. Yasir bin Rashid" lost العبسي that way. Past three lines, split
+  // it rather than let anything be cut.
+  const rendered = wrapCueText(text, MAX_LINE).split('\n');
+  if (rendered.length > 3) {
+    flags.push(`needs ${rendered.length} lines — split it into separate cues rather than shortening`);
   }
-  if (text.split('\n').length > 2) flags.push('more than two lines');
   const last = flat.replace(/[.,!?;:"'\u201d\u2019]+$/, '').split(/\s+/).pop()?.toLowerCase() || '';
   if (DANGLERS.has(last)) flags.push(`ends on "${last}"`);
   if (/^[a-z,;:]/.test(flat)) flags.push('opens mid-sentence');
@@ -817,7 +728,8 @@ const DANGLERS = new Set(['the', 'a', 'an', 'of', 'in', 'and', 'or', 'but', 'wit
 export async function reviewCues(
   env: ScribeEnv,
   cues: Cue[],
-  targetLang: string
+  targetLang: string,
+  words?: CleanWord[]
 ): Promise<{ cues: Cue[]; fixed: number }> {
   const out = [...cues];
   const flagged = out.map((c, i) => ({ i, c, flags: cueFlags(c.text, c.end - c.start, c.source || '') }))
@@ -825,11 +737,13 @@ export async function reviewCues(
   if (!flagged.length) return { cues: out, fixed: 0 };
 
   let fixed = 0;
+  const splits = new Map<number, Cue[]>();
   const BATCH = 12;
   const runBatch = async (batch: typeof flagged) => {
-    const body = batch.map(({ i, c, flags }) =>
-      `Cue ${i} [${(c.end - c.start).toFixed(1)}s]\n  PROBLEM: ${flags.join('; ')}\n  AR: "${(c.source || '').replace(/\n/g, ' ')}"\n  EN: "${c.text.replace(/\n/g, ' | ')}"`
-    ).join('\n\n');
+    const body = batch.map(({ i, c, flags }) => {
+      const span = words && c.w ? `\n  WORDS ${c.w[0]}-${c.w[1]}: ${words.slice(c.w[0], c.w[1] + 1).map((w) => `${w.i}:${w.text}`).join(' ')}` : '';
+      return `Cue ${i} [${(c.end - c.start).toFixed(1)}s]\n  PROBLEM: ${flags.join('; ')}\n  AR: "${(c.source || '').replace(/\n/g, ' ')}"\n  EN: "${c.text.replace(/\n/g, ' | ')}"${span}`;
+    }).join('\n\n');
     try {
       const raw = await llmChat(env, [
         { role: 'system', content: `You are a subtitle accuracy checker for ${targetLang} subtitles of an Islamic lecture. You receive cues with the problems found in them, and you rewrite the wording only. The timing is fixed and is not yours to change.
@@ -852,6 +766,11 @@ RULES
 OUTPUT compact JSONL, one line per cue you change:
 {"cue":5,"l1":"fixed line one","l2":"line two"}
 {"cue":12,"skip":true}
+
+WHEN THE WORDS WILL NOT FIT
+Some cues carry more than two lines can hold. Shortening them would mean dropping a name or a clause, which is worse. For those, split the cue instead — give two or more cues covering exactly the same words:
+{"cue":7,"split":[{"w":[120,126],"l1":"first cue"},{"w":[127,133],"l1":"second cue","l2":"its second line"}]}
+The word range is printed with each cue. Your pieces must start at its first index, end at its last, and each begin one after the previous ends. Split only where the sentence allows it.
 Emit nothing else — no commentary, no code fences.` },
         { role: 'user', content: body },
       ], 8000);
@@ -862,6 +781,35 @@ Emit nothing else — no commentary, no code fences.` },
         try { f = JSON.parse(t); } catch { continue; }
         const idx = Number(f.cue);
         if (!Number.isInteger(idx) || !out[idx] || out[idx].q || f.skip) continue;
+        // A split is the only thing here that may touch a boundary, and it is
+        // accepted only if the pieces cover exactly the words the cue covered —
+        // same first word, same last, contiguous. Timing then comes from the
+        // word list as it always does, so a split cannot desync anything.
+        const src = out[idx];
+        if (Array.isArray(f.split) && f.split.length > 1 && words && src.w) {
+          const parts = f.split.filter((p: any) => Array.isArray(p.w) && typeof p.l1 === 'string' && p.l1.trim());
+          let ok = parts.length > 1 && parts[0].w[0] === src.w[0] && parts[parts.length - 1].w[1] === src.w[1];
+          for (let n = 1; ok && n < parts.length; n++) if (parts[n].w[0] !== parts[n - 1].w[1] + 1) ok = false;
+          for (const p of parts) if (ok && !(words[p.w[0]] && words[p.w[1]])) ok = false;
+          if (ok) {
+            splits.set(idx, parts.map((p: any) => {
+              const a = words[p.w[0]];
+              const b = words[p.w[1]];
+              const l1 = p.l1.trim();
+              const l2 = typeof p.l2 === 'string' ? p.l2.trim() : '';
+              return {
+                ...src,
+                start: a.start,
+                end: Math.max(b.end, a.start + 0.6),
+                text: l1 && l2 ? `${l1}\n${l2}` : l1,
+                source: words.slice(p.w[0], p.w[1] + 1).map((w) => w.text).join(' '),
+                w: [p.w[0], p.w[1]] as [number, number],
+              };
+            }));
+            fixed++;
+            continue;
+          }
+        }
         const l1 = typeof f.l1 === 'string' ? f.l1.trim() : '';
         const l2 = typeof f.l2 === 'string' ? f.l2.trim() : '';
         const text = l1 && l2 ? `${l1}\n${l2}` : l1;
@@ -878,7 +826,19 @@ Emit nothing else — no commentary, no code fences.` },
   for (let i = 0; i < jobs.length; i += CONCURRENCY) {
     await Promise.all(jobs.slice(i, i + CONCURRENCY).map(runBatch));
   }
-  console.log(`review: ${flagged.length} cues flagged, ${fixed} rewritten`);
-  return { cues: out, fixed };
+  console.log(`review: ${flagged.length} cues flagged, ${fixed} rewritten, ${splits.size} split`);
+  if (!splits.size) return { cues: out, fixed };
+  const rebuilt: Cue[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const s = splits.get(i);
+    if (s) rebuilt.push(...s);
+    else rebuilt.push(out[i]);
+  }
+  // A split shortens the cue before the next one starts; nothing else moves.
+  rebuilt.sort((a, b) => a.start - b.start);
+  for (let i = 0; i < rebuilt.length - 1; i++) {
+    if (rebuilt[i].end > rebuilt[i + 1].start) rebuilt[i] = { ...rebuilt[i], end: rebuilt[i + 1].start };
+  }
+  return { cues: rebuilt, fixed };
 }
 
