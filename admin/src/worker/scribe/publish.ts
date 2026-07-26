@@ -156,6 +156,10 @@ export async function generateThumbCandidates(env: PublishEnv, jobId: string, re
   }
   const job: any = await env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(jobId).first();
   if (!job?.source_key) throw new Error('job has no source media');
+  // There are no frames in an mp3. Asking ffmpeg for one returns "Output file
+  // does not contain any stream", which surfaced as a scary failure on a job
+  // that simply needs artwork instead.
+  if (/\.(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(job.source_key)) return [];
   const dur = job.duration || 60;
   const timestamps = [0.15, 0.4, 0.7].map((p) => Math.max(1, Math.round(dur * p)));
 
@@ -236,8 +240,14 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   if (job.status !== 'done') throw new Error(`Job status is ${job.status}, must be done`);
   // Audio-only jobs publish as AUDIOBOOKS: same catalog row, media='audio',
   // karaoke transcript instead of a video track.
-  const isAudiobook = !job.full_video;
+  // What the file IS decides this, not what the job was queued as. A job created
+  // as a full video whose download only produced audio still has full_video set,
+  // and it then took the video path: frame extraction against an mp3, which
+  // ffmpeg answers with "Output file does not contain any stream", and no way to
+  // publish it as the audiobook it plainly is.
   const extMatch = (job.source_key || '').match(/\.(mp4|webm|mkv|mov)$/i);
+  const audioOnly = /\.(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(job.source_key || '');
+  const isAudiobook = !job.full_video || audioOnly;
   if (!isAudiobook && !extMatch) throw new Error(`Source is ${job.source_key} — run fetch-video first or publish as audiobook`);
   // The Worker-native full-video path serves the video-only stream as an interim
   // source_key while the mux runs; refuse to publish that (it has no audio).

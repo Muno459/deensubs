@@ -419,8 +419,24 @@ export async function translateWords(
   }
   quotes = mergedQ;
 
+  // Only cite what he is actually citing.
+  //
+  // Fuzzy matching cannot tell recitation from a turn of phrase, and the phrases
+  // it confuses are the commonest in the language. "بسم الله الرحمن الرحيم" IS
+  // verse 1:1, but a speaker opening a talk with it is not reciting al-Fatiha,
+  // and it went on screen as canonical scripture. Worse, "الحمد لله" opening a
+  // khutbah matched 1:2, so "(Quran 1:2)" was stamped onto "Praise be to Allah,
+  // Who knows the measure of the oceans" — which is not in the Qur'an at all.
+  //
+  // A formula counts as recitation only when the recitation CONTINUES past it:
+  // bismillah followed by the next ayah is al-Fatiha, bismillah alone is how you
+  // begin a sentence. Everything else is untouched, so a genuine short quote is
+  // unaffected.
+  const FORMULA_VERSES = new Set(['1:1', '1:2', '112:1']);
   const lockedCues: WCue[] = [];
   for (const qt of quotes) {
+    if (qt.verses.length === 1 && FORMULA_VERSES.has(qt.verses[0].key)) continue;
+    if (qt.wEnd - qt.wStart + 1 < 3) continue; // two words is a phrase, not a quotation
     const cite = citeQuote(qt.verses);
     qt.verses.forEach((v, vi) => {
       const first = words[v.wStart];
