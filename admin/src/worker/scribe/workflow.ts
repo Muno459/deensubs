@@ -98,7 +98,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
           // the audio itself moves in seconds. The old 15-minute ceiling meant
           // one silent proxy hang looked like a frozen job for a quarter hour.
           const aud = await step.do('download-audio',
-            { retries: { limit: 3, delay: '20 seconds' }, timeout: '3 minutes' }, async () => {
+            { retries: { limit: 4, delay: '3 seconds', backoff: 'exponential' }, timeout: '3 minutes' }, async () => {
             const { downloadAudioOnly } = await import('./download');
             return await downloadAudioOnly(env, jobId, url);
           });
@@ -127,9 +127,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         await stampTime(env, jobId, 'asr_end');
         return { ...res, cached: false };
       };
+      // Exponential from 5 seconds, not linear from 90. With per-fetch
+      // deadlines and stall watchdogs below, failures now surface in seconds —
+      // and a retry that then waits a minute and a half squanders exactly what
+      // was won. Early retries are near-instant; the tail (80s, 160s) still
+      // rides out real contention like a full container pool.
       const dlStep = step.do(
         'download',
-        { retries: { limit: 6, delay: '90 seconds', backoff: 'linear' }, timeout: '30 minutes' },
+        { retries: { limit: 7, delay: '5 seconds', backoff: 'exponential' }, timeout: '30 minutes' },
         async () => {
           // Resume: reuse the already-downloaded source if it exists
           const row: any = await env.DB.prepare('SELECT source_key, download_method, duration, title, channel, thumb_url FROM scribe_jobs WHERE id = ?').bind(jobId).first();

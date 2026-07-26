@@ -205,9 +205,16 @@ async function fetchRange(url: string, start: number, end: number): Promise<Uint
   let tries = 0;
   for (;;) {
     try {
-      const r = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
-      if (r.status !== 206 && r.status !== 200) throw new Error('range HTTP ' + r.status);
-      return new Uint8Array(await r.arrayBuffer());
+      // A per-try deadline. Without it, one stalled googlevideo connection held
+      // the whole download at 1% until the step timeout minutes later — the
+      // retry logic never got a turn because the first try never ended.
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort('range fetch stalled'), 20_000);
+      try {
+        const r = await fetch(url, { headers: { Range: `bytes=${start}-${end}` }, signal: ctl.signal });
+        if (r.status !== 206 && r.status !== 200) throw new Error('range HTTP ' + r.status);
+        return new Uint8Array(await r.arrayBuffer());
+      } finally { clearTimeout(timer); }
     } catch (e) { if (++tries >= 5) throw e; await new Promise((res) => setTimeout(res, 250 * tries)); }
   }
 }

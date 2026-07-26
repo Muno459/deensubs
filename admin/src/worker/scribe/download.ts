@@ -187,12 +187,20 @@ export function poolName(jobId: string): string {
 export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
   if (!env.YTDLP) throw new Error('container binding not configured');
   const { getContainer } = await import('@cloudflare/containers');
-  const container = getContainer(env.YTDLP as any, poolName(jobId));
+  // A RANDOM warm slot per attempt, not a hash of the job id. Hashing is stable,
+  // which is exactly wrong for retries: a job that failed on a sick instance
+  // retried onto the same sick instance forever. Randomising means the retry is
+  // itself the fix. All calls within this attempt share the one handle, so the
+  // start and the polling still talk to the same instance.
+  const container = getContainer(env.YTDLP as any, `dl-${Math.floor(Math.random() * 24)}`);
   const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };
   const call = (path: string, init?: RequestInit) =>
     container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
 
-  const start = await call('/download', {
+  // Bounded start: a cold boot is ~30s, so 90s means "this instance is sick",
+  // and the step retry lands on a different one.
+  const startDeadline = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('container start timed out after 90s')), 90_000));
+  const start = await Promise.race([startDeadline, call('/download', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       url, video: fullVideo,
@@ -201,12 +209,14 @@ export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: stri
       aria2: (env as any).__ARIA2 ?? true,
       player_client: (env as any).__PLAYER_CLIENT ?? 'android_vr',
     }),
-  });
+  })]);
   if (!start.ok) throw new Error(`ytdlp start failed: HTTP ${start.status}`);
   const { id } = (await start.json()) as { id: string };
 
   let info: any = null;
   let lastBeat = 0;
+  let lastSnapshot = '';
+  let lastChange = Date.now();
   for (let i = 0; i < 1200; i++) {
     // Ask first, wait second, and wait less at the start. The old loop slept a
     // flat 1.5s before its first question, so a short clip that finished in two
@@ -220,9 +230,17 @@ export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: stri
     // container's own state, and a download_pct nudge so "running" visibly
     // moves — the real figure when the container reports one, a bounded creep
     // when it does not.
+    const snapshot = JSON.stringify(info);
+    if (snapshot !== lastSnapshot) { lastSnapshot = snapshot; lastChange = Date.now(); }
+    else if (Date.now() - lastChange > 120_000) {
+      // Frozen container output for two minutes is a dead download. Failing here
+      // hands the retry a fresh instance instead of riding this one for the
+      // remaining half hour of poll budget.
+      throw new Error('container download stalled: no progress for 120s');
+    }
     if (Date.now() - lastBeat > 15_000) {
       lastBeat = Date.now();
-      console.log(`container dl ${jobId}: ${JSON.stringify(info).slice(0, 200)}`);
+      console.log(`container dl ${jobId}: ${snapshot.slice(0, 200)}`);
       const pct = Number((info as any).progress ?? (info as any).pct ?? NaN);
       const sql = Number.isFinite(pct)
         ? env.DB.prepare('UPDATE scribe_jobs SET download_pct = ? WHERE id = ?').bind(Math.max(1, Math.min(99, Math.round(pct))), jobId)
