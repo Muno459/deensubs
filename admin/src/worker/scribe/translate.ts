@@ -109,7 +109,8 @@ SEGMENT ON MEANING AND DELIVERY
 
 TRANSLATION
 - Translate to ${targetLang}. Translate all meaningful content faithfully — never paraphrase away or condense meaning.
-- Clean speech artifacts: drop stutters, false starts and filler from the translation. Their word indices still belong to the cue covering that span.
+- Clean speech artifacts: drop stutters, false starts and repeated words from the translation. Their word indices still belong to the cue covering that span.
+- THAT IS THE ONLY THING YOU MAY DROP. Names, titles, honorific chains, numbers and lists are content, not ceremony: "\u0635\u0627\u062d\u0628 \u0627\u0644\u0633\u0645\u0648 \u0627\u0644\u0645\u0644\u0643\u064a \u0627\u0644\u0623\u0645\u064a\u0631 \u062e\u0627\u0644\u062f \u0628\u0646 \u0633\u0644\u0645\u0627\u0646" must appear as "His Royal Highness Prince Khalid bin Salman", not be summarised away. If a cue's words take ten seconds to say, its translation cannot be six words long \u2014 that means something was left out. Say everything he said.
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
 - Keep as transliterations (do not translate): fatwa, mufti, Sharia, fiqh, usul al-fiqh, ifta, Haramain, madhhab, and similar established terms.
 - Proper nouns and Arabic terms: standard English transliteration.
@@ -750,6 +751,31 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
     [['رحمه الله', 'رحمها الله'], ['(rh)', 'rh)', 'may allah have mercy']],
     [['عليهم السلام', 'عليه السلام'], ['(as)', 'as)', 'peace be upon him', 'peace be upon them']],
   ];
+  // Content quietly left out. Ten seconds of Arabic rendered as six English
+  // words is not concise, it is incomplete: the cue at 4:07 said "His Royal
+  // Highness Prince Khalid bin Salman" and the subtitle stopped at "the Minister
+  // of Defense". English runs a steady length against its Arabic across a whole
+  // lecture, so a cue far under that is one that dropped something. Honorific
+  // phrases are collapsed first, being long in Arabic and one glyph in English.
+  const AR_HONORIFIC = ['صلى الله عليه وسلم', 'عليه الصلاة والسلام', 'رضي الله عنهما', 'رضي الله عنهم',
+    'رضي الله عنها', 'رضي الله عنه', 'سبحانه وتعالى', 'تبارك وتعالى', 'عليهم السلام', 'عليه السلام',
+    'رحمه الله', 'رحمها الله', 'عز وجل', 'جل جلاله'];
+  const arLen = (t: string) => {
+    let x = t;
+    for (const h of AR_HONORIFIC) x = x.split(h).join('*');
+    return x.length;
+  };
+  const ratios = cues.filter((c) => !c.q && (c.source || '').trim())
+    .map((c) => c.text.length / Math.max(1, arLen(c.source))).sort((a, b) => a - b);
+  const medianRatio = ratios.length ? ratios[Math.floor(ratios.length / 2)] : 1.4;
+  const dropsContent = (c: T) => {
+    const ar = arLen(c.source || '');
+    if (ar < 30) return false; // too short to judge
+    // 0.7 rather than something looser: at 0.6 this catches 32 cues on the
+    // reference lecture and at 0.7 it catches 73, covering six minutes of
+    // speech that reached the screen thinner than it was spoken.
+    return c.text.length / ar < medianRatio * 0.7;
+  };
   const dropsHonorific = (c: T) => {
     const src = c.source || '';
     const en = c.text.toLowerCase();
@@ -784,6 +810,8 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
       add([i, i + 1], 'the first cue ends on a word that governs the next one');
     } else if (dropsHonorific(c)) {
       add([i], 'the Arabic carries an honorific that the translation drops');
+    } else if (dropsContent(c)) {
+      add([i], `the translation leaves out part of what is said: ${(c.source || '').length} characters of Arabic rendered as ${c.text.length} of ${targetLang}, against about ${Math.round(medianRatio * arLen(c.source || ''))} for this speaker`);
     }
   }
   const merged: { idx: number[]; why: string[] }[] = [];
@@ -839,7 +867,7 @@ HARD REQUIREMENTS — a reply breaking any of these is discarded and the origina
 - The pieces must cover the given word range EXACTLY: the first starts at the range's first index, the last ends at its last index, each begins on the index right after the previous ends. No gaps, no overlaps, no reordering.
 - Every piece: at most 84 characters, at most 2 lines of 42, with the break given as \\n.
 - EVERY PIECE MUST READ AS A SENTENCE ON ITS OWN. None may open with a comma or a lowercase continuation of the piece before it, and none may END on a word that governs the next one (an article, preposition, conjunction, auxiliary or relative pronoun). Reword freely to achieve this — moving the boundary is not enough, and this is the main thing being asked for. Arabic chains clauses endlessly with و; English must not. Write separate sentences.
-- Keep all the meaning. Where the Arabic says صلى الله عليه وسلم, سبحانه وتعالى, رضي الله عنه, رحمه الله or عليه السلام, the translation must carry it — as ﷺ, ﷻ, (RA), (RH), (AS) or spelled out. Keep transliterations (fiqh, Sharia, Tawhid).
+- SAY EVERYTHING THE ARABIC SAYS. Names, titles and numbers are content: a cue whose words take ten seconds cannot be six English words. Where the Arabic says صلى الله عليه وسلم, سبحانه وتعالى, رضي الله عنه, رحمه الله or عليه السلام, the translation must carry it — as ﷺ, ﷻ, (RA), (RH), (AS) or spelled out. Keep transliterations (fiqh, Sharia, Tawhid).
 - EVERY PIECE MUST FIT ITS OWN SECONDS. Its duration is its last word's end minus its first word's start, both given below. At most 17 characters per second of that, and never fewer than 0.7 seconds of speech for a piece. A piece carrying more words than its span can hold is rejected outright — if the wording will not fit, use fewer words, not a shorter span.
 - Never repeat a word across a boundary: the last words of one piece must not be the first words of the next.
 - CUT WHERE HE STOPS. Every boundary you create should fall on a [PAUSE] or a [BREAK]. If the range contains as many pauses as you need boundaries and you cut somewhere else instead, the reply is rejected. Never carry two speakers in one cue: always cut at [SPEAKER].
@@ -996,7 +1024,7 @@ export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): P
     if (!lines) return;
     try {
       const raw = await llmChat(env, [
-        { role: 'system', content: `You are a Netflix-standard subtitle QA reviewer for Islamic lectures (${targetLang} target). Review source↔translation pairs. Output ONLY JSONL fixes for cues that need them (mistranslation, dropped meaning, awkward phrasing, CPS violations to condense, honorific mistakes):
+        { role: 'system', content: `You are a Netflix-standard subtitle QA reviewer for Islamic lectures (${targetLang} target). Review source↔translation pairs. Your FIRST job is completeness: if the Arabic says something the translation does not, put it back. Names, titles, honorific chains, numbers and lists are content — "صاحب السمو الملكي الأمير خالد بن سلمان" must reach the viewer as "His Royal Highness Prince Khalid bin Salman", not disappear. A long line of Arabic rendered as a handful of English words has left something out. Then fix mistranslation, awkward phrasing, reading speed and honorifics. Output ONLY JSONL fixes for cues that need them:
 {"i": cueNumber, "t": "corrected translation"}
 Rules: max ~84 chars, keep honorifics (Allah  ﷻ, Prophet ﷺ, RA/AS/RH) — never drop one, keep transliterations (fiqh, Sharia...), Quran quotes in established translation wording. Every cue you rewrite must read as a sentence on its own: never leave it opening with a comma or a lowercase continuation of the cue before it. If a cue is fine, output nothing for it. No commentary.` },
         { role: 'user', content: lines },

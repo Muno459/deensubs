@@ -57,6 +57,7 @@ OPENING_MAX = 8.0         # percent of cues allowed to open on a continuation
 PAUSE_MIN = 0.15          # an inter-word gap this long is a real break in delivery
 PAUSE_TARGET = 75.0       # percent of cues that must begin after one
 DRIFT_MAX = 2.0           # percent of cues whose text may not match their own audio
+FAITHFUL_MIN = 0.7        # a cue under this share of the file's usual EN/AR ratio dropped content
 SPEAKER_MAX = 2.0         # percent of cues that may span a change of speaker
 
 CLING = set(
@@ -283,10 +284,22 @@ def main(srt_path, cues_path, asr_path):
     if pairs:
         ratios = sorted(r for r, _ in pairs)
         med = ratios[len(ratios) // 2]
-        drift = [c for r, c in pairs if r < med * 0.5 or r > med * 2.0]
-        check("L1", f"<={DRIFT_MAX}% of cues carry text that is not what is being said",
+        # Two different faults, so two criteria. Carrying MORE than the Arabic
+        # supports means text drifted in from a neighbouring cue. Carrying LESS
+        # means it was left out, which is the worse of the two: "His Royal
+        # Highness Prince Khalid bin Salman" reached the screen as nothing at
+        # all. Cues with little Arabic are skipped, being too short to judge.
+        drift = [c for r, c in pairs if r > med * 2.0]
+        check("L1", f"<={DRIFT_MAX}% of cues carry text drifted in from elsewhere",
               pct(len(drift), len(pairs)) <= DRIFT_MAX,
               f"{len(drift)} ({pct(len(drift), len(pairs)):.1f}%), median ratio {med:.2f}")
+
+        judged = [(r, c) for r, c in pairs if ar_len(c.get("source") or "") >= 30]
+        thin = [c for r, c in judged if r < med * FAITHFUL_MIN]
+        lost = sum(c["end"] - c["start"] for c in thin)
+        check("F1", f"<={DRIFT_MAX}% of cues say less than the speaker said",
+              pct(len(thin), len(judged)) <= DRIFT_MAX,
+              f"{len(thin)} ({pct(len(thin), len(judged)):.1f}%), {lost:.0f}s of speech under-translated")
 
     # A cue's stored Arabic must BE the words inside its own timestamps. This is
     # true by construction — source is sliced from the same word range the timing
