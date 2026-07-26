@@ -651,8 +651,12 @@ export async function translateWords(
   // This has to happen BEFORE the timing passes below: a re-cut cue is rebuilt
   // from its word range, which would discard any silence an earlier pass had
   // given it to be readable in.
+  // The fast model handles most of these; whatever it could not fix, or whose
+  // answer failed validation, goes to the strong one on the last round. Running
+  // everything through the strong model was what made this step cost more than
+  // the translation it repairs.
   for (let round = 0; round < 3; round++) {
-    const r = await refitCues(env, cues, words, targetLang);
+    const r = await refitCues(env, cues, words, targetLang, round === 2 ? STRONG_MODEL : undefined);
     cues = r.cues as WCue[];
     if (!r.fixed) break;
   }
@@ -747,7 +751,8 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
   env: ScribeEnv,
   cues: T[],
   words: CleanWord[],
-  targetLang: string
+  targetLang: string,
+  model?: string
 ): Promise<{ cues: T[]; fixed: number }> {
   const twoLines = (t: string) => {
     const ls = t.split('\n');
@@ -854,7 +859,12 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
   if (!merged.length) return { cues, fixed: 0 };
 
   const replaced = new Map<number, T[]>();
-  const BATCH = 6;
+  // A lecture yields a few hundred repair groups. At six per request that is ~78
+  // requests a round against translation's ~26 for the whole talk, and on the
+  // slow model — which is how a 2.5 minute step became forty. Twenty per request
+  // costs nothing in quality (each group is independent) and cuts the round to a
+  // handful of calls.
+  const BATCH = 20;
   // Each batch is an independent request, so they go out together. Run one at
   // a time this took longer than the translation itself: a lecture produces a
   // few hundred groups and three rounds of them serially is hundreds of
