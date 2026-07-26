@@ -8,7 +8,6 @@ import { translateWords, qaPass, takeUsage, takeCost } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
 import { generateChapters, generateMetaAndChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
-import { assessQuality } from './quality';
 import { renderSrt } from './srt';
 import { updateJob, type Cue, type ScribeEnv } from './types';
 
@@ -376,23 +375,12 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         if (lang === primary) {
           primaryCueCount = tr.cueCount;
           await updateJob(env.DB, jobId, { cue_count: tr.cueCount });
-          // Quality report: mechanical metrics + cross-lingual semantic audit.
-          // Audiobooks skip it — its CPS/display grading is a subtitle concept.
-          const qKey = `scribe/${jobId}/quality.json`;
-          if (!isAudiobook && (!tr.cached || !(await env.MEDIA_BUCKET.head(qKey)))) {
-            // Diagnostics must never kill a job: the step timeout throws past
-            // the inner catch, so the whole step is best-effort too.
-            try {
-              await step.do('quality', { retries: { limit: 1, delay: '30 seconds' }, timeout: '30 minutes' }, async () => {
-                try {
-                  const r = await assessQuality(env as any, jobId, cuesKey);
-                  return { grade: r.grade, score: r.score, flagged: r.flags.length };
-                } catch (e: any) {
-                  return { error: String(e?.message || e).slice(0, 200) };
-                }
-              });
-            } catch {}
-          }
+          // No quality step. It embedded every cue twice with bge-m3 to grade
+          // the job C and list "low-similarity" cues that were fine — minutes
+          // of tail latency per job for a card the operator asked to be rid
+          // of. The review pass already fixes what it can fix; a grade nobody
+          // trusts is not worth the wait. check-subs.py remains for offline
+          // measurement when it matters.
         }
       }
       await markStage(env, jobId, 'render');

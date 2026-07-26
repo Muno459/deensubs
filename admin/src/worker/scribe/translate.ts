@@ -286,8 +286,10 @@ function parseCues(raw: string, win: CleanWord[]): { w: [number, number]; t: str
 }
 
 // Escalation + QA model: bulk runs on cheap gemini, sonnet handles the hard parts
-const STRONG_MODEL = 'ag/claude-sonnet-4-6';
-const QA_MODEL = 'ag/claude-opus-4-6-thinking'; // touch-ups deserve the best; plain opus-4-6 404s on the router
+// One model everywhere, per the operator's standing instruction — and it is
+// also the fast one: the claude fallbacks made QA the longest step of a job.
+const STRONG_MODEL = 'ag/gemini-3.6-flash-tiered';
+const QA_MODEL = 'ag/gemini-3.6-flash-tiered';
 
 /** Uncovered index ranges within [lo,hi] given parsed cues. */
 function computeHoles(cues: { w: [number, number] }[], lo: number, hi: number): [number, number][] {

@@ -47,7 +47,7 @@ Pick the ${count} strongest, ranked best first. hook: punchy, faithful to conten
   } catch {}
   if (!raw.includes('[')) {
     // fallback: the strong model with a shorter budget
-    try { raw = await callOnce('ag/claude-sonnet-4-6', 2500); } catch (e: any) {
+    try { raw = await callOnce('ag/gemini-3.6-flash-tiered', 2500); } catch (e: any) {
       throw new Error('moment scan failed on both models: ' + String(e?.message || e).slice(0, 150));
     }
   }
@@ -60,7 +60,7 @@ Pick the ${count} strongest, ranked best first. hook: punchy, faithful to conten
   if (!arr.length) {
     // model answered but not in-format — one strong-model retry
     try {
-      raw = await callOnce('ag/claude-sonnet-4-6', 2500);
+      raw = await callOnce('ag/gemini-3.6-flash-tiered', 2500);
       start = raw.indexOf('[');
       end = raw.lastIndexOf(']');
       if (start >= 0 && end > start) arr = JSON.parse(raw.slice(start, end + 1));
@@ -116,11 +116,11 @@ Rules:
 - The FIRST card lands within 1.3s of ${start.toFixed(1)}s; the FINAL card ends cleanly on the last spoken word before ${end.toFixed(1)}s.
 - Cover ALL the speech. No commentary, no markdown.` },
       { role: 'user', content: `Hook (for tone): ${hook}\nTimed Arabic words (sec word):\n${wordLines}` },
-    ], 6000, 'ag/claude-sonnet-4-6').catch(() =>
+    ], 6000, 'ag/gemini-3.6-flash-tiered').catch(() =>
       llmChat(env, [
         { role: 'system', content: 'Return the JSONL caption cards as instructed.' },
         { role: 'user', content: `Hook: ${hook}\nTimed Arabic words:\n${wordLines}` },
-      ], 6000, 'ag/claude-opus-4-6-thinking')
+      ], 6000, 'ag/gemini-3.6-flash-tiered')
     );
     const cards: CaptionCard[] = [];
     for (let line of raw.split('\n')) {

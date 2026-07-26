@@ -18,8 +18,10 @@ import { findQuranQuotes, citeQuote } from './quran';
 export type AudioCue = Cue & { w: [number, number] };
 
 const CONCURRENCY = 16;
-const STRONG_MODEL = 'ag/claude-sonnet-4-6';
-const QA_MODEL = 'ag/claude-opus-4-6-thinking';
+// One model everywhere, per the operator's standing instruction — and it is
+// also the fast one: the claude fallbacks made QA the longest step of a job.
+const STRONG_MODEL = 'ag/gemini-3.6-flash-tiered';
+const QA_MODEL = 'ag/gemini-3.6-flash-tiered';
 
 const SYSTEM_PROMPT = (targetLang: string) => `You are an expert translator producing a READING transcript of an Islamic audio lecture for a karaoke-style player. You receive numbered words from speech recognition and answer with translation units.
 
