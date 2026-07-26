@@ -53,6 +53,7 @@ BASELINE_BOUNDARY_DUPS = 19  # measured on the pre-change baseline; must not reg
 ANCHOR_TOL = 0.002        # a cue start must BE a word start, not sit near one
 HOLE_TOL = 0.5            # speech on screen for nobody, in seconds
 LOITER_MAX = 2.0          # how long a cue may sit on screen after its last word
+OPENING_MAX = 8.0         # percent of cues allowed to open on a continuation
 
 CLING = set(
     "a an the and or but nor so yet of in on at to for with from by as is was are were be been "
@@ -209,6 +210,27 @@ def main(srt_path, cues_path, asr_path):
             lazy.append(c)
     check("V4", "verses: dense cues use the silence available to them", not lazy,
           f"{len(lazy)} cues stop early")
+
+    # A cue is read on its own for a few seconds, so it has to stand up on its
+    # own. One that opens on a comma or a bare continuation ("and a sun in broad
+    # daylight.") is a sentence sliced into boxes, not a subtitle. This is what
+    # every other criterion here missed: a file could satisfy all of them with a
+    # third of its cues opening mid-sentence.
+    def opens_mid_sentence(c):
+        t = c["text"].strip().lstrip("\u201c\u201d\"'-\u2013\u2014\u2026 ")
+        if not t:
+            return False
+        if t[0] in ",;:":
+            return True
+        first = re.split(r"\s+", t)[0].strip(".,;:!?")
+        # Lowercase opening is the signal, but a handful of words legitimately
+        # begin an English sentence in lowercase after a name or transliteration.
+        return bool(re.match(r"^[a-z]", first))
+
+    mid = [c for c in speech if opens_mid_sentence(c)]
+    check("N1", f"speech: <={OPENING_MAX}% of cues open mid-sentence",
+          pct(len(mid), len(speech)) <= OPENING_MAX,
+          f"{len(mid)} ({pct(len(mid), len(speech)):.1f}%)")
 
     # ---- sync, measured against the ASR ----------------------------------
     starts = word_starts

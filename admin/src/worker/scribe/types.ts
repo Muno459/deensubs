@@ -33,10 +33,6 @@ export type Cue = {
   text: string; // translated text
   source: string; // original-language text (joined words)
   q?: string; // Quran verse key ("2:255") — canonical LOCKED cue, never LLM-edited
-  // Word-index range into the ASR this cue was built from. Kept on the cue so a
-  // later pass can still cut it on a word the speaker actually says instead of
-  // interpolating a timestamp from character counts.
-  w?: [number, number];
 };
 
 export type AsrResult = {

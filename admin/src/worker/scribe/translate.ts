@@ -32,6 +32,10 @@ const WINDOW_SIZE = 180; // words per LLM call — bigger windows = fewer calls;
 const WINDOW_LOOKAHEAD = 30; // stretch to a natural boundary
 const CONCURRENCY = 16; // gemini flash sustains this fine; 6 made a 2.5h lecture translate in ~40 min
 
+/** Cue text on one line. The model writes its own line break, and both repair
+ *  prompts are line-delimited, so it has to be flattened on the way in. */
+const flat = (t: string) => t.replace(/\s*\n\s*/g, ' ').trim();
+
 export function cleanWords(words: Word[]): CleanWord[] {
   const out: CleanWord[] = [];
   for (const w of words) {
@@ -67,28 +71,40 @@ export function makeWindows(words: CleanWord[]): CleanWord[][] {
   return windows;
 }
 
-const SYSTEM_PROMPT = (targetLang: string) => `You are an expert subtitle translator for Islamic lectures. You receive numbered words with timestamps from speech recognition and produce subtitle cues with translations.
+const SYSTEM_PROMPT = (targetLang: string) => `You are a subtitle editor for Islamic lectures, working to broadcast (Netflix) timed-text standards. You receive numbered words with timestamps from speech recognition and return subtitle cues.
 
-OUTPUT FORMAT — one JSON object per line, nothing else:
-{"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"t":"translation of those words"}
+OUTPUT — one JSON object per line, nothing else:
+{"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"t":"first line\nsecond line"}
 
-RULES:
-- Cover EVERY word index exactly once, in order, with no gaps and no overlaps.
-- Segment at natural boundaries: sentence ends, pauses (marked [GAP]), speaker changes (marked [SPEAKER]).
-- Each cue: ideally 1.5-7 seconds of speech, translation at most 2 lines x 42 characters (~84 chars). NEVER exceed 84 characters — split into another cue instead.
+The word range you choose IS the cue's timing: the cue appears when FIRST is spoken and leaves when LAST finishes. Nothing downstream re-cuts or re-times what you return, so the segmentation you choose is the segmentation the viewer sees. Choose it deliberately.
 
-SEGMENT ON MEANING AND DELIVERY, NOT ON LENGTH. Every cue must be a self-contained unit a viewer can read in one glance. Judge a boundary by all of these together, not by character count:
-- Where the speaker pauses or draws breath ([GAP] markers, and the audio itself when you are given it). This is the strongest signal.
-- Where the grammar closes: end at a clause or sentence boundary, never mid-clause dangling into the next cue.
-- NEVER end a cue on a word that governs what follows: an article (a, the), preposition (of, in, to, for, with, from, by), conjunction (and, or, but), auxiliary (is, was, has), or a relative (that, which, who). Move that word to the next cue.
+COVERAGE
+- Every word index belongs to exactly one cue, in order, with no gaps and no overlaps.
+
+EVERY CUE MUST READ AS A SENTENCE, NOT AS A SLICE OF ONE
+This is what separates a subtitle from a transcript chopped into boxes. Each cue is on screen alone for a few seconds and has to make sense there.
+- START where a thought starts. Never open a cue with a comma, and never open on a continuation that only parses if the viewer still has the previous cue in their head. "and a sun in broad daylight." is wrong. Either keep it with the clause it belongs to, or open with a subject: "He was like a sun in broad daylight."
+- END where the grammar closes: a sentence, or a complete clause. Never end on a word that governs the next one — an article, preposition, conjunction, auxiliary verb, or relative pronoun.
 - Keep together what cannot be understood apart: a verb and its object, a name and its title, a number and its unit, a quotation and the verb introducing it.
-- DO NOT OVER-SEGMENT. Fewer, complete cues read better than many small ones. Use the full 84 characters when the thought fills them; only cut earlier when the sentence genuinely breaks there. If a piece would be under ~25 characters or under ~1.5 seconds, merge it into the neighbouring cue instead of emitting it alone.
-- Every word index appears in exactly ONE cue, and no word of the translation may appear at the end of one cue and again at the start of the next. Never repeat a word across a boundary.
-- Translate to ${targetLang}. Translate ALL meaningful content faithfully — never paraphrase away or condense meaning.
-- Clean speech artifacts: drop stutters, false starts, and filler sounds from the translation (their word indices still belong to the cue covering that span).
+- When a thought is too long for one cue, break it where the sentence itself breathes — at a clause boundary, before a conjunction, after a completed statement — and make the next cue stand up on its own.
+- Never repeat a word across a boundary.
+
+FIT — you have the timestamps, so check this yourself
+- Duration is LAST word's end minus FIRST word's start. Aim for 1-7 seconds.
+- Reading speed: at most 17 characters per second of that duration, and never above 20. A 3-second cue holds roughly 50 characters; a 6-second cue roughly 100.
+- Size: at most 2 lines of 42 characters. Put the line break in "t" yourself as \n. Break at the largest grammatical unit available: after punctuation, before a conjunction, before a preposition. Never break between an article and its noun, a preposition and its object, or a name and its title. One line is better than two when it fits.
+- If the faithful translation will not fit the seconds available, say the same thing in fewer words. Never drop meaning to make it fit, and never exceed the limit.
+- If a phrase would be under about a second on its own, carry it with the neighbouring thought instead of flashing it.
+
+SEGMENT ON MEANING AND DELIVERY
+- The speaker is the strongest signal: where they pause ([GAP]), draw breath, or change ([SPEAKER]). When you are given the audio, listen to where the sentence lands.
+- Do not segment by character count. The limit is a ceiling, not a target — never pad a cue toward it, and never chop a complete thought to stay under it.
+
+TRANSLATION
+- Translate to ${targetLang}. Translate all meaningful content faithfully — never paraphrase away or condense meaning.
+- Clean speech artifacts: drop stutters, false starts and filler from the translation. Their word indices still belong to the cue covering that span.
 - Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
 - Keep as transliterations (do not translate): fatwa, mufti, Sharia, fiqh, usul al-fiqh, ifta, Haramain, madhhab, and similar established terms.
-- Quranic verses: use established translation wording, wrapped in quotes.
 - Proper nouns and Arabic terms: standard English transliteration.
 - No markdown, no commentary, no code fences — only JSONL lines.`;
 
@@ -537,37 +553,12 @@ export async function translateWords(
     const b: WCue = { ...cue, start: words[wSplit].start, w: [wSplit, cue.w[1]], text: text.slice(splitAt).trim(), source: srcWords.slice(sSplit).join(' ') };
     return [...splitLocked(a), ...splitLocked(b)];
   };
-  const splitOnce = (cue: WCue): WCue[] => {
-    if (cue.q) return splitLocked(cue);
-    const dur = cue.end - cue.start;
-    // Too long to read in two lines, or too long on screen, is worth splitting
-    // — but only where the sentence actually allows it (see below).
-    if ((dur <= 8.5 && cue.text.length <= MAX_CUE_CHARS) || cue.w[1] - cue.w[0] < 2) return [cue];
-    if (dur < MIN_PIECE_SEC * 2) return [cue]; // no time to divide
-    const text = cue.text;
-    const marks = [...text.matchAll(/[.!?؟…,;:]\s+/g)].map((m) => m.index! + m[0].length);
-    const mid = text.length / 2;
-    const splitAt = marks.length ? marks.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p)) : -1;
-    // No syntactic boundary means any cut lands mid-clause. Splitting at the
-    // nearest bare space (what this used to do) manufactures exactly the
-    // dangling fragments the segmentation rules exist to prevent, so a cue with
-    // nowhere clean to break is left alone.
-    if (splitAt < 8 || text.length - splitAt < 8) return [cue];
-    const share = splitAt / text.length;
-    const wSplit = Math.max(cue.w[0] + 1, Math.min(cue.w[1], cue.w[0] + Math.round((cue.w[1] - cue.w[0]) * share)));
-    const a: WCue = {
-      start: cue.start, end: words[wSplit - 1].end, w: [cue.w[0], wSplit - 1],
-      text: text.slice(0, splitAt).trim(),
-      source: words.slice(cue.w[0], wSplit).map((w) => w.text).join(' '),
-    };
-    const b: WCue = {
-      start: words[wSplit].start, end: cue.end, w: [wSplit, cue.w[1]],
-      text: text.slice(splitAt).trim(),
-      source: words.slice(wSplit, cue.w[1] + 1).map((w) => w.text).join(' '),
-    };
-    return [...splitOnce(a), ...splitOnce(b)];
-  };
-  cues = cues.flatMap(splitOnce);
+  // Only canonical verses are cut here. Their text is inserted by us, the model
+  // never sees it, and a fully recited verse is far longer than one cue can
+  // hold. Everything the model wrote keeps the segmentation the model chose:
+  // re-cutting it at commas is what produced cues opening "and a sun in broad
+  // daylight." — a sentence sliced into boxes rather than a subtitle.
+  cues = cues.flatMap((c) => (c.q ? splitLocked(c) : [c]));
 
   // Netflix-style post pass: ordered, non-overlapping, breathable
   cues.sort((a, b) => a.start - b.start);
@@ -598,14 +589,12 @@ export async function translateWords(
       cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + grab));
     }
   }
-  // Splitting above lands every cut on a real word boundary, so the timing stays
-  // tied to the speech. What is left is display polish the model is not reliable
-  // at: joining cues too brief to read, dropping a word written twice across a
-  // seam, and handing dense cues the silence beside them. The word list goes
-  // with the cues so it can cut on a word too, and the `w` spans are kept on the
-  // way out so the QA re-polish still has them.
-  const { polishCues } = await import('./polish');
-  return polishCues(cues.filter((c) => c.end > c.start && c.text.trim()), words);
+  // Nothing rewrites the cues after this point. Every cut above landed on a real
+  // word boundary, so the timing is the speech's own; the wording and the
+  // segmentation are the model's, and stay the model's. A deterministic pass
+  // that "tidied" them here is what desynced 44% of cues and deleted half of a
+  // verse — display quality is a prompt problem, and it is solved in the prompt.
+  return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);
 }
 
 /**
@@ -634,7 +623,7 @@ export async function condenseDense(env: ScribeEnv, cues: Cue[], targetLang: str
   for (let k = 0; k < todo.length; k += BATCH) {
     const batch = todo.slice(k, k + BATCH);
     const lines = batch
-      .map(({ i, c }) => `${i}\tmax ${Math.max(12, Math.round((c.end - c.start) * TARGET_CPS))} chars\t${c.text}`)
+      .map(({ i, c }) => `${i}\tmax ${Math.max(12, Math.round((c.end - c.start) * TARGET_CPS))} chars\t${flat(c.text)}`)
       .join('\n');
     try {
       const raw = await llmChat(env, [
@@ -674,7 +663,7 @@ export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): P
       const dur = Math.max(0.3, c.end - c.start);
       const cps = Math.round(c.text.length / dur);
       const flag = cps > 20 ? ` [CPS ${cps} TOO FAST — condense]` : '';
-      return `${offset + i}\nSRC: ${c.source}\nTRN: ${c.text}${flag}`;
+      return `${offset + i}\nSRC: ${c.source}\nTRN: ${flat(c.text)}${flag}`;
     }).filter(Boolean).join('\n\n');
     if (!lines) return;
     try {

@@ -51,6 +51,14 @@ function greedyWrap(words: string[], maxLine: number): string {
  *  actually breathes rather than at the raw character midpoint: punctuation
  *  first, then a balanced break that does not strand a function word. */
 export function wrapCueText(text: string, maxLine = 42): string {
+  // A break the model put in is the best one available: it knows where the
+  // sentence divides, which is what the Netflix rule is actually asking for.
+  // Measuring only takes over when there is no break to honour or it does not
+  // fit the line width.
+  if (text.includes('\n')) {
+    const given = text.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (given.length === 2 && given.every((l) => l.length <= maxLine)) return given.join('\n');
+  }
   const clean = text.replace(/\s+/g, ' ').trim();
   if (clean.length <= maxLine) return clean;
   const words = clean.split(' ');
