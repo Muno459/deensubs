@@ -288,6 +288,66 @@ def main(srt_path, cues_path, asr_path):
               pct(len(drift), len(pairs)) <= DRIFT_MAX,
               f"{len(drift)} ({pct(len(drift), len(pairs)):.1f}%), median ratio {med:.2f}")
 
+    # A cue's stored Arabic must BE the words inside its own timestamps. This is
+    # true by construction — source is sliced from the same word range the timing
+    # comes from — so any mismatch means something downstream rewrote one without
+    # the other. It is the cheapest possible integrity check and it catches the
+    # class of bug that is hardest to see: a cue that looks perfectly timed while
+    # carrying another cue's words. (Verses are excluded: their source is the
+    # Qur'anic Arabic, not the transcript.)
+    wstarts_all = [w["start"] for w in words]
+
+    def words_in(a, b):
+        i = bisect.bisect_left(wstarts_all, a - 1e-6)
+        j = bisect.bisect_left(wstarts_all, b - 1e-6)
+        return [words[k]["text"].strip() for k in range(i, j)]
+
+    mismatch = []
+    for c in speech:
+        stored = (c.get("source") or "").split()
+        if not stored:
+            continue
+        actual = words_in(c["start"], c["end"])
+        # a single word of slack at either end: a cue's end may be nudged to the
+        # next cue's start, which can pull in or drop one boundary word
+        if stored in (actual, actual[:-1], actual[1:]) or (
+                len(actual) and abs(len(stored) - len(actual)) <= 1
+                and stored[0] == actual[0]):
+            continue
+        mismatch.append(c)
+    check("C1", "each cue's Arabic is the words inside its own timestamps",
+          not mismatch, f"{len(mismatch)} ({pct(len(mismatch), len(speech)):.1f}%)")
+
+    # Honorifics are not decoration in this material: dropping the ﷺ after the
+    # Prophet's name, or rendering Allah without ﷻ, is a substantive error to the
+    # audience this is for. Each Arabic form has an accepted English rendering,
+    # and a cue whose Arabic carries one must carry it in translation too — as the
+    # glyph or as the spelled-out phrase, both being normal practice.
+    HONOR_MAP = [
+        (["صلى الله عليه وسلم", "عليه الصلاة والسلام"],
+         ["ﷺ", "peace be upon him", "blessings and peace"]),
+        (["سبحانه وتعالى", "تبارك وتعالى", "عز وجل", "جل جلاله", "سبحانه"],
+         ["ﷻ", "Glorified and Exalted", "Exalted be He", "the Most High", "Almighty"]),
+        (["رضي الله عنه", "رضي الله عنها", "رضي الله عنهم", "رضي الله عنهما"],
+         ["(RA)", "RA)", "may Allah be pleased"]),
+        (["رحمه الله", "رحمها الله"], ["(RH)", "RH)", "may Allah have mercy"]),
+        (["عليه السلام", "عليهم السلام"], ["(AS)", "AS)", "peace be upon him", "peace be upon them"]),
+    ]
+    expected = 0
+    dropped = []
+    for c in speech:
+        src = c.get("source") or ""
+        for ar_forms, en_forms in HONOR_MAP:
+            if not any(a in src for a in ar_forms):
+                continue
+            expected += 1
+            if not any(e.lower() in c["text"].lower() for e in en_forms):
+                dropped.append(c)
+    check("H1", "honorifics in the Arabic survive into the translation",
+          not dropped,
+          f"{len(dropped)} dropped of {expected} expected"
+          + (f" ({pct(len(dropped), expected):.1f}%)" if expected else ""))
+
     # A cue that spans a change of speaker puts two people in one box. Splitting
     # on diarisation is always allowed, so there is no excuse for it.
     wstarts = [w["start"] for w in words]
