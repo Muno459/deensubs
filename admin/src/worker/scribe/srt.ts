@@ -57,7 +57,11 @@ export function wrapCueText(text: string, maxLine = 42): string {
   // fit the line width.
   if (text.includes('\n')) {
     const given = text.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
-    if (given.length === 2 && given.every((l) => l.length <= maxLine)) return given.join('\n');
+    // Honour it when it fits AND does not strand a word that governs the next
+    // line. A break after "the" or "of" reads as a stumble whether a model or a
+    // scoring function put it there, and measuring can do better than that.
+    const strands = given.length === 2 && isCling(given[0].split(' ').pop() || '');
+    if (given.length === 2 && given.every((l) => l.length <= maxLine) && !strands) return given.join('\n');
   }
   const clean = text.replace(/\s+/g, ' ').trim();
   if (clean.length <= maxLine) return clean;
