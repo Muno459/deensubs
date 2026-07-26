@@ -344,11 +344,19 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   // grab: artwork is the scholar's baked 1920x1080 stage card when one exists
   // (scholars/cards/{slug}.jpg — the site also renders it as the player
   // stage), else the chosen image or the channel's cover art.
+  // Artwork, best first: the baked stage card, then the scholar's own photo,
+  // then whatever cover art came with the source. Only the card used to count,
+  // so a scholar with a perfectly good portrait but no card made the publish
+  // fail outright with nothing the operator could do but go and make a card.
   let scholarCard: string | null = null;
   if (isAudiobook && !opts.thumb_key && opts.scholar_id) {
-    const sch: any = await env.DB.prepare('SELECT slug FROM scholars WHERE id = ?').bind(opts.scholar_id).first();
+    const sch: any = await env.DB.prepare('SELECT slug, photo, photo_hero FROM scholars WHERE id = ?').bind(opts.scholar_id).first();
     if (sch?.slug && (await env.MEDIA_BUCKET.head(`scholars/cards/${sch.slug}.jpg`))) {
       scholarCard = `scholars/cards/${sch.slug}.jpg`;
+    } else {
+      for (const candidate of [sch?.photo_hero, sch?.photo]) {
+        if (candidate && (await env.MEDIA_BUCKET.head(candidate))) { scholarCard = candidate; break; }
+      }
     }
   }
   const fromImage = !!opts.thumb_key || isAudiobook;
@@ -357,7 +365,7 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
     : isAudiobook
       ? (scholarCard ? `${CDN_BASE}/${scholarCard}` : (job.thumb_url as string))
       : `${CDN_BASE}/${job.source_key}`;
-  if (isAudiobook && !thumbSrc) throw new Error('audiobook needs artwork: pick a scholar with a stage card or set a thumbnail image first');
+  if (isAudiobook && !thumbSrc) throw new Error('This audiobook has no artwork. Upload or paste an image, or pick a scholar who has a stage card or a photo.');
   const ts = fromImage ? 0 : opts.thumb_ts ?? Math.max(1, Math.round((job.duration || 60) * 0.3));
   const start = await containerCall(env, jobId, '/thumbs', {
     method: 'POST',

@@ -1440,10 +1440,16 @@ app.post('/api/scribe/:id/to-audiobook', async (c) => {
     const l = JSON.parse(job.target_langs || '[]');
     if (Array.isArray(l) && l.length) langs = l;
   } catch {}
+  // Reuse the media when the source is already audio: the new job would
+  // otherwise re-download the whole thing from the URL to end up with a file it
+  // already has sitting in R2.
+  const audioSource = /\.(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(job.source_key || '')
+    && (await c.env.MEDIA_BUCKET.head(job.source_key)) ? job.source_key : null;
   let newId = '';
   try {
     newId = await createScribeJob(c.env, job.url, langs, false,
-      { title: job.title, channel: job.channel, thumb_url: job.thumb_url }, c.get('user')?.id);
+      { title: job.title, channel: job.channel, thumb_url: job.thumb_url }, c.get('user')?.id,
+      undefined, audioSource ? { sourceKey: audioSource, duration: Math.round(job.duration || 0) } as any : undefined);
   } catch (err: any) {
     return c.json({ error: 'failed to start audiobook job: ' + err.message }, 500);
   }

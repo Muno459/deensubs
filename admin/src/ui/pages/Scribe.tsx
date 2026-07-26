@@ -357,7 +357,11 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
   // An audio job publishes with the scholar's stage card, an uploaded image, or
   // the channel art. With none of those there is nothing to show, and publish
   // fails server-side after the click.
-  const needsArtwork = !isVideoFile && !chosenKey && !customThumb && !cardThumb && !schCardSlug && !job?.thumb_url;
+  // The server takes the stage card, or the scholar's photo, or the source's own
+  // cover art. So the only true dead end is an audio job with no image chosen
+  // AND no scholar to draw one from.
+  const needsArtwork = !isVideoFile && !chosenKey && !customThumb && !cardThumb
+    && !form?.scholar_id && !job?.thumb_url;
   useEffect(() => {
     setCardThumb(null);
     if (!open || !schCardSlug || !form?.title) return;
