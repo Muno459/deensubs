@@ -361,6 +361,58 @@ def main(srt_path, cues_path, asr_path):
           f"{len(dropped)} dropped of {expected} expected"
           + (f" ({pct(len(dropped), expected):.1f}%)" if expected else ""))
 
+    # Numbers are the one piece of content that can be verified exactly rather
+    # than by proportion: either the figure he stated reached the screen or it did
+    # not. Matching has to be on whole words with Arabic prefixes stripped — a
+    # first attempt at this substring-matched and reported 80% failures, every one
+    # an artifact (يستمع contains ست, ألفناه contains ألف). A check nobody has
+    # validated is worse than no check.
+    AR_NUM = {
+        "واحد", "واحدة", "اثنين", "اثنان", "ثلاثة", "ثلاث", "أربعة", "أربع", "اربعة", "اربع",
+        "خمسة", "خمس", "ستة", "ست", "سبعة", "سبع", "ثمانية", "ثمان", "تسعة", "تسع", "عشرة",
+        "عشر", "عشرين", "ثلاثين", "أربعين", "اربعين", "خمسين", "ستين", "سبعين", "ثمانين",
+        "تسعين", "مائة", "مئة", "مائتين", "مئتين", "ألف", "الف", "ألفين", "مليون",
+        "نصف", "ثلث", "ربع", "أول", "ثاني", "ثالث", "رابع", "خامس",
+    }
+    EN_NUM = re.compile(
+        r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|"
+        r"forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|half|third|quarter|"
+        r"first|second|fourth|fifth|single|sole|only|primary|start|beginning|once|twice)\b", re.I)
+
+    def ar_tokens(text):
+        out = []
+        for raw in text.split():
+            t = re.sub(r"[\u064b-\u0652\u0640]", "", raw)
+            t = re.sub(r"[^\u0621-\u064a]", "", t)
+            for pre in ("وال", "فال", "بال", "كال", "لل", "ال", "و", "ف", "ب", "ل", "ك"):
+                if t.startswith(pre) and len(t) > len(pre) + 2 and t[len(pre):] in AR_NUM:
+                    t = t[len(pre):]
+                    break
+            out.append(t)
+        return out
+
+    # واحد/واحدة is also the indefinite pronoun — "طيب واحدة خرجت من ولادة" is
+    # "a woman who just gave birth", not the numeral one — so an indefinite
+    # rendering counts as carrying it.
+    INDEF = re.compile(r"\b(a|an|someone|somebody|a person|a man|a woman)\b", re.I)
+
+    def carried(c, nums):
+        if EN_NUM.search(c["text"]):
+            return True
+        return nums <= {"واحد", "واحدة"} and bool(INDEF.search(c["text"]))
+
+    stated = []
+    lost = []
+    for c in speech:
+        nums = {t for t in ar_tokens(c.get("source") or "") if t in AR_NUM}
+        if not nums:
+            continue
+        stated.append(c)
+        if not carried(c, nums):
+            lost.append(c)
+    check("F2", "numbers stated in the Arabic reach the translation", not lost,
+          f"{len(lost)} dropped of {len(stated)} stated")
+
     # A cue that spans a change of speaker puts two people in one box. Splitting
     # on diarisation is always allowed, so there is no excuse for it.
     wstarts = [w["start"] for w in words]
