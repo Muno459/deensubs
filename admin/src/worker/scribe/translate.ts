@@ -866,6 +866,10 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
   if (!merged.length) return { cues, fixed: 0 };
 
   const replaced = new Map<number, T[]>();
+  // Why a reply was thrown away. Without this the pass reports "38 sent, 14
+  // accepted" and there is no way to tell an unreasonable rule from a model
+  // that cannot follow a reasonable one.
+  const reject = { tile: 0, fit: 0, dup: 0, pause: 0, shape: 0 };
   // A lecture yields a few hundred repair groups. At six per request that is ~78
   // requests a round against translation's ~26 for the whole talk, and on the
   // slow model — which is how a 2.5 minute step became forty. Twenty per request
@@ -930,7 +934,7 @@ No commentary, no code fences, JSONL only.` },
         const id = Number(f.id);
         const g = merged.find((x) => x.idx[0] === id);
         const list = Array.isArray(f.cues) ? f.cues : Array.isArray(f.pieces) ? f.pieces : null;
-        if (!g || !list || !list.length) continue;
+        if (!g || !list || !list.length) { reject.shape++; continue; }
         const src = cues[g.idx[0]];
         const tail = cues[g.idx[g.idx.length - 1]];
         const parts = list.filter((p: any) => Array.isArray(p.w) && typeof p.t === 'string' && p.t.trim());
@@ -941,7 +945,7 @@ No commentary, no code fences, JSONL only.` },
           if (!(Number.isInteger(x) && Number.isInteger(y) && y >= x)) ok = false;
           else if (n > 0 && x !== parts[n - 1].w[1] + 1) ok = false;
         }
-        if (!ok) continue;
+        if (!ok) { reject.tile++; continue; }
         // A re-cut may reword, so a piece can come back carrying more text than
         // its own seconds can hold. Measured: splitting fixed the fragments and
         // took the worst reading speed from 35 to 300 characters per second,
@@ -954,13 +958,13 @@ No commentary, no code fences, JSONL only.` },
           const b = words[parts[n].w[1]];
           const span = Math.max(0.05, b.end - a.start);
           const txt = parts[n].t.replace(/\n/g, ' ').trim();
-          if (span < 0.7 && parts.length > 1) ok = false;
-          else if (txt.length / span > TARGET_CPS + 5) ok = false;
+          if (span < 0.7 && parts.length > 1) { ok = false; reject.fit++; }
+          else if (txt.length / span > TARGET_CPS + 5) { ok = false; reject.fit++; }
           else if (n > 0) {
             const prev = bare(parts[n - 1].t);
             const cur = bare(txt);
             for (let k = Math.min(3, prev.length, cur.length); k > 0; k--) {
-              if (prev.slice(-k).join(' ') === cur.slice(0, k).join(' ')) { ok = false; break; }
+              if (prev.slice(-k).join(' ') === cur.slice(0, k).join(' ')) { ok = false; reject.dup++; break; }
             }
           }
         }
@@ -975,7 +979,7 @@ No commentary, no code fences, JSONL only.` },
           }
           const bounds = parts.slice(1).map((p: any) => p.w[0]);
           const onPause = bounds.filter((b: number) => b > 0 && words[b].start - words[b - 1].end >= 0.15).length;
-          if (onPause < Math.min(bounds.length, avail)) ok = false;
+          if (onPause < Math.min(bounds.length, avail)) { ok = false; reject.pause++; }
         }
         if (!ok) continue;
         replaced.set(g.idx[0], parts.map((p: any) => {
@@ -998,7 +1002,8 @@ No commentary, no code fences, JSONL only.` },
   for (let i = 0; i < jobs.length; i += CONCURRENCY) {
     await Promise.all(jobs.slice(i, i + CONCURRENCY).map(runBatch));
   }
-  console.log(`refit: ${merged.length} groups sent, ${replaced.size} accepted`);
+  console.log(`refit: ${merged.length} sent, ${replaced.size} accepted; rejected `
+    + `tile=${reject.tile} fit=${reject.fit} dup=${reject.dup} pause=${reject.pause} shape=${reject.shape}`);
   if (!replaced.size) return { cues, fixed: 0 };
 
   const drop = new Set<number>();
