@@ -1415,11 +1415,21 @@ app.post('/api/scribe/:id/retry', async (c) => {
   const job: any = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
   if (!job) return c.json({ error: 'Not found' }, 404);
   if (job.status === 'running') return c.json({ error: 'Job is still running' }, 400);
-  const newId = genJobId();
-  await c.env.DB.prepare('INSERT INTO scribe_jobs (id, url, target_lang, status, step) VALUES (?, ?, ?, ?, ?)')
-    .bind(newId, job.url, job.target_lang, 'queued', 'queued').run();
-  await c.env.SCRIBE_WORKFLOW.create({ id: newId, params: { jobId: newId, url: job.url, targetLang: job.target_lang } });
-  const fresh = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(newId).first();
+  // Restart THIS job, do not clone it. The old version inserted a brand-new row
+  // per retry — every click duplicated the list — and copied only url and
+  // target_lang, silently dropping full_video and the extra languages: a
+  // retried LECTURE came back as an audiobook because the flag defaulted away.
+  // Same id, new workflow instance, full parameters; artifacts already in R2
+  // (source, asr.json) are reused by the steps' own resume logic.
+  await terminateJob(c.env, job);
+  const langs = (() => { try { const l = JSON.parse(job.target_langs || '[]'); return Array.isArray(l) && l.length ? l : [job.target_lang || 'en']; } catch { return [job.target_lang || 'en']; } })();
+  const instance = `${id}-t${genJobId().slice(0, 4)}`;
+  await c.env.DB.prepare("UPDATE scribe_jobs SET status = 'queued', step = 'queued', error = NULL, wf_instance = ? WHERE id = ?").bind(instance, id).run();
+  await c.env.SCRIBE_WORKFLOW.create({
+    id: instance,
+    params: { jobId: id, url: job.url, targetLang: langs[0], targetLangs: langs, fullVideo: !!job.full_video },
+  });
+  const fresh = await c.env.DB.prepare('SELECT * FROM scribe_jobs WHERE id = ?').bind(id).first();
   return c.json({ job: fresh });
 });
 

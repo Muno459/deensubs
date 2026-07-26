@@ -1290,10 +1290,19 @@ export default function Scribe() {
             </div>
           )}
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            <label className="flex items-center gap-1.5 text-[11px] text-muted">
-              <input type="checkbox" checked={fullVideo} onChange={(e) => setFullVideo(e.target.checked)} className="accent-[#45b3a2]" />
-              Full video (for publishing + clips)
-            </label>
+            {/* An explicit choice, not a checkbox whose meaning has to be
+                remembered. This is the single decision that routes the whole
+                pipeline, and guessing it from the media went wrong. */}
+            <div className="flex overflow-hidden rounded-lg border border-hairline">
+              <button type="button" onClick={() => setFullVideo(true)}
+                className={'px-2.5 py-1 text-[11px] font-medium transition-colors ' + (fullVideo ? 'bg-gold text-ink' : 'bg-inset text-muted hover:text-cream')}>
+                Process as video
+              </button>
+              <button type="button" onClick={() => setFullVideo(false)}
+                className={'px-2.5 py-1 text-[11px] font-medium transition-colors ' + (!fullVideo ? 'bg-gold text-ink' : 'bg-inset text-muted hover:text-cream')}>
+                Process as audiobook
+              </button>
+            </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-faint">Also translate to:</span>
               {LANGS.filter((l) => l.code !== lang).map((l) => (

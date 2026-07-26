@@ -198,13 +198,35 @@ async function fetchRange(url: string, start: number, end: number): Promise<Uint
   }
 }
 
-/** Parallel 4MB ranges assembled into 8MB R2 parts, up to ~20 concurrent range
- *  fetches, bounded memory (~80MB). Reports byte progress. */
-async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: number, contentType: string, onBytes?: (n: number) => void, partConc = 6): Promise<number> {
-  // PART=8MB, ~6 parts in flight: peak memory ~6*(part + concat scratch) stays
-  // comfortably under the Worker's 128MB even for large videos.
-  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024, PARTCONC = partConc;
-  const nParts = Math.ceil(total / PART);
+/** One ranged fetch per R2 part, streamed straight through. */
+async function fetchRangeStream(url: string, start: number, end: number): Promise<ReadableStream> {
+  let tries = 0;
+  for (;;) {
+    try {
+      const r = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+      if ((r.status !== 206 && r.status !== 200) || !r.body) throw new Error('range HTTP ' + r.status);
+      return r.body;
+    } catch (e) { if (++tries >= 5) throw e; await new Promise((res) => setTimeout(res, 250 * tries)); }
+  }
+}
+
+/**
+ * Parallel ranged download streamed straight into an R2 multipart upload.
+ *
+ * Two hard-won constants meet here. R2 requires every part but the last to be
+ * at least 5MiB, so parts are 8MB. googlevideo 403s oversized range requests on
+ * android_vr URLs — 4MB is the measured safe size, and the one request this
+ * code ever made at 8MB got "range HTTP 403" and knocked every download onto
+ * the Browser Rendering fallback. So each 8MB part is fed by two 4MB range
+ * fetches piped back-to-back through a FixedLengthStream into uploadPart:
+ * the request pattern googlevideo accepts, the part size R2 accepts, and no
+ * buffering in between. The old version buffered and concatenated the chunks
+ * instead, which peaked near the Worker's 128MB ceiling and OOMed the moment
+ * anything ran alongside it.
+ */
+async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: number, contentType: string, onBytes?: (n: number) => void, partConc = 12): Promise<number> {
+  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024;
+  const nParts = Math.max(1, Math.ceil(total / PART));
   const mpu = await bucket.createMultipartUpload(key, { httpMetadata: { contentType } });
   const uploaded: R2UploadedPart[] = new Array(nParts);
   let nextPart = 0, done = 0;
@@ -213,14 +235,21 @@ async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: n
       for (;;) {
         const p = nextPart++; if (p >= nParts) return;
         const pStart = p * PART, pEnd = Math.min(pStart + PART, total);
-        const subN = Math.ceil((pEnd - pStart) / CHUNK);
-        const subs = await Promise.all(Array.from({ length: subN }, (_, s) => fetchRange(url, pStart + s * CHUNK, Math.min(pStart + (s + 1) * CHUNK, pEnd) - 1)));
-        const partBytes = concat(subs);
-        uploaded[p] = await mpu.uploadPart(p + 1, partBytes);
-        done += partBytes.length; onBytes?.(done);
+        const { readable, writable } = new FixedLengthStream(pEnd - pStart);
+        const upload = mpu.uploadPart(p + 1, readable);
+        const pump = (async () => {
+          for (let s0 = pStart; s0 < pEnd; s0 += CHUNK) {
+            const e0 = Math.min(s0 + CHUNK, pEnd);
+            const body = await fetchRangeStream(url, s0, e0 - 1);
+            await body.pipeTo(writable, { preventClose: e0 < pEnd });
+          }
+        })().catch(async (err) => { try { await writable.abort(err); } catch {} throw err; });
+        const [part] = await Promise.all([upload, pump]);
+        uploaded[p] = part;
+        done += pEnd - pStart; onBytes?.(done);
       }
     }
-    await Promise.all(Array.from({ length: Math.min(PARTCONC, nParts) }, worker));
+    await Promise.all(Array.from({ length: Math.min(partConc, nParts) }, worker));
     await mpu.complete(uploaded);
     return total;
   } catch (e) { try { await mpu.abort(); } catch {} throw e; }
@@ -322,24 +351,18 @@ export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, u
   // Download video then audio (sequential keeps peak memory bounded to one
   // stream's part window); each is internally parallel across 4MB ranges.
   // Resume: if the streams are already in R2 (a mux retry), skip the re-download.
-  // Video and audio go at the SAME time. Running them one after the other paid
-  // every fixed cost twice — multipart setup, the first range's round trip — and
-  // on a short clip that overhead is most of the elapsed time, which is why a
-  // four-minute video took about as long as an hour-long one. Peak memory is
-  // held where it was by splitting the in-flight part budget between them rather
-  // than giving each the full six.
+  // Sequential, and it has to stay that way. Running the two streams together
+  // to save fixed overhead on short clips looked free — the in-flight part
+  // budget was split 4/2 so the same number of parts were live — but two
+  // concurrent multipart uploads carry their own buffers on top of that, and
+  // the download step started dying with "Worker exceeded memory limit" and
+  // retrying forever. The budget here was already sized to sit just under the
+  // 128MB ceiling; there is no headroom to share.
   const pct = throttledPct(env, jobId, vTotal + aTotal);
-  let vSeen = 0;
-  let aSeen = 0;
-  const [vHead, aHead] = await Promise.all([env.MEDIA_BUCKET.head(vKey), env.MEDIA_BUCKET.head(aKey)]);
-  const [vBytes, aBytes] = await Promise.all([
-    vHead && vHead.size > 10_000 ? Promise.resolve(vHead.size)
-      : downloadToR2(env.MEDIA_BUCKET, vKey, vfmt.url, vTotal, (vfmt.mimeType || 'video/mp4').split(';')[0],
-          (n) => { vSeen = n; pct(vSeen + aSeen); }, 4),
-    aHead && aHead.size > 5_000 ? Promise.resolve(aHead.size)
-      : downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4',
-          (n) => { aSeen = n; pct(vSeen + aSeen); }, 2),
-  ]);
+  const vHead = await env.MEDIA_BUCKET.head(vKey);
+  const vBytes = vHead && vHead.size > 10_000 ? vHead.size : await downloadToR2(env.MEDIA_BUCKET, vKey, vfmt.url, vTotal, (vfmt.mimeType || 'video/mp4').split(';')[0], (n) => pct(n));
+  const aHead = await env.MEDIA_BUCKET.head(aKey);
+  const aBytes = aHead && aHead.size > 5_000 ? aHead.size : await downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4', (n) => pct(vBytes + n));
   if (vBytes < 10_000 || aBytes < 5_000) throw new Error(`stream too small (v=${vBytes} a=${aBytes})`);
 
   // Do NOT mux here — the mux runs as a BACKGROUND workflow step (muxWorkerNative)

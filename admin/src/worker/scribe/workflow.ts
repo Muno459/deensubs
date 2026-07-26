@@ -263,12 +263,14 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // Audio-only jobs take the AUDIOBOOK pipeline (prose units for the
       // karaoke player, word spans kept, no display constraints); video jobs
       // take the proven subtitle pipeline, untouched.
-      // What the source IS, not what the job was queued as. A job created as a
-      // full video whose download only produced audio kept fullVideo set and ran
-      // the video path, so no karaoke transcript was ever built — and then
-      // publishing it as the audiobook it plainly is failed on the missing
-      // transcript.json.
-      const isAudiobook = !fullVideo || /\.(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(dl.key || '');
+      // The queued intent decides here, NOT the file. Deciding by extension
+      // looked right and was wrong: the audio-first video flow downloads audio
+      // FIRST, so mid-run the source is source.m4a while the video is still on
+      // its way — and a real lecture got reclassified as an audiobook. The
+      // upload path already sets full_video from the file, and the video
+      // fallback above clears it when no video can be fetched, so by this point
+      // the flag is the truth.
+      const isAudiobook = !fullVideo;
       let primaryCueCount = 0;
       let anyFresh = false;
       for (const lang of langs) {
