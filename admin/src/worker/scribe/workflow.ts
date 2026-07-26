@@ -4,7 +4,7 @@
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
 import { download, needsBrowser } from './download';
 import { runAsr, loadAsr } from './asr';
-import { translateWords, qaPass, takeUsage, takeCost } from './translate';
+import { translateWords, qaPass, takeUsage, takeCost, cleanWords } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
 import { generateChapters, generateMetaAndChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
@@ -334,14 +334,21 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
                   .then(async (m) => ({ ...m, ...(await import('./polish')) }));
                 // Polish cuts oversize cues, and a cut needs a real word start
                 // or the line stops matching the speaker's mouth, so the word
-                // list is reloaded here rather than letting it guess.
-                const asrWords = (await loadAsr(env, asr.asrKey)).words;
+                // list is reloaded here rather than letting it guess. It has to
+                // be the CLEANED list: cue.w indexes that, while the raw ASR
+                // interleaves spacing tokens whose start is the previous word's
+                // end — feeding the raw one in put 12 cues on a word ending
+                // instead of a word beginning.
+                const asrWords = cleanWords((await loadAsr(env, asr.asrKey)).words);
                 // Shortening a cue changes what fits and how long its neighbours
                 // need, so polish has to run again — which can push a different
-                // cue back over the limit. Two rounds converges, and the second
-                // only looks at whatever is still too dense, so nothing is
-                // shortened further than it has to be.
-                for (let pass = 0; pass < 2; pass++) {
+                // cue back over the limit. Each pass only looks at whatever is
+                // still too dense, so nothing is shortened further than it has
+                // to be, and the loop stops as soon as a pass changes nothing.
+                // Two passes left 48 cues over the reading-speed target on the
+                // reference lecture; since timing may no longer be stretched to
+                // cover for dense wording, this is the only lever there is.
+                for (let pass = 0; pass < 4; pass++) {
                   const c = await condenseDense(env, final, lang);
                   if (!c.fixed) break;
                   tightened += c.fixed;

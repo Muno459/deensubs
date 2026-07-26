@@ -201,18 +201,51 @@ function partOf(text: string, canonical: string): boolean {
  *  The canonical English does not map word-for-word onto the Arabic being
  *  recited, so the guarantee for a verse is that it is on screen while it is
  *  recited. Its internal cuts still land on word starts like everything else. */
+/** The full wording a run of verse cues carries between them.
+ *
+ *  Two things land in the same run and they need opposite treatment. Fuzzy
+ *  matching emits the SAME verse two or three times, each carrying the whole
+ *  canonical translation, and those must collapse to one. But translate.ts also
+ *  splits a long verse into halves, and those are complementary: "And remember
+ *  Him, as He has guided you, for indeed," followed by "you were before that
+ *  among those astray." Taking the longest text (which is what this did) kept
+ *  the second and deleted the first, truncating scripture and leaving the words
+ *  of the discarded half with nothing on screen.
+ *
+ *  So a cue joins the assembled text unless it is already represented in it. */
+function assembleVerse(run: PCue[]): string {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const parts: string[] = [];
+  for (const c of run) {
+    const n = norm(c.text);
+    if (!n) continue;
+    const at = parts.findIndex((p) => {
+      const q = norm(p);
+      return q.includes(n) || n.includes(q);
+    });
+    if (at >= 0) { if (c.text.length > parts[at].length) parts[at] = c.text; }
+    else parts.push(c.text);
+  }
+  return parts.join(' ').trim();
+}
+
 function rebuildVerses(cues: PCue[], words?: Word[]): PCue[] {
   const groups = new Map<string, PCue[]>();
   for (const c of cues) if (c.q) (groups.get(c.q) ?? groups.set(c.q, []).get(c.q)!).push(c);
 
   const blocks: PCue[] = [];
+  // The whole recitation window and everything it says, kept before the block is
+  // cut into displayable pieces. A duplicate has to be judged against the entire
+  // verse: tested against the pieces instead, a restatement of the opening words
+  // matches the piece it does not sit inside and misses the one it does.
+  const windows: { start: number; end: number; text: string }[] = [];
   for (const [q, items] of groups) {
     items.sort((a, b) => a.start - b.start);
     let run: PCue[] = [items[0]];
     const flush = () => {
       const start = Math.min(...run.map((c) => c.start));
       const end = Math.max(...run.map((c) => speechEnd(c)));
-      const full = run.reduce((a, b) => (b.text.length > a.text.length ? b : a)).text;
+      const full = assembleVerse(run);
       const cite = run.map((c) => c.text).join(' ').match(/\(Quran [^)]+\)/);
       const text = cite && !full.includes(cite[0]) ? `${full} ${cite[0]}` : full;
       const spans = run.map((c) => c.w).filter(Boolean) as [number, number][];
@@ -220,6 +253,7 @@ function rebuildVerses(cues: PCue[], words?: Word[]): PCue[] {
         ? [Math.min(...spans.map((s) => s[0])), Math.max(...spans.map((s) => s[1]))] as [number, number]
         : undefined;
       const block: PCue = { ...run[0], start, end, text, q, s0: start, e0: end, w };
+      windows.push({ start, end, text });
       blocks.push(...respan(block, toFitting(text), words));
     };
     for (const c of items.slice(1)) {
@@ -227,7 +261,7 @@ function rebuildVerses(cues: PCue[], words?: Word[]): PCue[] {
       // swallows whatever the speaker said between two recitations of the same
       // verse, which both loses that speech and squeezes its neighbours.
       const gap = c.start - run[run.length - 1].end;
-      const canon = run.reduce((a, b) => (b.text.length > a.text.length ? b : a)).text;
+      const canon = assembleVerse(run);
       const between = cues.filter((x) => !x.q
         && x.start >= run[run.length - 1].end - 0.01 && x.end <= c.start + 0.01);
       const allVerse = between.every((x) => partOf(x.text, canon));
@@ -244,8 +278,13 @@ function rebuildVerses(cues: PCue[], words?: Word[]): PCue[] {
   // A free cue inside a verse window is only the verse mis-attributed to the
   // free-text translator when it actually says the verse. Real speech that
   // happens to fall in the window is kept.
-  const kept = cues.filter((c) => !c.q && !blocks.some((b) =>
-    b.start - 0.01 <= c.start && c.end <= b.end + 0.01 && partOf(c.text, b.text)));
+  //
+  // Only the START has to fall inside the block. Requiring the whole cue to be
+  // contained let a duplicate through whenever it ran a moment past the end of
+  // the recitation: it then began on the very word the verse begins on, and two
+  // cues cannot share a start, so one of them collapsed to a 1ms flash.
+  const kept = cues.filter((c) => !c.q && !windows.some((b) =>
+    b.start - 0.01 <= c.start && c.start < b.end - 0.01 && partOf(c.text, b.text)));
   return [...kept, ...blocks].sort((a, b) => a.start - b.start);
 }
 
@@ -350,6 +389,32 @@ function assignTiming(cues: PCue[]): void {
   }
 }
 
+/** Two cues cannot begin on the same word, and starts are not ours to move, so
+ *  one of them has no time to occupy. Rather than let it render as a flash, its
+ *  words are handed to the cue that can actually be read — or dropped when it is
+ *  only the model's own restatement of the verse it collided with. */
+function absorbUnshowable(cues: PCue[]): PCue[] {
+  const out: PCue[] = [];
+  for (let i = 0; i < cues.length; i++) {
+    const c = cues[i];
+    const n = cues[i + 1];
+    const collides = !!n && !c.q && dur(c) < 0.2 && n.start - c.start < 0.05;
+    if (collides && n!.q) {
+      if (partOf(c.text, n!.text)) continue; // duplicate of the verse
+    } else if (collides) {
+      n!.text = `${c.text} ${n!.text}`.trim();
+      n!.s0 = c.s0 ?? c.start;
+      n!.start = n!.s0;
+      n!.e0 = Math.max(speechEnd(c), speechEnd(n!));
+      n!.source = `${c.source || ''} ${n!.source || ''}`.trim();
+      if (c.w && n!.w) n!.w = [c.w[0], n!.w[1]];
+      continue;
+    }
+    out.push(c);
+  }
+  return out;
+}
+
 /** Reading speed is characters over seconds, so joining a dense cue to a sparse
  *  neighbour averages the two. The join keeps the first cue's start and the
  *  second's speech end, so it costs no sync. */
@@ -396,6 +461,8 @@ export function polishCues(input: Cue[], words?: Word[]): Cue[] {
     dedupBoundaries(cues);
     moveDangling(cues);
     cues = mergeForDensity(cues);
+    assignTiming(cues);
+    cues = absorbUnshowable(cues);
     assignTiming(cues);
   }
   return cues.filter((c) => c.end > c.start && c.text.trim())
