@@ -559,7 +559,13 @@ export async function translateWords(
     // Gating that on 12 seconds left eleven canonical cues over the character
     // limit: the recitation was quick, the official translation was not.
     if (dur <= 12 && cue.text.length <= MAX_CUE_CHARS) return [cue];
-    if (dur < MIN_PIECE_SEC * 2) return [cue]; // no time to divide
+    // A whole ayah recited quickly is long text over a short span — 1:7 came out
+    // at 136 characters in 2.89s. Two cues of 68 read; one of 136 does not fit
+    // the screen at all, so the comfortable minimum gives way when the text will
+    // otherwise overflow. Below 1.2s there is no room for two cues either way.
+    const mustFit = cue.text.length > MAX_CUE_CHARS;
+    if (!mustFit && dur < MIN_PIECE_SEC * 2) return [cue];
+    if (dur < 1.2) return [cue]; // no time to divide at all
     const text = cue.text;
     const marks = [...text.matchAll(/[.!?؟…,;:—]\s+/g)].map((m) => m.index! + m[0].length);
     // Canonical wording is continuous and cannot be reworded, so when it offers
