@@ -555,20 +555,45 @@ export async function translateWords(
   // split at the proportional source-word boundary
   const splitLocked = (cue: WCue): WCue[] => {
     const dur = cue.end - cue.start;
-    if ((dur <= 12 && cue.text.length <= MAX_CUE_CHARS) || cue.w[1] - cue.w[0] < 2) return [cue];
+    // A verse is cut whenever it will not fit on screen, whatever its duration.
+    // Gating that on 12 seconds left eleven canonical cues over the character
+    // limit: the recitation was quick, the official translation was not.
+    if (dur <= 12 && cue.text.length <= MAX_CUE_CHARS) return [cue];
     if (dur < MIN_PIECE_SEC * 2) return [cue]; // no time to divide
     const text = cue.text;
     const marks = [...text.matchAll(/[.!?؟…,;:—]\s+/g)].map((m) => m.index! + m[0].length);
-    if (!marks.length) return [cue];
-    const mid = text.length / 2;
-    const splitAt = marks.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p));
-    if (splitAt < 10 || text.length - splitAt < 10) return [cue];
+    // Canonical wording is continuous and cannot be reworded, so when it offers
+    // no punctuation near the middle it is still better carried over two cues
+    // than spilling off the screen. This fallback is for scripture only; the
+    // model's own sentences are never cut here.
+    const usable = marks.filter((m) => m >= 10 && text.length - m >= 10);
+    let splitAt: number;
+    if (usable.length) {
+      const mid = text.length / 2;
+      splitAt = usable.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p));
+    } else {
+      const sp = [...text.matchAll(/\s+/g)].map((m) => m.index! + m[0].length)
+        .filter((m) => m >= 10 && text.length - m >= 10);
+      if (!sp.length) return [cue];
+      const mid = text.length / 2;
+      splitAt = sp.reduce((p, c) => (Math.abs(c - mid) < Math.abs(p - mid) ? c : p));
+    }
     const share = splitAt / text.length;
-    const wSplit = Math.max(cue.w[0] + 1, Math.min(cue.w[1], cue.w[0] + Math.round((cue.w[1] - cue.w[0]) * share)));
     const srcWords = cue.source.split(' ');
     const sSplit = Math.max(1, Math.min(srcWords.length - 1, Math.round(srcWords.length * share)));
-    const a: WCue = { ...cue, end: words[wSplit - 1].end, w: [cue.w[0], wSplit - 1], text: text.slice(0, splitAt).trim(), source: srcWords.slice(0, sSplit).join(' ') };
-    const b: WCue = { ...cue, start: words[wSplit].start, w: [wSplit, cue.w[1]], text: text.slice(splitAt).trim(), source: srcWords.slice(sSplit).join(' ') };
+    let a: WCue;
+    let b: WCue;
+    if (cue.w[1] > cue.w[0]) {
+      const wSplit = Math.max(cue.w[0] + 1, Math.min(cue.w[1], cue.w[0] + Math.round((cue.w[1] - cue.w[0]) * share)));
+      a = { ...cue, end: words[wSplit - 1].end, w: [cue.w[0], wSplit - 1], text: text.slice(0, splitAt).trim(), source: srcWords.slice(0, sSplit).join(' ') };
+      b = { ...cue, start: words[wSplit].start, w: [wSplit, cue.w[1]], text: text.slice(splitAt).trim(), source: srcWords.slice(sSplit).join(' ') };
+    } else {
+      // One word of recitation carrying a long ayah: there is no second word to
+      // cut on, so the span itself is divided by character share.
+      const at = cue.start + dur * share;
+      a = { ...cue, end: at, text: text.slice(0, splitAt).trim(), source: srcWords.slice(0, sSplit).join(' ') };
+      b = { ...cue, start: at, text: text.slice(splitAt).trim(), source: srcWords.slice(sSplit).join(' ') };
+    }
     return [...splitLocked(a), ...splitLocked(b)];
   };
   // Only canonical verses are cut here. Their text is inserted by us, the model
@@ -607,11 +632,21 @@ export async function translateWords(
       cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + grab));
     }
   }
-  // Nothing rewrites the cues after this point. Every cut above landed on a real
-  // word boundary, so the timing is the speech's own; the wording and the
-  // segmentation are the model's, and stay the model's. A deterministic pass
-  // that "tidied" them here is what desynced 44% of cues and deleted half of a
-  // verse — display quality is a prompt problem, and it is solved in the prompt.
+  // Nothing here rewrites a cue. The only display limit a prompt cannot carry on
+  // its own is the character count, because the model cannot count characters —
+  // so the cues that came back too long are measured here and handed BACK to the
+  // model to re-cut, which answers in word indices and keeps the timing the
+  // audio's. Two rounds: re-cutting can leave a piece still over, and the second
+  // round only looks at what is still over.
+  for (let round = 0; round < 2; round++) {
+    const r = await refitCues(env, cues, words, targetLang);
+    cues = r.cues as WCue[];
+    if (!r.fixed) break;
+  }
+  cues.sort((a, b) => a.start - b.start);
+  for (let i = 0; i < cues.length - 1; i++) {
+    if (cues[i].end > cues[i + 1].start) cues[i].end = cues[i + 1].start;
+  }
   return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);
 }
 
@@ -628,6 +663,108 @@ export async function translateWords(
  * either, only said in fewer words, and a rewrite is rejected unless it is
  * genuinely shorter.
  */
+/**
+ * Re-cut the cues the model made too big, by asking the model to re-cut them.
+ *
+ * This is the one display limit a prompt cannot carry on its own: a language
+ * model cannot count characters, and measured on a full lecture 12% of its cues
+ * came back over 84 characters however plainly the limit was stated. The answer
+ * is not to chop them here — cutting text at a comma is exactly what produced
+ * "and a sun in broad daylight." — but to divide the labour. Code counts, and
+ * hands back the number. The model re-cuts, and because it answers in WORD
+ * INDICES the pieces are timed by the audio exactly as the original was; nothing
+ * interpolates a timestamp.
+ *
+ * A reply is only accepted when its pieces tile the original word range exactly:
+ * same first word, same last word, contiguous, in order. Anything else is
+ * dropped and the cue is left as it was, because a cue that is too long is a
+ * lesser fault than one that has lost its place in the audio.
+ */
+export async function refitCues<T extends Cue & { w: [number, number] }>(
+  env: ScribeEnv,
+  cues: T[],
+  words: CleanWord[],
+  targetLang: string
+): Promise<{ cues: T[]; fixed: number }> {
+  const twoLines = (t: string) => t.split('\n').length <= 2 && t.split('\n').every((l) => l.length <= 42);
+  const tooBig = (c: T) => !c.q && c.w[1] > c.w[0]
+    && (c.text.length > MAX_CUE_CHARS || !twoLines(c.text)
+        || c.text.length / Math.max(0.3, c.end - c.start) > TARGET_CPS + 4);
+  const todo = cues.map((c, i) => ({ i, c })).filter(({ c }) => tooBig(c));
+  if (!todo.length) return { cues, fixed: 0 };
+
+  const out = [...cues];
+  const replaced = new Map<number, T[]>();
+  const BATCH = 8;
+  for (let k = 0; k < todo.length; k += BATCH) {
+    const batch = todo.slice(k, k + BATCH);
+    const body = batch.map(({ i, c }) => {
+      const ws = words.slice(c.w[0], c.w[1] + 1)
+        .map((w) => `${w.i}\t${w.start.toFixed(2)}-${w.end.toFixed(2)}\t${w.text}`).join('\n');
+      const secs = (c.end - c.start).toFixed(1);
+      return `### ${i}\nCurrent line (${c.text.replace(/\n/g, ' ').length} characters, needs to be at most ${MAX_CUE_CHARS}, over ${secs}s):\n${c.text.replace(/\n/g, ' ')}\nWords ${c.w[0]}-${c.w[1]}:\n${ws}`;
+    }).join('\n\n');
+    try {
+      const raw = await llmChat(env, [
+        { role: 'system', content: `You re-cut subtitle cues for an Islamic lecture that came out too long to display. Target language: ${targetLang}.
+
+For each block, split the given word range into two or more cues so that every cue fits on screen. Answer with ONE JSON object per line:
+{"id": <the ### number>, "cues": [{"w":[FIRST,LAST],"t":"line one\\nline two"}, ...]}
+
+HARD REQUIREMENTS — a reply that breaks any of these is discarded:
+- The pieces must cover the given word range EXACTLY: the first piece starts at the range's first index, the last piece ends at its last index, and each piece begins on the index right after the previous one ends. No gaps, no overlaps, no reordering.
+- Every piece: at most 84 characters, at most 2 lines of 42. Put the line break in as \\n.
+- Every piece must read as a sentence on its own. Never leave one opening with a comma or a lowercase continuation of the piece before it. Rewrite the wording so each stands up — that is the point of the exercise, not merely getting under the limit.
+- Keep all the meaning of the original line. Keep honorifics (Allah ﷻ, the Prophet ﷺ, RA/AS/RH) and transliterations (fiqh, Sharia, Tawhid).
+- Aim for at most 17 characters per second of each piece's own duration, which you can read off the word timings.
+No commentary, no code fences, JSONL only.` },
+        { role: 'user', content: body },
+      ], 8000, STRONG_MODEL);
+      for (const line of raw.split('\n')) {
+        const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
+        if (!t.startsWith('{')) continue;
+        let f: any;
+        try { f = JSON.parse(t); } catch { continue; }
+        const src = out[f.id] as T | undefined;
+        if (!src || !Array.isArray(f.cues) || f.cues.length < 2) continue;
+        const parts = f.cues.filter((p: any) => Array.isArray(p.w) && typeof p.t === 'string' && p.t.trim());
+        if (parts.length < 2) continue;
+        // The reply is only usable if it tiles the original range exactly.
+        let ok = parts[0].w[0] === src.w[0] && parts[parts.length - 1].w[1] === src.w[1];
+        for (let n = 0; ok && n < parts.length; n++) {
+          const [a, b] = parts[n].w;
+          if (!(Number.isInteger(a) && Number.isInteger(b) && b >= a)) ok = false;
+          else if (n > 0 && a !== parts[n - 1].w[1] + 1) ok = false;
+        }
+        if (!ok) continue;
+        const built = parts.map((p: any) => {
+          const first = words[p.w[0]];
+          const last = words[p.w[1]];
+          return {
+            ...src,
+            start: first.start,
+            end: Math.max(last.end, first.start + 0.6),
+            text: p.t.trim(),
+            source: words.slice(p.w[0], p.w[1] + 1).map((w) => w.text).join(' '),
+            w: [p.w[0], p.w[1]] as [number, number],
+          } as T;
+        });
+        replaced.set(f.id, built);
+      }
+    } catch (err) {
+      console.log('refit batch failed (non-fatal):', (err as any)?.message);
+    }
+  }
+  if (!replaced.size) return { cues, fixed: 0 };
+  const result: T[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const r = replaced.get(i);
+    if (r) result.push(...r);
+    else result.push(out[i]);
+  }
+  return { cues: result, fixed: replaced.size };
+}
+
 export async function condenseDense(env: ScribeEnv, cues: Cue[], targetLang: string): Promise<{ cues: Cue[]; fixed: number }> {
   const OVER = 20; // leaves headroom under the 21 CPS target
   const out = [...cues];
