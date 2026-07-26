@@ -94,8 +94,12 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       let audioFirstDur = 0;
       if (fullVideo && needsBrowser(url)) {
         try {
+          // 3 minutes, not 15: a healthy extraction finishes in well under 30s
+          // now that every proxied request carries its own 15s deadline, and
+          // the audio itself moves in seconds. The old 15-minute ceiling meant
+          // one silent proxy hang looked like a frozen job for a quarter hour.
           const aud = await step.do('download-audio',
-            { retries: { limit: 3, delay: '20 seconds' }, timeout: '15 minutes' }, async () => {
+            { retries: { limit: 3, delay: '20 seconds' }, timeout: '3 minutes' }, async () => {
             const { downloadAudioOnly } = await import('./download');
             return await downloadAudioOnly(env, jobId, url);
           });

@@ -206,6 +206,7 @@ export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: stri
   const { id } = (await start.json()) as { id: string };
 
   let info: any = null;
+  let lastBeat = 0;
   for (let i = 0; i < 1200; i++) {
     // Ask first, wait second, and wait less at the start. The old loop slept a
     // flat 1.5s before its first question, so a short clip that finished in two
@@ -214,6 +215,20 @@ export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: stri
     const st = await call(`/jobs/${id}`).catch(() => null);
     if (!st || !st.ok) continue;
     info = await st.json();
+    // The container can download for minutes with nothing reaching the
+    // dashboard, which reads as a frozen job. Every ~15s: one log line with the
+    // container's own state, and a download_pct nudge so "running" visibly
+    // moves — the real figure when the container reports one, a bounded creep
+    // when it does not.
+    if (Date.now() - lastBeat > 15_000) {
+      lastBeat = Date.now();
+      console.log(`container dl ${jobId}: ${JSON.stringify(info).slice(0, 200)}`);
+      const pct = Number((info as any).progress ?? (info as any).pct ?? NaN);
+      const sql = Number.isFinite(pct)
+        ? env.DB.prepare('UPDATE scribe_jobs SET download_pct = ? WHERE id = ?').bind(Math.max(1, Math.min(99, Math.round(pct))), jobId)
+        : env.DB.prepare('UPDATE scribe_jobs SET download_pct = MIN(95, COALESCE(download_pct, 0) + 5) WHERE id = ?').bind(jobId);
+      await sql.run().catch(() => {});
+    }
     if (info.status === 'done') break;
     if (info.status === 'error') throw new Error('ytdlp failed: ' + (info.error || 'unknown'));
   }
@@ -344,7 +359,22 @@ export async function download(env: ScribeEnv, jobId: string, url: string, fullV
     // uses the container only to REMUX (stream-copy, no re-encode). Fallbacks:
     // container download, then Browser Rendering.
     if (videoIdOf(url)) {
-      // 1. proxy extraction + Worker download (fast path)
+      // FULL VIDEOS go to the container first. The Worker-native video path
+      // spent tonight dying with "Worker exceeded memory limit" in three
+      // different configurations — multi-GB streams through a 128MB isolate is
+      // a knife fight with the ceiling even when it works. The container has
+      // 4GB, downloads at ~290MB/s from its own datacenter IP, muxes in place,
+      // and its instances are pooled warm now. AUDIO jobs stay Worker-native:
+      // small files, proven path, no container dependency.
+      if (fullVideo) {
+        try {
+          console.log(`download ${jobId}: full video -> container path first`);
+          return await ytdlpViaContainer(env, jobId, url, true);
+        } catch (e: any) {
+          console.log('container yt-dlp failed, trying Worker-native: ' + (e?.message || e));
+        }
+      }
+      // proxy extraction + Worker download (primary for audio, fallback for video)
       try {
         const ytdl = await import('./ytdl');
         return fullVideo

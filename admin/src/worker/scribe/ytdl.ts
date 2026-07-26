@@ -88,13 +88,23 @@ function parseHttp(raw: Uint8Array): RawResp {
   const bodyBytes = chunked ? dechunk(raw.slice(sep + 4)) : raw.slice(sep + 4);
   return { status, headers, setCookies, bodyBytes };
 }
-async function proxyHttps(proxyUrl: string, method: string, urlStr: string, extraHeaders: Record<string, string>, body?: string): Promise<HttpResp> {
+async function proxyHttps(proxyUrl: string, method: string, urlStr: string, extraHeaders: Record<string, string>, body?: string, timeoutMs = 15_000): Promise<HttpResp> {
   const proxy = parseProxy(proxyUrl);
   const u = new URL(urlStr);
   const socket = connect({ hostname: proxy.host, port: proxy.port }, { secureTransport: 'off', allowHalfOpen: false });
-  await socket.opened;
-  const reader = socket.readable.getReader(); const writer = socket.writable.getWriter();
-  try {
+  // A hard deadline over the whole exchange. The proxy rotates residential
+  // exits, and a dead one hangs silently mid-read — with no timeout here, one
+  // bad rotation blocked the download step until the WORKFLOW's own timeout
+  // (fifteen minutes) fired, which read as "stuck" in the dashboard. Measured
+  // through this proxy, a healthy watch-page GET worst-cases at ~6.2s and the
+  // /player POST at ~2.8s, so 15s is two and a half times the slowest healthy
+  // request. Closing the socket in finally is what actually unblocks the
+  // dangling read.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error(`proxy request timed out after ${timeoutMs}ms: ${u.hostname}${u.pathname}`)), timeoutMs); });
+  const work = (async () => {
+    await socket.opened;
+    const reader = socket.readable.getReader(); const writer = socket.writable.getWriter();
     const leftover = await socks5Connect(reader, writer, proxy, u.hostname, 443);
     const tls = new Tls13(reader, writer, u.hostname, leftover);
     await tls.handshake();
@@ -111,7 +121,11 @@ async function proxyHttps(proxyUrl: string, method: string, urlStr: string, extr
     const r = parseHttp(concat(chunks));
     const inflated = await inflate(r.bodyBytes, r.headers['content-encoding']);
     return { status: r.status, headers: r.headers, setCookies: r.setCookies, body: new TextDecoder().decode(inflated) };
-  } finally { try { await socket.close(); } catch {} }
+  })();
+  work.catch(() => {}); // settled-after-timeout must not surface as unhandled
+  try {
+    return await Promise.race([work, deadline]);
+  } finally { clearTimeout(timer); try { await socket.close(); } catch {} }
 }
 
 // ---- extraction (through the proxy) ---------------------------------------
@@ -198,35 +212,13 @@ async function fetchRange(url: string, start: number, end: number): Promise<Uint
   }
 }
 
-/** One ranged fetch per R2 part, streamed straight through. */
-async function fetchRangeStream(url: string, start: number, end: number): Promise<ReadableStream> {
-  let tries = 0;
-  for (;;) {
-    try {
-      const r = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
-      if ((r.status !== 206 && r.status !== 200) || !r.body) throw new Error('range HTTP ' + r.status);
-      return r.body;
-    } catch (e) { if (++tries >= 5) throw e; await new Promise((res) => setTimeout(res, 250 * tries)); }
-  }
-}
-
-/**
- * Parallel ranged download streamed straight into an R2 multipart upload.
- *
- * Two hard-won constants meet here. R2 requires every part but the last to be
- * at least 5MiB, so parts are 8MB. googlevideo 403s oversized range requests on
- * android_vr URLs — 4MB is the measured safe size, and the one request this
- * code ever made at 8MB got "range HTTP 403" and knocked every download onto
- * the Browser Rendering fallback. So each 8MB part is fed by two 4MB range
- * fetches piped back-to-back through a FixedLengthStream into uploadPart:
- * the request pattern googlevideo accepts, the part size R2 accepts, and no
- * buffering in between. The old version buffered and concatenated the chunks
- * instead, which peaked near the Worker's 128MB ceiling and OOMed the moment
- * anything ran alongside it.
- */
-async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: number, contentType: string, onBytes?: (n: number) => void, partConc = 12): Promise<number> {
-  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024;
-  const nParts = Math.max(1, Math.ceil(total / PART));
+/** Parallel 4MB ranges assembled into 8MB R2 parts, up to ~20 concurrent range
+ *  fetches, bounded memory (~80MB). Reports byte progress. */
+async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: number, contentType: string, onBytes?: (n: number) => void): Promise<number> {
+  // PART=8MB, ~6 parts in flight: peak memory ~6*(part + concat scratch) stays
+  // comfortably under the Worker's 128MB even for large videos.
+  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024, PARTCONC = 6;
+  const nParts = Math.ceil(total / PART);
   const mpu = await bucket.createMultipartUpload(key, { httpMetadata: { contentType } });
   const uploaded: R2UploadedPart[] = new Array(nParts);
   let nextPart = 0, done = 0;
@@ -235,21 +227,15 @@ async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: n
       for (;;) {
         const p = nextPart++; if (p >= nParts) return;
         const pStart = p * PART, pEnd = Math.min(pStart + PART, total);
-        const { readable, writable } = new FixedLengthStream(pEnd - pStart);
-        const upload = mpu.uploadPart(p + 1, readable);
-        const pump = (async () => {
-          for (let s0 = pStart; s0 < pEnd; s0 += CHUNK) {
-            const e0 = Math.min(s0 + CHUNK, pEnd);
-            const body = await fetchRangeStream(url, s0, e0 - 1);
-            await body.pipeTo(writable, { preventClose: e0 < pEnd });
-          }
-        })().catch(async (err) => { try { await writable.abort(err); } catch {} throw err; });
-        const [part] = await Promise.all([upload, pump]);
-        uploaded[p] = part;
-        done += pEnd - pStart; onBytes?.(done);
+        const subN = Math.ceil((pEnd - pStart) / CHUNK);
+        const subs = await Promise.all(Array.from({ length: subN }, (_, s) => fetchRange(url, pStart + s * CHUNK, Math.min(pStart + (s + 1) * CHUNK, pEnd) - 1)));
+        const partBytes = concat(subs);
+        uploaded[p] = await mpu.uploadPart(p + 1, partBytes);
+        done += partBytes.length; onBytes?.(done);
+        if (p % 16 === 0 || p === nParts - 1) console.log(`dl ${key.split('/').pop()}: part ${p + 1}/${nParts}, ${(done / 1048576).toFixed(0)}MB`);
       }
     }
-    await Promise.all(Array.from({ length: Math.min(partConc, nParts) }, worker));
+    await Promise.all(Array.from({ length: Math.min(PARTCONC, nParts) }, worker));
     await mpu.complete(uploaded);
     return total;
   } catch (e) { try { await mpu.abort(); } catch {} throw e; }
@@ -259,26 +245,66 @@ type AudioCore = { key: string; bytes: number; durationSec: number; title?: stri
 
 /** Extract the android_vr player response via the proxy (cached session,
  *  one refresh retry on a non-OK status). */
-async function extractPlayer(env: ScribeEnv, url: string): Promise<any> {
+async function extractPlayer(env: ScribeEnv, url: string, jobId?: string): Promise<any> {
   const videoId = videoIdOf(url);
   if (!videoId) throw new Error('not a YouTube video url');
+
+  // One extraction per JOB, not per step. A full-video job runs this twice —
+  // once for the audio-first download, once for the video — and each pass costs
+  // several proxied round trips at 2-6s apiece. The player response is cached
+  // beside the job's other tmp artifacts and reused while its stream URLs still
+  // have at least ten minutes of validity (they carry their own expiry).
+  const cacheKey = jobId ? `scribe/${jobId}/tmp/player.json` : null;
+  if (cacheKey) {
+    try {
+      const hit = await env.MEDIA_BUCKET.get(cacheKey);
+      if (hit) {
+        const cached: any = await hit.json();
+        const anyUrl = (cached?.streamingData?.adaptiveFormats || [])[0]?.url;
+        const exp = Number(new URL(anyUrl || 'http://x/').searchParams.get('expire') || 0);
+        if (exp * 1000 > Date.now() + 600_000) return cached;
+      }
+    } catch {}
+  }
+
   const cfg = await getAsrConfig(env);
   // Rotating residential proxy for /player extraction only — the byte download
   // stays Worker-native. Falls back to the ASR proxy list if ytProxy is unset.
   const proxyUrl = cfg.ytProxy || cfg.proxies?.[0];
   if (!proxyUrl) throw new Error('no proxy configured for extraction');
-  let player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId));
-  if (player?.playabilityStatus?.status !== 'OK') {
-    player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId, true));
+
+  // Transport failures retry on a fresh rotation — each connection through the
+  // rotating proxy is a different exit, so trying again IS the fix. Playability
+  // refusals are the video's own state and retrying cannot change them.
+  let lastErr: any;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      let player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId));
+      if (player?.playabilityStatus?.status !== 'OK') {
+        player = await ytPlayer(proxyUrl, videoId, await getSession(env, proxyUrl, videoId, true));
+      }
+      const status = player?.playabilityStatus?.status;
+      if (status !== 'OK') {
+        const err: any = new Error(`playability ${status}: ${player?.playabilityStatus?.reason || ''}`);
+        err.permanent = true;
+        throw err;
+      }
+      if (cacheKey) {
+        await env.MEDIA_BUCKET.put(cacheKey, JSON.stringify(player), { httpMetadata: { contentType: 'application/json' } }).catch(() => {});
+      }
+      return player;
+    } catch (e: any) {
+      if (e?.permanent) throw e;
+      lastErr = e;
+      console.log(`extraction attempt ${attempt + 1} failed (${e?.message}); retrying on a fresh rotation`);
+    }
   }
-  const status = player?.playabilityStatus?.status;
-  if (status !== 'OK') throw new Error(`playability ${status}: ${player?.playabilityStatus?.reason || ''}`);
-  return player;
+  throw lastErr;
 }
 
 /** Extract (via proxy) + range-download the best audio to `key` in R2. */
 async function ytdlAudioCore(env: ScribeEnv, jobId: string, url: string, key: string, writePct: boolean): Promise<AudioCore> {
-  const player = await extractPlayer(env, url);
+  const player = await extractPlayer(env, url, jobId);
   const a = pickAudio(player);
   const total = parseInt(a.contentLength || '0', 10);
   if (!total) throw new Error('audio format has no contentLength');
@@ -337,9 +363,11 @@ async function containerMux(env: ScribeEnv, jobId: string, videoUrl: string, aud
  *  video+audio streams DIRECT from the Worker, then container-mux into source.mp4.
  *  The container only muxes (no download). Throws → caller falls back. */
 export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, url: string): Promise<DownloadResult> {
-  const player = await extractPlayer(env, url);
+  const t0 = Date.now();
+  const player = await extractPlayer(env, url, jobId);
   const vfmt = pickVideo(player, (await getAsrConfig(env)).preserveHdr);
   const afmt = pickAudio(player);
+  console.log(`ytdl ${jobId}: extracted in ${((Date.now() - t0) / 1000).toFixed(1)}s; video itag ${vfmt.itag} ${vfmt.qualityLabel || ''} ${(parseInt(vfmt.contentLength || '0') / 1048576).toFixed(0)}MB, audio itag ${afmt.itag} ${(parseInt(afmt.contentLength || '0') / 1048576).toFixed(0)}MB`);
   const vTotal = parseInt(vfmt.contentLength || '0', 10);
   const aTotal = parseInt(afmt.contentLength || '0', 10);
   if (!vTotal || !aTotal) throw new Error('video/audio format missing contentLength');
@@ -364,6 +392,7 @@ export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, u
   const aHead = await env.MEDIA_BUCKET.head(aKey);
   const aBytes = aHead && aHead.size > 5_000 ? aHead.size : await downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4', (n) => pct(vBytes + n));
   if (vBytes < 10_000 || aBytes < 5_000) throw new Error(`stream too small (v=${vBytes} a=${aBytes})`);
+  console.log(`ytdl ${jobId}: streams done in ${((Date.now() - t0) / 1000).toFixed(1)}s (${(((vBytes + aBytes) / 1048576) / Math.max(0.1, (Date.now() - t0) / 1000)).toFixed(0)}MB/s incl. extraction)`);
 
   // Do NOT mux here — the mux runs as a BACKGROUND workflow step (muxWorkerNative)
   // in parallel with transcription, so subtitles never wait on it. The video-only
