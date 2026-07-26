@@ -200,10 +200,10 @@ async function fetchRange(url: string, start: number, end: number): Promise<Uint
 
 /** Parallel 4MB ranges assembled into 8MB R2 parts, up to ~20 concurrent range
  *  fetches, bounded memory (~80MB). Reports byte progress. */
-async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: number, contentType: string, onBytes?: (n: number) => void): Promise<number> {
+async function downloadToR2(bucket: R2Bucket, key: string, url: string, total: number, contentType: string, onBytes?: (n: number) => void, partConc = 6): Promise<number> {
   // PART=8MB, ~6 parts in flight: peak memory ~6*(part + concat scratch) stays
   // comfortably under the Worker's 128MB even for large videos.
-  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024, PARTCONC = 6;
+  const CHUNK = 4 * 1024 * 1024, PART = 8 * 1024 * 1024, PARTCONC = partConc;
   const nParts = Math.ceil(total / PART);
   const mpu = await bucket.createMultipartUpload(key, { httpMetadata: { contentType } });
   const uploaded: R2UploadedPart[] = new Array(nParts);
@@ -322,11 +322,24 @@ export async function ytdlFullVideoWorkerNative(env: ScribeEnv, jobId: string, u
   // Download video then audio (sequential keeps peak memory bounded to one
   // stream's part window); each is internally parallel across 4MB ranges.
   // Resume: if the streams are already in R2 (a mux retry), skip the re-download.
+  // Video and audio go at the SAME time. Running them one after the other paid
+  // every fixed cost twice — multipart setup, the first range's round trip — and
+  // on a short clip that overhead is most of the elapsed time, which is why a
+  // four-minute video took about as long as an hour-long one. Peak memory is
+  // held where it was by splitting the in-flight part budget between them rather
+  // than giving each the full six.
   const pct = throttledPct(env, jobId, vTotal + aTotal);
-  const vHead = await env.MEDIA_BUCKET.head(vKey);
-  const vBytes = vHead && vHead.size > 10_000 ? vHead.size : await downloadToR2(env.MEDIA_BUCKET, vKey, vfmt.url, vTotal, (vfmt.mimeType || 'video/mp4').split(';')[0], (n) => pct(n));
-  const aHead = await env.MEDIA_BUCKET.head(aKey);
-  const aBytes = aHead && aHead.size > 5_000 ? aHead.size : await downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4', (n) => pct(vBytes + n));
+  let vSeen = 0;
+  let aSeen = 0;
+  const [vHead, aHead] = await Promise.all([env.MEDIA_BUCKET.head(vKey), env.MEDIA_BUCKET.head(aKey)]);
+  const [vBytes, aBytes] = await Promise.all([
+    vHead && vHead.size > 10_000 ? Promise.resolve(vHead.size)
+      : downloadToR2(env.MEDIA_BUCKET, vKey, vfmt.url, vTotal, (vfmt.mimeType || 'video/mp4').split(';')[0],
+          (n) => { vSeen = n; pct(vSeen + aSeen); }, 4),
+    aHead && aHead.size > 5_000 ? Promise.resolve(aHead.size)
+      : downloadToR2(env.MEDIA_BUCKET, aKey, afmt.url, aTotal, 'audio/mp4',
+          (n) => { aSeen = n; pct(vSeen + aSeen); }, 2),
+  ]);
   if (vBytes < 10_000 || aBytes < 5_000) throw new Error(`stream too small (v=${vBytes} a=${aBytes})`);
 
   // Do NOT mux here — the mux runs as a BACKGROUND workflow step (muxWorkerNative)
