@@ -263,7 +263,12 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
       // Audio-only jobs take the AUDIOBOOK pipeline (prose units for the
       // karaoke player, word spans kept, no display constraints); video jobs
       // take the proven subtitle pipeline, untouched.
-      const isAudiobook = !fullVideo;
+      // What the source IS, not what the job was queued as. A job created as a
+      // full video whose download only produced audio kept fullVideo set and ran
+      // the video path, so no karaoke transcript was ever built — and then
+      // publishing it as the audiobook it plainly is failed on the missing
+      // transcript.json.
+      const isAudiobook = !fullVideo || /\.(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(dl.key || '');
       let primaryCueCount = 0;
       let anyFresh = false;
       for (const lang of langs) {

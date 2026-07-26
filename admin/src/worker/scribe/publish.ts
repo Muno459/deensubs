@@ -287,6 +287,25 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
   // 1b. Audiobook: the karaoke transcript gets a canonical slug-stable copy,
   // and the speaker-turn txt exports ride along when they exist
   if (isAudiobook) {
+    // Build it if the run never did. A job that went down the video path has
+    // cues but no karaoke transcript, and publishing it as the audiobook it is
+    // then failed on "missing R2 object: transcript.json" with no way forward.
+    if (!(await env.MEDIA_BUCKET.head(`scribe/${jobId}/transcript.json`))) {
+      const [asrObj, cuesObj] = await Promise.all([
+        env.MEDIA_BUCKET.get(job.asr_key || `scribe/${jobId}/asr.json`),
+        env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`),
+      ]);
+      if (!asrObj || !cuesObj) throw new Error('cannot build the transcript: the job has no stored ASR or cues');
+      const [{ buildTranscript }, asr, cues] = await Promise.all([
+        import('./audiobook'),
+        asrObj.json<any>(),
+        cuesObj.json<any[]>(),
+      ]);
+      const doc = buildTranscript(asr.words || [], cues as any, job.chapters || null, null);
+      await env.MEDIA_BUCKET.put(`scribe/${jobId}/transcript.json`, JSON.stringify(doc), {
+        httpMetadata: { contentType: 'application/json' },
+      });
+    }
     await copyObject(env, `scribe/${jobId}/transcript.json`, `transcripts/${slug}.json`);
     const primary = langs[0] || 'en';
     await copyObject(env, `scribe/${jobId}/transcript-source.txt`, `transcripts/${slug}-source.txt`).catch(() => {});
