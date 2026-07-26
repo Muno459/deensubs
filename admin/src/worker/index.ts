@@ -1592,9 +1592,13 @@ app.post('/api/scribe/:id/thumbs', async (c) => {
 // refreshes the published copy when the job is live.
 app.post('/api/scribe/:id/rebuild-transcript', async (c) => {
   const jobId = c.req.param('id');
-  const job: any = await c.env.DB.prepare('SELECT chapters, title, channel, target_langs, full_video FROM scribe_jobs WHERE id = ?').bind(jobId).first();
+  const job: any = await c.env.DB.prepare('SELECT chapters, title, channel, target_langs, full_video, source_key FROM scribe_jobs WHERE id = ?').bind(jobId).first();
   if (!job) return c.json({ error: 'job not found' }, 404);
-  if (job.full_video) return c.json({ error: 'not an audiobook job' }, 400);
+  // The file decides, not the flag. A job queued as a video whose download
+  // produced only audio keeps full_video set, and this refused to rebuild the
+  // transcript for the audiobook it actually is.
+  const audioFile = /\.(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(job.source_key || '');
+  if (job.full_video && !audioFile) return c.json({ error: 'not an audiobook job' }, 400);
   const asrObj = await c.env.MEDIA_BUCKET.get(`scribe/${jobId}/asr.json`);
   const cuesObj = await c.env.MEDIA_BUCKET.get(`scribe/${jobId}/cues.json`);
   if (!asrObj || !cuesObj) return c.json({ error: 'asr.json or cues.json missing' }, 404);

@@ -313,7 +313,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
     });
     // Generate frame candidates via the container (video jobs only — audio
     // jobs have no frames; artwork is the scholar stage card or an upload)
-    if (job.full_video) {
+    if (isVideoFile) {
       api(`/api/scribe/${job.id}/thumbs`, { method: 'POST' })
         .then((r) => {
           setCands(r.candidates || []);
@@ -353,7 +353,11 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
   }, [open, job.id]);
 
   // Audiobook thumb preview: re-compose the card + title whenever either changes
-  const schCardSlug = !job.full_video ? (meta.data?.scholars || []).find((s: any) => s.id === form?.scholar_id)?.slug : null;
+  const schCardSlug = !isVideoFile ? (meta.data?.scholars || []).find((s: any) => s.id === form?.scholar_id)?.slug : null;
+  // An audio job publishes with the scholar's stage card, an uploaded image, or
+  // the channel art. With none of those there is nothing to show, and publish
+  // fails server-side after the click.
+  const needsArtwork = !isVideoFile && !chosenKey && !customThumb && !cardThumb && !schCardSlug && !job?.thumb_url;
   useEffect(() => {
     setCardThumb(null);
     if (!open || !schCardSlug || !form?.title) return;
@@ -508,7 +512,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 }} />
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {!job.full_video && (() => {
+              {!isVideoFile && (() => {
                 const schSlug = (meta.data?.scholars || []).find((s: any) => s.id === form.scholar_id)?.slug;
                 if (!schSlug) return null;
                 return (
@@ -562,11 +566,19 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
               On publish, this video joins the playlist <span className="font-medium text-gold-bright">{job.playlist_title}</span>{job.playlist_pos != null ? ` at position ${job.playlist_pos + 1}` : ''}.
             </p>
           )}
+          {/* An audiobook with nothing to show fails server-side AFTER the click,
+              which is a poor way to learn it. Say it here, where it can be
+              fixed, and do not let the click happen. */}
+          {needsArtwork && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
+              This audiobook has no artwork yet. Pick a scholar who has a stage card, or upload / paste an image above.
+            </p>
+          )}
           {err && <ErrorNote message={err} />}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button
-              disabled={publishing || !form.title || !form.slug}
+              disabled={publishing || !form.title || !form.slug || needsArtwork}
               onClick={async () => {
                 setPublishing(true);
                 setErr('');
@@ -575,7 +587,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                   // scholar card and publish that (falls back to the plain
                   // card server-side if this fails)
                   let thumbKey: string | undefined = chosenKey ?? undefined;
-                  if (!job.full_video && !thumbKey && cardThumb) {
+                  if (!isVideoFile && !thumbKey && cardThumb) {
                     const up = await fetch(`/api/upload?prefix=${encodeURIComponent(`scribe/${job.id}/`)}&name=card-title`, {
                       method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: cardThumb.blob, credentials: 'include',
                     });
