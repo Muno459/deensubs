@@ -870,12 +870,12 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
   // accepted" and there is no way to tell an unreasonable rule from a model
   // that cannot follow a reasonable one.
   const reject = { tile: 0, fit: 0, dup: 0, pause: 0, shape: 0 };
-  // A lecture yields a few hundred repair groups. At six per request that is ~78
-  // requests a round against translation's ~26 for the whole talk, and on the
-  // slow model — which is how a 2.5 minute step became forty. Twenty per request
-  // costs nothing in quality (each group is independent) and cuts the round to a
-  // handful of calls.
-  const BATCH = 20;
+  // Six. Twenty was tried to cut the request count and the model could not hold
+  // it: measured, batches of twenty came back with eight objects, or none at all
+  // and a paragraph of reasoning, or the input echoed. Batches of three came back
+  // complete. The request count was never the problem — the slow model was, and
+  // that is fixed separately, so these can stay small and go out together.
+  const BATCH = 6;
   // Each batch is an independent request, so they go out together. Run one at
   // a time this took longer than the translation itself: a lecture produces a
   // few hundred groups and three rounds of them serially is hundreds of
@@ -921,9 +921,14 @@ HARD REQUIREMENTS — a reply breaking any of these is discarded and the origina
 - EVERY PIECE MUST FIT ITS OWN SECONDS. Its duration is its last word's end minus its first word's start, both given below. At most 17 characters per second of that, and never fewer than 0.7 seconds of speech for a piece. A piece carrying more words than its span can hold is rejected outright — if the wording will not fit, use fewer words, not a shorter span.
 - Never repeat a word across a boundary: the last words of one piece must not be the first words of the next.
 - CUT WHERE HE STOPS. Every boundary you create should fall on a [PAUSE] or a [BREAK]. If the range contains as many pauses as you need boundaries and you cut somewhere else instead, the reply is rejected. Never carry two speakers in one cue: always cut at [SPEAKER].
-No commentary, no code fences, JSONL only.` },
+OUTPUT DISCIPLINE — this is not optional:
+- Emit exactly one JSON object per ### block, on its own line, in the order given.
+- Emit nothing else. No reasoning, no restating the problem, no repeating the word list, no code fences, no blank lines, no prose before or after.
+- If you cannot improve a block, still emit a line for it with its cues unchanged.` },
         { role: 'user', content: body },
       ], 12000, model);
+      const objLines = raw.split('\n').filter((l) => l.trim().replace(/^```(json)?/, '').trim().startsWith('{')).length;
+      console.log(`refit batch: ${batch.length} asked, ${objLines} objects back, ${raw.length} chars; head=${raw.slice(0, 160).replace(/\n/g, ' | ')}`);
       for (const line of raw.split('\n')) {
         const t = line.trim().replace(/^```(json)?|```$/g, '').trim();
         if (!t.startsWith('{')) continue;
