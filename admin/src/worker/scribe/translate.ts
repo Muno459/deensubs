@@ -603,6 +603,24 @@ export async function translateWords(
   // daylight." — a sentence sliced into boxes rather than a subtitle.
   cues = cues.flatMap((c) => (c.q ? splitLocked(c) : [c]));
 
+  // Repair first, then time. The only display limit a prompt cannot carry on its
+  // own is the character count — a model cannot count characters — so cues that
+  // came back too long, reading as fragments, ending on a governing word, or
+  // missing an honorific are measured here and handed BACK to the model. It
+  // answers in word indices, so its pieces are timed by the audio exactly as the
+  // originals were. Three rounds, because re-cutting a pair can leave one new
+  // piece still reading as a continuation, and each round only looks at what is
+  // still wrong.
+  //
+  // This has to happen BEFORE the timing passes below: a re-cut cue is rebuilt
+  // from its word range, which would discard any silence an earlier pass had
+  // given it to be readable in.
+  for (let round = 0; round < 3; round++) {
+    const r = await refitCues(env, cues, words, targetLang);
+    cues = r.cues as WCue[];
+    if (!r.fixed) break;
+  }
+
   // Netflix-style post pass: ordered, non-overlapping, breathable
   cues.sort((a, b) => a.start - b.start);
   for (let i = 0; i < cues.length; i++) {
@@ -631,23 +649,6 @@ export async function translateWords(
       const grab = cue.q ? 12.0 : 3.0;
       cue.end = Math.max(cue.end, Math.min(need, limit, cue.end + grab));
     }
-  }
-  // Nothing here rewrites a cue. The only display limit a prompt cannot carry on
-  // its own is the character count, because the model cannot count characters —
-  // so the cues that came back too long are measured here and handed BACK to the
-  // model to re-cut, which answers in word indices and keeps the timing the
-  // audio's. Two rounds: re-cutting can leave a piece still over, and the second
-  // round only looks at what is still over.
-  // Three rounds: re-cutting a pair can leave one of the new pieces still
-  // reading as a continuation, and each round only looks at what is still wrong.
-  for (let round = 0; round < 3; round++) {
-    const r = await refitCues(env, cues, words, targetLang);
-    cues = r.cues as WCue[];
-    if (!r.fixed) break;
-  }
-  cues.sort((a, b) => a.start - b.start);
-  for (let i = 0; i < cues.length - 1; i++) {
-    if (cues[i].end > cues[i + 1].start) cues[i].end = cues[i + 1].start;
   }
   return cues.filter((c) => c.end > c.start && c.text.trim()).map(({ w, ...c }) => c);
 }
