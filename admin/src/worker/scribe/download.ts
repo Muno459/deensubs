@@ -131,7 +131,7 @@ const CDN_BASE = 'https://cdn.deensubs.com';
 export async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: string, audioKey: string): Promise<{ key: string; bytes: number; contentType: string }> {
   if (!env.YTDLP) throw new Error('mux container binding not configured');
   const { getContainer } = await import('@cloudflare/containers');
-  const container = getContainer(env.YTDLP as any, jobId);
+  const container = getContainer(env.YTDLP as any, poolName(jobId));
   const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };
   const call = (path: string, init?: RequestInit) =>
     container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
@@ -145,7 +145,7 @@ export async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: s
 
   let info: any = null;
   for (let i = 0; i < 240; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
+    if (i) await new Promise((r) => setTimeout(r, i < 10 ? 400 : i < 30 ? 1000 : 2000));
     const st = await call(`/jobs/${id}`).catch(() => null);
     if (!st || !st.ok) continue;
     info = await st.json();
@@ -163,6 +163,23 @@ export async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: s
   return { key, bytes, contentType: ct };
 }
 
+/**
+ * Which container instance a job should use.
+ *
+ * getContainer(binding, jobId) gives every job its own instance, so every
+ * download paid a container cold start before yt-dlp had fetched a single byte
+ * — which is most of what a short video's "download" time actually was.
+ * Hashing the job into a fixed set of slots keeps instances warm and reused
+ * while still allowing this many downloads at once. The pool sits under the
+ * binding's max_instances so clip and thumbnail containers keep their room.
+ */
+const DL_POOL = 24;
+export function poolName(jobId: string): string {
+  let h = 0;
+  for (let i = 0; i < jobId.length; i++) h = (h * 31 + jobId.charCodeAt(i)) >>> 0;
+  return `dl-${h % DL_POOL}`;
+}
+
 /** Primary path: the container runs yt-dlp from its own datacenter IP (no
     proxies, no browser). android_vr extraction works direct; the bytes are
     pulled with parallel 4 MB byte-ranges (~290 MB/s, c=48) that finish inside
@@ -170,7 +187,7 @@ export async function muxViaContainer(env: ScribeEnv, jobId: string, videoKey: s
 export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: string, fullVideo = false): Promise<DownloadResult> {
   if (!env.YTDLP) throw new Error('container binding not configured');
   const { getContainer } = await import('@cloudflare/containers');
-  const container = getContainer(env.YTDLP as any, jobId);
+  const container = getContainer(env.YTDLP as any, poolName(jobId));
   const auth = { Authorization: 'Bearer ' + (env.YTDLP_TOKEN || 'internal') };
   const call = (path: string, init?: RequestInit) =>
     container.fetch(new Request('http://ytdlp' + path, { ...init, headers: { ...auth, ...(init?.headers as any) } }));
@@ -190,7 +207,10 @@ export async function ytdlpViaContainer(env: ScribeEnv, jobId: string, url: stri
 
   let info: any = null;
   for (let i = 0; i < 1200; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
+    // Ask first, wait second, and wait less at the start. The old loop slept a
+    // flat 1.5s before its first question, so a short clip that finished in two
+    // seconds still reported closer to four.
+    if (i) await new Promise((r) => setTimeout(r, i < 10 ? 400 : i < 30 ? 1000 : 2000));
     const st = await call(`/jobs/${id}`).catch(() => null);
     if (!st || !st.ok) continue;
     info = await st.json();

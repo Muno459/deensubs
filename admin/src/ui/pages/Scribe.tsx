@@ -285,6 +285,8 @@ async function composeCardThumb(schSlug: string, title: string): Promise<{ dataU
 
 function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose: () => void }) {
   const meta = useApi<any>(open ? '/api/meta' : null);
+  // The file decides, not the job's flag — see the note by the thumbnail.
+  const isVideoFile = /\.(mp4|webm|mkv|mov)$/i.test(job?.source_key || '');
   const [form, setForm] = useState<any>(null);
   const [cands, setCands] = useState<{ key: string; ts: number }[] | null>(null);
   const [customThumb, setCustomThumb] = useState<string | null>(null);
@@ -416,11 +418,19 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
             <div className="space-y-1.5">
               {(form.chapters || []).map((ch: any, i: number) => (
                 <div key={i} className="flex items-center gap-2">
-                  <input className={inputCls + ' w-24 text-center font-mono'} value={ch._t ?? fmtT(ch.t)}
-                    onChange={(e) => updCh(i, { _t: e.target.value })}
-                    onBlur={() => { const t = parseT(ch._t ?? ''); updCh(i, { t: t == null ? ch.t : t, _t: undefined }); }} />
-                  <input className={inputCls + ' flex-1'} value={ch.title} placeholder="Chapter title"
-                    onChange={(e) => updCh(i, { title: e.target.value })} />
+                  {/* inputCls carries w-full, and appending w-24 does not beat it —
+                      CSS order decides, not class order — so the timestamp filled
+                      the row and squeezed the title box to nothing. Constrain the
+                      wrapper instead of fighting the utility. */}
+                  <div className="w-24 shrink-0">
+                    <input className={inputCls + ' text-center font-mono'} value={ch._t ?? fmtT(ch.t)}
+                      onChange={(e) => updCh(i, { _t: e.target.value })}
+                      onBlur={() => { const t = parseT(ch._t ?? ''); updCh(i, { t: t == null ? ch.t : t, _t: undefined }); }} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <input className={inputCls} value={ch.title} placeholder="Chapter title"
+                      onChange={(e) => updCh(i, { title: e.target.value })} />
+                  </div>
                   <button type="button" className="px-1 text-[15px] leading-none text-muted hover:text-cream" title="Remove chapter"
                     onClick={() => setForm({ ...form, chapters: form.chapters.filter((_: any, j: number) => j !== i) })}>×</button>
                 </div>
@@ -538,8 +548,12 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 </div>
               )}
             </div>
-            {!!job.full_video && cands?.length === 0 && <p className="mt-1 text-[11px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}.</p>}
-            {!job.full_video && <p className="mt-1 text-[11px] text-faint">Audio-only job: the scholar's stage card with the title baked into its right zone is attached automatically; upload or paste an image to override.</p>}
+            {/* Decide by the file, not the flag: a job queued as a video whose
+                download produced only audio still has full_video set, and it
+                showed "Frame extraction failed" for an mp3 that has no frames
+                to extract. */}
+            {isVideoFile && cands?.length === 0 && <p className="mt-1 text-[11px] text-red-400">Frame extraction failed{candErr ? ': ' + candErr : ''}.</p>}
+            {!isVideoFile && <p className="mt-1 text-[11px] text-faint">Audio job — there are no frames to grab. Pick a scholar with a stage card and it is attached automatically, or upload / paste an image here.</p>}
             <p className="mt-1.5 text-[11px] text-faint">Responsive WebP variants (320/480/640) are generated on publish and mirrored to KV.</p>
           </div>
 
