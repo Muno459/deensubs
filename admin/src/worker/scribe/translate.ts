@@ -645,7 +645,7 @@ export async function condenseDense(env: ScribeEnv, cues: Cue[], targetLang: str
       .join('\n');
     try {
       const raw = await llmChat(env, [
-        { role: 'system', content: `You tighten subtitle lines for an Islamic lecture so they can be read in the time they are on screen. Target language: ${targetLang}. Keep the meaning, the register and every honorific (Allah ﷻ, the Prophet ﷺ, RA/AS/RH) exactly as they are. Keep transliterations (Tawhid, Sunnah, fiqh, Sharia). Do not add or remove content: say the same thing in fewer words. Return ONLY JSONL, one object per line: {"i": <id>, "t": "<shortened line>"}. Omit any line you cannot shorten without losing meaning.` },
+        { role: 'system', content: `You tighten subtitle lines for an Islamic lecture so they can be read in the time they are on screen. Target language: ${targetLang}. Keep the meaning, the register and every honorific (Allah ﷻ, the Prophet ﷺ, RA/AS/RH) exactly as they are. Keep transliterations (Tawhid, Sunnah, fiqh, Sharia). Do not add or remove content: say the same thing in fewer words. The shortened line must still read as a sentence on its own \u2014 never leave it opening with a comma or a lowercase continuation, and never strip an honorific to save characters. Return ONLY JSONL, one object per line: {"i": <id>, "t": "<shortened line>"}. Omit any line you cannot shorten without losing meaning.` },
         { role: 'user', content: lines },
       ], 4000, STRONG_MODEL);
       for (const line of raw.split('\n')) {
@@ -688,7 +688,7 @@ export async function qaPass(env: ScribeEnv, cues: Cue[], targetLang: string): P
       const raw = await llmChat(env, [
         { role: 'system', content: `You are a Netflix-standard subtitle QA reviewer for Islamic lectures (${targetLang} target). Review source↔translation pairs. Output ONLY JSONL fixes for cues that need them (mistranslation, dropped meaning, awkward phrasing, CPS violations to condense, honorific mistakes):
 {"i": cueNumber, "t": "corrected translation"}
-Rules: max ~84 chars, keep honorifics (Allah ﷻ, Prophet ﷺ, RA/AS/RH), keep transliterations (fiqh, Sharia...), Quran quotes in established translation wording. If a cue is fine, output nothing for it. No commentary.` },
+Rules: max ~84 chars, keep honorifics (Allah  ﷻ, Prophet ﷺ, RA/AS/RH) — never drop one, keep transliterations (fiqh, Sharia...), Quran quotes in established translation wording. Every cue you rewrite must read as a sentence on its own: never leave it opening with a comma or a lowercase continuation of the cue before it. If a cue is fine, output nothing for it. No commentary.` },
         { role: 'user', content: lines },
       ], 8000, QA_MODEL);
       for (const line of raw.split('\n')) {
