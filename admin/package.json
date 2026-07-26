@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "deploy": "vite build && wrangler deploy",
+    "deploy": "tsc --noEmit -p . && vite build && wrangler deploy",
     "check": "tsc --noEmit"
   },
   "dependencies": {

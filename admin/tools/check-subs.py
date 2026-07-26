@@ -58,6 +58,7 @@ PAUSE_MIN = 0.15          # an inter-word gap this long is a real break in deliv
 PAUSE_TARGET = 75.0       # percent of cues that must begin after one
 DRIFT_MAX = 2.0           # percent of cues whose text may not match their own audio
 FAITHFUL_MIN = 0.7        # a cue under this share of the file's usual EN/AR ratio dropped content
+MAX_CUE_SECONDS = 15.0    # beyond this a cue has swallowed a passage, not covered a sentence
 SPEAKER_MAX = 2.0         # percent of cues that may span a change of speaker
 
 CLING = set(
@@ -297,9 +298,23 @@ def main(srt_path, cues_path, asr_path):
         judged = [(r, c) for r, c in pairs if ar_len(c.get("source") or "") >= 30]
         thin = [c for r, c in judged if r < med * FAITHFUL_MIN]
         lost = sum(c["end"] - c["start"] for c in thin)
-        check("F1", f"<={DRIFT_MAX}% of cues say less than the speaker said",
-              pct(len(thin), len(judged)) <= DRIFT_MAX,
-              f"{len(thin)} ({pct(len(thin), len(judged)):.1f}%), {lost:.0f}s of speech under-translated")
+        # Counted by cue, one cue is always a small percentage — and a single cue
+        # held 521 characters of Arabic as 69 of English across 87 seconds, which
+        # passed at 1.8% of cues while being a minute and a half of the lecture
+        # missing. What matters is how much of the talk went untranslated, so the
+        # criterion is on time as well as on count.
+        talk = max(1.0, sum(c["end"] - c["start"] for c in speech))
+        check("F1", f"<={DRIFT_MAX}% of cues, and <={DRIFT_MAX}% of speech time, say less than the speaker said",
+              pct(len(thin), len(judged)) <= DRIFT_MAX and pct(lost, talk) <= DRIFT_MAX,
+              f"{len(thin)} cues ({pct(len(thin), len(judged)):.1f}%), {lost:.0f}s under-translated ({pct(lost, talk):.1f}% of speech)")
+
+    # No line belongs on screen for the length of a paragraph. Netflix caps a cue
+    # at seven seconds; a cue may run longer here when the speech under it genuinely
+    # runs on, but 87 seconds is not that — it is a cue that swallowed a passage.
+    overlong = [c for c in speech if c["end"] - c["start"] > MAX_CUE_SECONDS]
+    check("S8", f"no cue stays on screen longer than {MAX_CUE_SECONDS}s",
+          not overlong,
+          f"{len(overlong)} cues, longest {max((c['end'] - c['start'] for c in speech), default=0):.0f}s")
 
     # A cue's stored Arabic must BE the words inside its own timestamps. This is
     # true by construction — source is sliced from the same word range the timing

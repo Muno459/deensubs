@@ -71,50 +71,35 @@ export function makeWindows(words: CleanWord[]): CleanWord[][] {
   return windows;
 }
 
-const SYSTEM_PROMPT = (targetLang: string) => `You are a subtitle editor for Islamic lectures, working to broadcast (Netflix) timed-text standards. You receive numbered words with timestamps from speech recognition and return subtitle cues.
+// Kept deliberately short. Every readability rule that used to live here — line
+// breaks, characters per second, how a cue must open, how Arabic chains clauses
+// — was piled on over time, and measured, the model stopped being able to obey
+// the ONE thing only it can do: return a cue for every word. On a 185-word
+// window it came back with a numbered list instead of JSON, or eleven cues
+// covering 95 words. Everything it skips is then glued onto a neighbouring cue
+// and never translated, which is where the 87-second cue came from.
+//
+// So this asks for coverage, faithfulness and sensible boundaries, and nothing
+// else. Readability is repaired afterwards by refitCues, one cue at a time,
+// where the model has attention to spare for it.
+const SYSTEM_PROMPT = (targetLang: string) => `You translate an Islamic lecture into subtitle cues. You are given numbered words with timestamps from speech recognition.
 
-OUTPUT — one JSON object per line, nothing else:
-{"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"t":"first line\nsecond line"}
+OUTPUT — one JSON object per line, nothing else. No prose, no numbering, no code fences:
+{"w":[FIRST_WORD_INDEX,LAST_WORD_INDEX],"t":"translation of those words"}
 
-The word range you choose IS the cue's timing: the cue appears when FIRST is spoken and leaves when LAST finishes. Nothing downstream re-cuts or re-times what you return, so the segmentation you choose is the segmentation the viewer sees. Choose it deliberately.
+THE TWO RULES THAT MATTER
+1. COVER EVERY WORD INDEX, in order, exactly once, with no gaps. If the list runs from 40 to 224, your first cue starts at 40, your last ends at 224, and each cue starts one after the previous ends. A skipped range is the worst thing you can do here: those words reach the viewer untranslated.
+2. SAY EVERYTHING HE SAYS. Never summarise, never compress. Names, titles, honorific chains, numbers and lists are content: "\u0635\u0627\u062d\u0628 \u0627\u0644\u0633\u0645\u0648 \u0627\u0644\u0645\u0644\u0643\u064a \u0627\u0644\u0623\u0645\u064a\u0631 \u062e\u0627\u0644\u062f \u0628\u0646 \u0633\u0644\u0645\u0627\u0646" is "His Royal Highness Prince Khalid bin Salman". Only stutters, false starts and repeated words are dropped; their indices still belong to the cue covering that span.
 
-COVERAGE
-- Every word index belongs to exactly one cue, in order, with no gaps and no overlaps.
+SEGMENTATION
+- End a cue where the sentence or clause closes, and start the next where the next thought starts. Roughly 1-7 seconds and at most ~84 characters each, but coverage matters more than either — if in doubt, emit the cue.
+- Cut where the speaker pauses: [PAUSE] and [BREAK] mark those. Never carry two speakers in one cue: always cut at [SPEAKER].
 
-EVERY CUE MUST READ AS A SENTENCE, NOT AS A SLICE OF ONE
-This is what separates a subtitle from a transcript chopped into boxes. Each cue is on screen alone for a few seconds and has to make sense there.
-- START where a thought starts. A cue must never open with a comma, and never with a lowercase continuation that only parses if the viewer still has the previous cue in their head.
-- ARABIC CHAINS, ENGLISH DOES NOT. The speaker links clause after clause with \u0648, \u0641 and \u062b\u0645, and a single spoken sentence can run for half a minute. Do NOT carry that chain into English and spread one sentence over five cues. Break the chain into separate English sentences, each one complete, each one a cue. This is the most common way subtitles go wrong here:
-    WRONG   "He was a beacon fire" / "and a sun in broad daylight." / "and whose confidant is its minbar."
-    RIGHT   "He was a beacon fire, a sun in broad daylight." / "The minbar was his confidant."
-- So before you emit a cue, read its text alone. If it does not stand up as a sentence by itself, you have cut a sentence into slices: either fold it into the cue before it, or give it its own subject and verb.
-- A cue may legitimately begin with And, But or So when it opens a real sentence \u2014 capitalised, standing on its own. That is different from a stranded fragment.
-- CONCRETELY: fewer than one cue in twelve should need the previous cue to make sense. Measured on the last version, nearly HALF of them did. Treat that as the main thing to get right.
-- A cue must also carry the words being spoken UNDER it. Do not translate a long chain early and leave its tail for the next cue: that puts one word on screen for three seconds while the speaker says a whole clause. The text of a cue and the audio of a cue must be the same content.
-- END where the grammar closes: a sentence, or a complete clause. Never end on a word that governs the next one — an article, preposition, conjunction, auxiliary verb, or relative pronoun.
-- Keep together what cannot be understood apart: a verb and its object, a name and its title, a number and its unit, a quotation and the verb introducing it.
-- When a thought is too long for one cue, break it where the sentence itself breathes — at a clause boundary, before a conjunction, after a completed statement — and make the next cue stand up on its own.
-- Never repeat a word across a boundary.
-
-FIT — you have the timestamps, so check this yourself
-- Duration is LAST word's end minus FIRST word's start. Aim for 1-7 seconds.
-- Reading speed: at most 17 characters per second of that duration, and never above 20. A 3-second cue holds roughly 50 characters; a 6-second cue roughly 100.
-- Size: at most 2 lines of 42 characters. Put the line break in "t" yourself as \n. Break at the largest grammatical unit available: after punctuation, before a conjunction, before a preposition. Never break between an article and its noun, a preposition and its object, or a name and its title. One line is better than two when it fits.
-- If the faithful translation will not fit the seconds available, say the same thing in fewer words. Never drop meaning to make it fit, and never exceed the limit.
-- If a phrase would be under about a second on its own, carry it with the neighbouring thought instead of flashing it.
-
-SEGMENT ON MEANING AND DELIVERY
-- The speaker is the strongest signal: where they stop ([BREAK]), hesitate ([PAUSE]), draw breath, or change ([SPEAKER]). When you are given the audio, listen to where the sentence lands.
-- Do not segment by character count. The limit is a ceiling, not a target — never pad a cue toward it, and never chop a complete thought to stay under it.
-
-TRANSLATION
-- Translate to ${targetLang}. Translate all meaningful content faithfully — never paraphrase away or condense meaning.
-- Clean speech artifacts: drop stutters, false starts and repeated words from the translation. Their word indices still belong to the cue covering that span.
-- THAT IS THE ONLY THING YOU MAY DROP. Names, titles, honorific chains, numbers and lists are content, not ceremony: "\u0635\u0627\u062d\u0628 \u0627\u0644\u0633\u0645\u0648 \u0627\u0644\u0645\u0644\u0643\u064a \u0627\u0644\u0623\u0645\u064a\u0631 \u062e\u0627\u0644\u062f \u0628\u0646 \u0633\u0644\u0645\u0627\u0646" must appear as "His Royal Highness Prince Khalid bin Salman", not be summarised away. If a cue's words take ten seconds to say, its translation cannot be six words long \u2014 that means something was left out. Say everything he said.
-- Islamic honorifics: Allah ﷻ, the Prophet Muhammad ﷺ, companions (RA), earlier prophets (AS), scholars (RH).
-- Keep as transliterations (do not translate): fatwa, mufti, Sharia, fiqh, usul al-fiqh, ifta, Haramain, madhhab, and similar established terms.
-- Proper nouns and Arabic terms: standard English transliteration.
-- No markdown, no commentary, no code fences — only JSONL lines.`;
+LANGUAGE
+- Translate to ${targetLang}.
+- Honorifics: Allah \ufdfb, the Prophet Muhammad \ufdfa, companions (RA), earlier prophets (AS), scholars (RH). Where the Arabic has one, the translation has one.
+- Keep transliterations: fatwa, mufti, Sharia, fiqh, usul al-fiqh, madhhab, Tawhid, Sunnah.
+- Proper nouns in standard English transliteration.`;
 
 function windowPrompt(win: CleanWord[], prevTail: string, verseContext?: string): string {
   const lines: string[] = [];
@@ -255,19 +240,10 @@ export async function windowAudio(env: ScribeEnv, opts: AudioOpts, startSec: num
  *  punctuation and word timings only approximate. So when audio is present it
  *  outranks the textual heuristics for cut placement. */
 export const AUDIO_NOTE = `
-- You are ALSO given the actual audio of this passage (it begins at the first listed word). The numbered words stay the authoritative transcript, but the AUDIO is the authority on WHERE A SENTENCE ENDS and therefore where a cue ends.
-
-LISTEN FOR THESE, IN THIS ORDER
-- FALLING INTONATION. When the voice drops and settles, the thought is finished: end the cue there and let the next one open a new sentence. When the voice holds level or rises, he is still going — do not end a cue there even if the text reached its limit. This is the single most useful thing in the audio.
-- BREATH GROUPS. He speaks in groups bounded by breaths. One breath group is one cue whenever it fits. If a group is too long for one cue, divide it at his own internal pause, never at the midpoint of the text.
-- QUOTATION. His voice changes when he quotes the Qur'an, a hadith, or a person — slower, more measured, often louder. Open a cue where the quoted speech begins and close it where his normal voice returns, so the quotation is not half in one cue and half in another.
-- ENUMERATION. When he lists, each item lands on its own beat. Follow those beats: one item per cue where the timing allows.
-- EMPHASIS. A word he stresses belongs with the phrase it is stressing. Never separate it from that phrase.
-- HESITATION. False starts, repeated words and filler are audible. Leave them out of the translation; their word indices still belong to the cue covering that span.
-- RECITATION is phrased by the reciter's stops, which do not follow English punctuation. Follow what you hear, not where a comma would go.
-- [BREAK] is where he stops; [PAUSE] is a shorter hesitation. Both are measured from the timings and are a rough hint only \u2014 trust the audio over them, and trust both over the character count.
-- CONCRETELY: at least three cues in four should begin immediately after a pause of 0.15s or longer. Pauses that long are only about one word gap in five, so this means choosing your boundaries around his breathing rather than around the text. Measured on the last version, only 57% did.
-- Speaker changes are marked [SPEAKER]. Never carry two speakers in one cue \u2014 always start a new cue at the change.`;
+- You are also given the audio of this passage, beginning at the first listed word. Use it to hear where sentences END: his voice falls and settles when a thought closes, and holds level when he is still going. End cues where it falls, not where the text reached a length.
+- He speaks in breath groups; one breath group is one cue where it fits.
+- His voice changes when he quotes the Qur'an, a hadith or a person. Start a cue where the quotation begins and close it where his normal voice returns.
+- [BREAK] is where he stops, [PAUSE] a shorter hesitation. Both are read off the timings; trust the audio over them.`;
 
 export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000, model?: string): Promise<string> {
   const base = (env.SCRIBE_LLM_URL || '').replace(/\/$/, '');
@@ -392,14 +368,26 @@ async function translateWindow(
       { role: 'user', content: withAudio ? [{ type: 'text', text: userText }, audio] : userText },
     ];
     try {
-      cues = parseCues(await llmChat(env, messages, 8000, model), win);
+      const raw = await llmChat(env, messages, 8000, model);
+      cues = parseCues(raw, win);
+      const covered = cues.reduce((n, c) => n + (c.w[1] - c.w[0] + 1), 0);
+      console.log(`win ${lo}-${hi}: ${win.length} words in, ${raw.length} chars back, `
+        + `${cues.length} cues covering ${covered} words${model ? ' [fallback]' : ''}`
+        + ` || RAW: ${raw.slice(0, 400).replace(/\n/g, ' ~ ')}`);
       if (cues.length) break;
-    } catch {}
+    } catch (e: any) {
+      console.log(`win ${lo}-${hi}: threw ${e?.message}`);
+    }
   }
   if (!cues.length) throw new Error(`window ${lo}-${hi} failed on all models`);
 
-  // Hole-filling: translate what the model skipped instead of stretching timing
-  for (let round = 0; round < 2; round++) {
+  // Hole-filling: translate what the model skipped instead of stretching timing.
+  // This is the pipeline's most important loop and it was the quietest. What it
+  // leaves behind gets glued onto a neighbouring cue by word range with no text
+  // added, so a stretch the model skipped becomes a cue that covers 87 seconds
+  // and says one line — the speech is "covered" and never translated. Three
+  // rounds, and a token budget that can actually answer a long hole.
+  for (let round = 0; round < 3; round++) {
     const holes = computeHoles(cues, lo, hi).filter(([a, b]) => b - a + 1 >= 3);
     if (!holes.length) break;
     for (const [a, b] of holes) {
@@ -410,12 +398,17 @@ async function translateWindow(
           await llmChat(env, [
             { role: 'system', content: SYSTEM_PROMPT(targetLang) },
             { role: 'user', content: windowPrompt(sub, cues[cues.length - 1]?.t || prevTail) },
-          ], 3000, round === 0 ? undefined : STRONG_MODEL),
+          ], 8000, round === 0 ? undefined : STRONG_MODEL),
           sub as CleanWord[]
         );
         if (more.length) cues.push(...more);
       } catch {}
     }
+  }
+  const left = computeHoles(cues, lo, hi).filter(([a, b]) => b - a + 1 >= 3);
+  if (left.length) {
+    const words = left.reduce((n, [a, b]) => n + (b - a + 1), 0);
+    console.log(`window ${lo}-${hi}: ${left.length} holes unresolved after 3 rounds, ${words} words skipped`);
   }
   attachSmallHoles(cues, lo, hi);
   return cues.sort((a, b) => a.w[0] - b.w[0]);
@@ -662,8 +655,11 @@ export async function translateWords(
   // answer failed validation, goes to the strong one on the last round. Running
   // everything through the strong model was what made this step cost more than
   // the translation it repairs.
-  for (let round = 0; round < 3; round++) {
-    const r = await refitCues(env, cues, words, targetLang, round === 2 ? STRONG_MODEL : undefined);
+  // Four rounds, because the faults feed each other: restoring a dropped name
+  // makes a cue too long, and splitting it is another round's work. Three left
+  // the repaired ones oversize because there was no round after the repair.
+  for (let round = 0; round < 4; round++) {
+    const r = await refitCues(env, cues, words, targetLang, round === 3 ? STRONG_MODEL : undefined);
     cues = r.cues as WCue[];
     if (!r.fixed) break;
   }
@@ -839,7 +835,9 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
   for (let i = 0; i < cues.length; i++) {
     const c = cues[i];
     if (c.q || c.w[1] < c.w[0]) continue;
-    if (tooBig(c) && c.w[1] > c.w[0]) {
+    if (c.end - c.start > 10 && c.w[1] > c.w[0] + 3) {
+      add([i], `one cue is holding ${(c.end - c.start).toFixed(0)} seconds of speech — that is a paragraph, not a subtitle; it must become several cues covering everything said`);
+    } else if (tooBig(c) && c.w[1] > c.w[0]) {
       add([i], c.text.length > MAX_CUE_CHARS
         ? `too long: ${c.text.replace(/\n/g, ' ').length} characters against a limit of ${MAX_CUE_CHARS}`
         : !twoLines(c.text) ? 'will not fit two lines of 42 characters'
