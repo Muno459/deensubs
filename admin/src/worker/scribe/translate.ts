@@ -122,7 +122,12 @@ function windowPrompt(win: CleanWord[], prevTail: string, verseContext?: string)
   // speaker recites, then explains. The verse itself is a locked cue the model
   // never translates, but without it here the explanation loses its referent.
   if (verseContext) {
-    lines.push(`The speaker has just recited this Quran passage, and the words below explain it. Use it to resolve pronouns and references. Do NOT translate or repeat it: ${verseContext}`, '');
+    // Two different notes arrive here. One is the verse just recited, which is
+    // background and must not be repeated. The other is a verse recited only in
+    // part INSIDE this window, which must be translated, in the wording given.
+    lines.push(verseContext.includes('PARTLY RECITED BELOW')
+      ? verseContext
+      : `The speaker has just recited this Quran passage, and the words below explain it. Use it to resolve pronouns and references. Do NOT translate or repeat it: ${verseContext}`, '');
   }
   if (prevTail) lines.push(`Previous cue for context (already translated, do NOT repeat): ${prevTail}`, '');
   lines.push('Words:');
@@ -497,12 +502,36 @@ export async function translateWords(
     const cite = citeQuote(q.verses);
     verseBefore.set(q.wEnd + 1, `${q.verses.map((v) => `“${v.en}”`).join(' ')} (Quran ${cite})`.slice(0, 1200));
   }
+  // A verse recited only in part is translated here like ordinary speech, and
+  // the model has no way to know it is handling Qur'an: "ألا بذكر الله تطمئن
+  // القلوب" came back as "Hearts find rest." The canonical wording of the whole
+  // ayah travels with the window so the recited clause can be rendered in its
+  // own register — and completely.
+  const fragmentNote = (win: CleanWord[]): string | undefined => {
+    const lo = win[0].i;
+    const hi = win[win.length - 1].i;
+    const hits = fragments.filter((f) => f.wEnd >= lo && f.wStart <= hi);
+    if (!hits.length) return undefined;
+    const seen = new Set<string>();
+    const lines: string[] = [];
+    for (const f of hits) {
+      if (seen.has(f.cite)) continue;
+      seen.add(f.cite);
+      const v = quotes.flatMap((q) => q.verses).find((x) => x.key === f.cite);
+      if (v) lines.push(`Quran ${f.cite}: “${v.en}”`);
+    }
+    return lines.length ? lines.join('\n').slice(0, 1400) : undefined;
+  };
+
   const windows: CleanWord[][] = [];
   const windowVerse: (string | undefined)[] = [];
   for (const [a, b] of freeRanges) {
     makeWindows(words.slice(a, b + 1)).forEach((w, i) => {
       windows.push(w);
-      windowVerse.push(i === 0 ? verseBefore.get(a) : undefined);
+      const before = i === 0 ? verseBefore.get(a) : undefined;
+      const frag = fragmentNote(w);
+      windowVerse.push([before, frag && `PARTLY RECITED BELOW — render the recited words in this wording, in full:\n${frag}`]
+        .filter(Boolean).join('\n\n') || undefined);
     });
   }
 
