@@ -54,6 +54,8 @@ ANCHOR_TOL = 0.002        # a cue start must BE a word start, not sit near one
 HOLE_TOL = 0.5            # speech on screen for nobody, in seconds
 LOITER_MAX = 2.0          # how long a cue may sit on screen after its last word
 OPENING_MAX = 8.0         # percent of cues allowed to open on a continuation
+PAUSE_MIN = 0.15          # an inter-word gap this long is a real break in delivery
+PAUSE_TARGET = 75.0       # percent of cues that must begin after one
 
 CLING = set(
     "a an the and or but nor so yet of in on at to for with from by as is was are were be been "
@@ -231,6 +233,27 @@ def main(srt_path, cues_path, asr_path):
     check("N1", f"speech: <={OPENING_MAX}% of cues open mid-sentence",
           pct(len(mid), len(speech)) <= OPENING_MAX,
           f"{len(mid)} ({pct(len(mid), len(speech)):.1f}%)")
+
+    # Did the model cut where the speaker actually broke? The audio is attached
+    # to every translation window precisely so it can hear that, and this is the
+    # only way to tell from the outside whether it used it. Only 18% of the
+    # inter-word gaps in a lecture are real pauses, so landing cue boundaries on
+    # them is a deliberate act, not chance. Published baseline was 58%.
+    pause_before = {}
+    for i in range(1, len(words)):
+        pause_before[round(words[i]["start"], 3)] = words[i]["start"] - words[i - 1]["end"]
+    onpause = 0
+    counted = 0
+    for c in speech:
+        g = pause_before.get(round(c["start"], 3))
+        if g is None:
+            continue          # first word of the talk: nothing to pause after
+        counted += 1
+        if g >= PAUSE_MIN:
+            onpause += 1
+    check("A1", f">={PAUSE_TARGET:.0f}% of cues begin after a pause of {PAUSE_MIN}s",
+          pct(onpause, counted) >= PAUSE_TARGET,
+          f"{onpause}/{counted} ({pct(onpause, counted):.1f}%)")
 
     # ---- sync, measured against the ASR ----------------------------------
     starts = word_starts

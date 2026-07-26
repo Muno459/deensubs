@@ -83,7 +83,12 @@ COVERAGE
 
 EVERY CUE MUST READ AS A SENTENCE, NOT AS A SLICE OF ONE
 This is what separates a subtitle from a transcript chopped into boxes. Each cue is on screen alone for a few seconds and has to make sense there.
-- START where a thought starts. Never open a cue with a comma, and never open on a continuation that only parses if the viewer still has the previous cue in their head. "and a sun in broad daylight." is wrong. Either keep it with the clause it belongs to, or open with a subject: "He was like a sun in broad daylight."
+- START where a thought starts. A cue must never open with a comma, and never with a lowercase continuation that only parses if the viewer still has the previous cue in their head.
+- ARABIC CHAINS, ENGLISH DOES NOT. The speaker links clause after clause with \u0648, \u0641 and \u062b\u0645, and a single spoken sentence can run for half a minute. Do NOT carry that chain into English and spread one sentence over five cues. Break the chain into separate English sentences, each one complete, each one a cue. This is the most common way subtitles go wrong here:
+    WRONG   "He was a beacon fire" / "and a sun in broad daylight." / "and whose confidant is its minbar."
+    RIGHT   "He was a beacon fire, a sun in broad daylight." / "The minbar was his confidant."
+- So before you emit a cue, read its text alone. If it does not stand up as a sentence by itself, you have cut a sentence into slices: either fold it into the cue before it, or give it its own subject and verb.
+- A cue may legitimately begin with And, But or So when it opens a real sentence \u2014 capitalised, standing on its own. That is different from a stranded fragment.
 - END where the grammar closes: a sentence, or a complete clause. Never end on a word that governs the next one — an article, preposition, conjunction, auxiliary verb, or relative pronoun.
 - Keep together what cannot be understood apart: a verb and its object, a name and its title, a number and its unit, a quotation and the verb introducing it.
 - When a thought is too long for one cue, break it where the sentence itself breathes — at a clause boundary, before a conjunction, after a completed statement — and make the next cue stand up on its own.
@@ -237,13 +242,17 @@ export async function windowAudio(env: ScribeEnv, opts: AudioOpts, startSec: num
  *  punctuation and word timings only approximate. So when audio is present it
  *  outranks the textual heuristics for cut placement. */
 export const AUDIO_NOTE = `
-- You are ALSO given the actual audio of this passage (it begins at the first listed word). The numbered words stay the authoritative transcript, but the AUDIO is the authority on WHERE TO CUT.
-- Put cue boundaries where the speaker actually breaks: a breath, a held pause, the voice falling to close a thought or lifting to open a new one. Never cut while the speaker is still mid-flow just because the text reached its character budget; end the cue earlier, at the last real break.
-- Equally, do not invent a break the speaker did not make. If they run a phrase straight through, keep it in one cue.
-- A phrase delivered in one continuous breath belongs in one cue. If it is too long for one cue, split it at the speaker's own internal pause, never at the midpoint of the text.
-- Keep an emphasised or stressed word together with the phrase it belongs to.
-- Recitation (Quran, hadith, du'a) is phrased by the reciter's stops, which do not line up with English sentence punctuation. Follow what you hear.
-- The [GAP] markers are a rough hint derived from timings. Trust the audio over them.`;
+- You are ALSO given the actual audio of this passage (it begins at the first listed word). The numbered words stay the authoritative transcript, but the AUDIO is the authority on WHERE A SENTENCE ENDS and therefore where a cue ends.
+
+LISTEN FOR THESE, IN THIS ORDER
+- FALLING INTONATION. When the voice drops and settles, the thought is finished: end the cue there and let the next one open a new sentence. When the voice holds level or rises, he is still going — do not end a cue there even if the text reached its limit. This is the single most useful thing in the audio.
+- BREATH GROUPS. He speaks in groups bounded by breaths. One breath group is one cue whenever it fits. If a group is too long for one cue, divide it at his own internal pause, never at the midpoint of the text.
+- QUOTATION. His voice changes when he quotes the Qur'an, a hadith, or a person — slower, more measured, often louder. Open a cue where the quoted speech begins and close it where his normal voice returns, so the quotation is not half in one cue and half in another.
+- ENUMERATION. When he lists, each item lands on its own beat. Follow those beats: one item per cue where the timing allows.
+- EMPHASIS. A word he stresses belongs with the phrase it is stressing. Never separate it from that phrase.
+- HESITATION. False starts, repeated words and filler are audible. Leave them out of the translation; their word indices still belong to the cue covering that span.
+- RECITATION is phrased by the reciter's stops, which do not follow English punctuation. Follow what you hear, not where a comma would go.
+- The [GAP] markers are a rough hint from the timings. Trust the audio over them, and trust both over the character count.`;
 
 export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000, model?: string): Promise<string> {
   const base = (env.SCRIBE_LLM_URL || '').replace(/\/$/, '');
