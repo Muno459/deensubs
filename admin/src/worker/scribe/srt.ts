@@ -51,18 +51,6 @@ function greedyWrap(words: string[], maxLine: number): string {
  *  actually breathes rather than at the raw character midpoint: punctuation
  *  first, then a balanced break that does not strand a function word. */
 export function wrapCueText(text: string, maxLine = 42): string {
-  // A break the model put in is the best one available: it knows where the
-  // sentence divides, which is what the Netflix rule is actually asking for.
-  // Measuring only takes over when there is no break to honour or it does not
-  // fit the line width.
-  if (text.includes('\n')) {
-    const given = text.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
-    // Honour it when it fits AND does not strand a word that governs the next
-    // line. A break after "the" or "of" reads as a stumble whether a model or a
-    // scoring function put it there, and measuring can do better than that.
-    const strands = given.length === 2 && isCling(given[0].split(' ').pop() || '');
-    if (given.length === 2 && given.every((l) => l.length <= maxLine) && !strands) return given.join('\n');
-  }
   const clean = text.replace(/\s+/g, ' ').trim();
   if (clean.length <= maxLine) return clean;
   const words = clean.split(' ');
@@ -80,9 +68,7 @@ export function wrapCueText(text: string, maxLine = 42): string {
     // function word a big penalty.
     let score = -Math.abs(l1 - half) / half;
     if (/[.!?:;,—…]$/.test(words[i])) score += 1.0;
-    // Breaking after a word that governs the next one reads as a stumble, so it
-    // has to lose to any alternative that fits, however lopsided that split is.
-    if (isCling(words[i])) score -= 4.0;
+    if (isCling(words[i])) score -= 0.8;
     if (score > bestScore) { bestScore = score; best = i; }
   }
   if (best < 0) return greedyWrap(words, maxLine); // cannot fit two lines

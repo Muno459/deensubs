@@ -4,7 +4,7 @@
 import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';
 import { download, needsBrowser } from './download';
 import { runAsr, loadAsr } from './asr';
-import { translateWords, reviewCues, takeUsage, takeCost } from './translate';
+import { translateWords, qaPass, takeUsage, takeCost } from './translate';
 import { translateWordsAudiobook, qaPassAudiobook, buildTranscript } from './audiobook';
 import { generateChapters, generateMetaAndChapters } from './metadata';
 import { generateThumbCandidates } from './publish';
@@ -270,14 +270,7 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
         const cuesKey = lang === primary ? `scribe/${jobId}/cues.json` : `scribe/${jobId}/cues.${lang}.json`;
         const tr = await step.do(
           `translate-${lang}`,
-          // A 69-minute lecture measured 45-51 minutes here: 37 windows, each a
-          // multimodal call carrying its slice of the audio, plus hole-filling.
-          // The old 45-minute limit sat right on that, so the step timed out and
-          // retried, and each retry re-translated the whole lecture from scratch
-          // (four of them, at roughly 1.5M tokens a go). Give it room to finish
-          // and retry fewer times, since a timeout here is expensive and a
-          // genuine failure is usually not transient.
-          { retries: { limit: 2, delay: '1 minute', backoff: 'exponential' }, timeout: '2 hours' },
+          { retries: { limit: 4, delay: '1 minute', backoff: 'exponential' }, timeout: '45 minutes' },
           async () => {
             const existing = await env.MEDIA_BUCKET.get(cuesKey);
             if (existing) {
@@ -312,50 +305,13 @@ export class ScribePipeline extends WorkflowEntrypoint<ScribeEnv, ScribeParams> 
               const obj = await env.MEDIA_BUCKET.get(cuesKey);
               if (!obj) throw new Error('cues missing for QA');
               const cues = await obj.json<Cue[]>();
-              // Keep what translation produced before QA rewrites it. Without
-              // this the only surviving artifact is the finished file, and a
-              // wrong word in a cue cannot be traced to the pass that put it
-              // there — which is exactly the position a real defect left us in.
-              await env.MEDIA_BUCKET.put(`scribe/${jobId}/cues-pre-qa-${lang}.json`, JSON.stringify(cues), {
-                httpMetadata: { contentType: 'application/json' },
-              }).catch(() => {});
-              // ONE review pass for subtitles. Code measures each cue — reading
-              // speed, line width, a comma at the end, a dropped honorific, a
-              // translation too short for the seconds it covers — and the model
-              // rewrites only the wording of the ones that need it. It cannot
-              // move a boundary, so nothing here can cost sync. This replaces a
-              // general QA pass plus a condense pass plus four rounds of
-              // re-cutting: three passes over the same cues, each able to undo
-              // the last.
-              let final = cues;
-              let tightened = 0;
-              if (isAudiobook) {
-                const r = await qaPassAudiobook(env, cues as any, lang);
-                final = r.cues as any;
-                tightened = r.fixes;
-              } else {
-                // Twice. The first pass fixes most of what is flagged; a rewrite
-                // can still come back over the line limit, and re-measuring is
-                // free. This is safe to repeat in a way the old re-cutting loop
-                // was not: it only touches cues that are still flagged and never
-                // moves a boundary, so a second pass cannot disturb a cue that
-                // is already right.
-                // The word list goes with it: the one thing this pass may do to
-                // a boundary is split a cue that cannot be shown without losing
-                // content, and a split has to land on a real word.
-                const { cleanWords } = await import('./translate');
-                const revWords = cleanWords((await loadAsr(env, asr.asrKey)).words);
-                for (let pass = 0; pass < 2; pass++) {
-                  const r = await reviewCues(env, final, lang, revWords);
-                  final = r.cues;
-                  tightened += r.fixed;
-                  if (!r.fixed) break;
-                }
-              }
-              await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(final), {
+              const repaired = isAudiobook
+                ? await qaPassAudiobook(env, cues as any, lang)
+                : await qaPass(env, cues, lang);
+              await env.MEDIA_BUCKET.put(cuesKey, JSON.stringify(repaired.cues), {
                 httpMetadata: { contentType: 'application/json' },
               });
-              return { fixes: tightened, tokens: takeUsage(), cost: takeCost() };
+              return { fixes: repaired.fixes, tokens: takeUsage(), cost: takeCost() };
             }
           );
           await addTokens(env, jobId, qa.tokens, (qa as any).cost || 0);

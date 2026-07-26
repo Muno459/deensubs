@@ -33,9 +33,6 @@ export type Cue = {
   text: string; // translated text
   source: string; // original-language text (joined words)
   q?: string; // Quran verse key ("2:255") — canonical LOCKED cue, never LLM-edited
-  // Word range this cue came from. Kept so the one pass that may split a cue can
-  // do it on a real word boundary, which is the only way timing survives.
-  w?: [number, number];
 };
 
 export type AsrResult = {
