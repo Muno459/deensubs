@@ -758,26 +758,35 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
   // Group the work. An ill-fitting cue is re-cut on its own; a cue that reads as
   // a fragment is re-cut with the one before it. Groups that touch are merged so
   // no cue is sent twice in one round.
-  const groups: number[][] = [];
+  // Each group carries WHY it is being sent back. Handing the model a set of
+  // cues and a list of rules leaves it to work out which rule each one breaks;
+  // naming the fault is the difference between "make these better" and a task.
+  const groups: { idx: number[]; why: string[] }[] = [];
+  const add = (idx: number[], why: string) => groups.push({ idx, why: [why] });
   for (let i = 0; i < cues.length; i++) {
     const c = cues[i];
     if (c.q || c.w[1] < c.w[0]) continue;
-    if (tooBig(c) && c.w[1] > c.w[0]) groups.push([i]);
-    else if (opensMid(c.text) && i > 0 && !cues[i - 1].q && cues[i - 1].w[1] + 1 === c.w[0]) {
-      groups.push([i - 1, i]);
+    if (tooBig(c) && c.w[1] > c.w[0]) {
+      add([i], c.text.length > MAX_CUE_CHARS
+        ? `too long: ${c.text.replace(/\n/g, ' ').length} characters against a limit of ${MAX_CUE_CHARS}`
+        : !twoLines(c.text) ? 'will not fit two lines of 42 characters'
+        : `too fast to read: ${Math.round(c.text.length / Math.max(0.3, c.end - c.start))} characters per second`);
+    } else if (opensMid(c.text) && i > 0 && !cues[i - 1].q && cues[i - 1].w[1] + 1 === c.w[0]) {
+      add([i - 1, i], 'the second cue opens as a fragment of the first — it does not read on its own');
     } else if (endsHanging(c.text) && i + 1 < cues.length && !cues[i + 1].q
                && c.w[1] + 1 === cues[i + 1].w[0]) {
-      groups.push([i, i + 1]);
+      add([i, i + 1], 'the first cue ends on a word that governs the next one');
     } else if (dropsHonorific(c)) {
-      groups.push([i]);
+      add([i], 'the Arabic carries an honorific that the translation drops');
     }
   }
-  const merged: number[][] = [];
+  const merged: { idx: number[]; why: string[] }[] = [];
   for (const g of groups) {
     const last = merged[merged.length - 1];
-    if (last && g[0] <= last[last.length - 1]) {
-      for (const i of g) if (!last.includes(i)) last.push(i);
-    } else merged.push([...g]);
+    if (last && g.idx[0] <= last.idx[last.idx.length - 1]) {
+      for (const i of g.idx) if (!last.idx.includes(i)) last.idx.push(i);
+      for (const w of g.why) if (!last.why.includes(w)) last.why.push(w);
+    } else merged.push({ idx: [...g.idx], why: [...g.why] });
   }
   if (!merged.length) return { cues, fixed: 0 };
 
@@ -787,10 +796,11 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
   // a time this took longer than the translation itself: a lecture produces a
   // few hundred groups and three rounds of them serially is hundreds of
   // sequential calls.
-  const jobs: number[][][] = [];
+  const jobs: { idx: number[]; why: string[] }[][] = [];
   for (let k = 0; k < merged.length; k += BATCH) jobs.push(merged.slice(k, k + BATCH));
-  const runBatch = async (batch: number[][]) => {
-    const body = batch.map((g) => {
+  const runBatch = async (batch: { idx: number[]; why: string[] }[]) => {
+    const body = batch.map((gr) => {
+      const g = gr.idx;
       const first = cues[g[0]];
       const last = cues[g[g.length - 1]];
       // Same markers the translation window carries, so a re-cut can respect the
@@ -810,7 +820,7 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
       }).join('\n');
       const cur = g.map((i) => `  [${cues[i].text.replace(/\n/g, ' ').length} chars] ${cues[i].text.replace(/\n/g, ' ')}`).join('\n');
       const secs = (last.end - first.start).toFixed(1);
-      return `### ${g[0]}\nCurrent ${g.length === 1 ? 'cue' : 'cues'} over ${secs}s (limit is ${MAX_CUE_CHARS} characters each):\n${cur}\nWords ${first.w[0]}-${last.w[1]}:\n${ws}`;
+      return `### ${g[0]}\nProblem: ${gr.why.join('; ')}\nCurrent ${g.length === 1 ? 'cue' : 'cues'} over ${secs}s:\n${cur}\nWords ${first.w[0]}-${last.w[1]}:\n${ws}`;
     }).join('\n\n');
     try {
       const raw = await llmChat(env, [
@@ -837,11 +847,11 @@ No commentary, no code fences, JSONL only.` },
         // The id comes back as a number or a string depending on the model's
         // mood; a strict mismatch here would silently discard every repair.
         const id = Number(f.id);
-        const g = merged.find((x) => x[0] === id);
+        const g = merged.find((x) => x.idx[0] === id);
         const list = Array.isArray(f.cues) ? f.cues : Array.isArray(f.pieces) ? f.pieces : null;
         if (!g || !list || !list.length) continue;
-        const src = cues[g[0]];
-        const tail = cues[g[g.length - 1]];
+        const src = cues[g.idx[0]];
+        const tail = cues[g.idx[g.idx.length - 1]];
         const parts = list.filter((p: any) => Array.isArray(p.w) && typeof p.t === 'string' && p.t.trim());
         if (!parts.length) continue;
         let ok = parts[0].w[0] === src.w[0] && parts[parts.length - 1].w[1] === tail.w[1];
@@ -851,7 +861,7 @@ No commentary, no code fences, JSONL only.` },
           else if (n > 0 && x !== parts[n - 1].w[1] + 1) ok = false;
         }
         if (!ok) continue;
-        replaced.set(g[0], parts.map((p: any) => {
+        replaced.set(g.idx[0], parts.map((p: any) => {
           const a = words[p.w[0]];
           const b = words[p.w[1]];
           return {
@@ -875,7 +885,7 @@ No commentary, no code fences, JSONL only.` },
   if (!replaced.size) return { cues, fixed: 0 };
 
   const drop = new Set<number>();
-  for (const g of merged) if (replaced.has(g[0])) for (const i of g) drop.add(i);
+  for (const g of merged) if (replaced.has(g.idx[0])) for (const i of g.idx) drop.add(i);
   const result: T[] = [];
   for (let i = 0; i < cues.length; i++) {
     const r = replaced.get(i);
