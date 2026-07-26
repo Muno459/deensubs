@@ -782,8 +782,13 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
 
   const replaced = new Map<number, T[]>();
   const BATCH = 6;
-  for (let k = 0; k < merged.length; k += BATCH) {
-    const batch = merged.slice(k, k + BATCH);
+  // Each batch is an independent request, so they go out together. Run one at
+  // a time this took longer than the translation itself: a lecture produces a
+  // few hundred groups and three rounds of them serially is hundreds of
+  // sequential calls.
+  const jobs: number[][][] = [];
+  for (let k = 0; k < merged.length; k += BATCH) jobs.push(merged.slice(k, k + BATCH));
+  const runBatch = async (batch: number[][]) => {
     const body = batch.map((g) => {
       const first = cues[g[0]];
       const last = cues[g[g.length - 1]];
@@ -857,6 +862,9 @@ No commentary, no code fences, JSONL only.` },
     } catch (err) {
       console.log('refit batch failed (non-fatal):', (err as any)?.message);
     }
+  };
+  for (let i = 0; i < jobs.length; i += CONCURRENCY) {
+    await Promise.all(jobs.slice(i, i + CONCURRENCY).map(runBatch));
   }
   if (!replaced.size) return { cues, fixed: 0 };
 
