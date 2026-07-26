@@ -732,6 +732,22 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
     'at', 'to', 'for', 'with', 'from', 'by', 'as', 'is', 'was', 'are', 'were', 'be', 'been', 'that',
     'which', 'who', 'whom', 'whose', 'this', 'these', 'those', 'his', 'her', 'its', 'their', 'our',
     'your', 'my', 'not', 'no', 'if', 'when', 'while', 'than', 'then', 'into', 'upon', 'about']);
+  // Honorifics are substantive here, not decoration: the ﷺ after the Prophet's
+  // name is part of the sentence to this audience. Each Arabic form has accepted
+  // English renderings, and a cue whose Arabic carries one but whose translation
+  // does not is sent back to be said properly.
+  const HONORIFICS: [string[], string[]][] = [
+    [['صلى الله عليه وسلم', 'عليه الصلاة والسلام'], ['ﷺ', 'peace be upon him', 'blessings and peace']],
+    [['سبحانه وتعالى', 'تبارك وتعالى', 'عز وجل', 'جل جلاله'], ['ﷻ', 'glorified and exalted', 'exalted be he', 'the most high', 'almighty']],
+    [['رضي الله عنهما', 'رضي الله عنهم', 'رضي الله عنها', 'رضي الله عنه'], ['(ra)', 'ra)', 'may allah be pleased']],
+    [['رحمه الله', 'رحمها الله'], ['(rh)', 'rh)', 'may allah have mercy']],
+    [['عليهم السلام', 'عليه السلام'], ['(as)', 'as)', 'peace be upon him', 'peace be upon them']],
+  ];
+  const dropsHonorific = (c: T) => {
+    const src = c.source || '';
+    const en = c.text.toLowerCase();
+    return HONORIFICS.some(([ar, forms]) => ar.some((a) => src.includes(a)) && !forms.some((f) => en.includes(f)));
+  };
   const endsHanging = (t: string) => {
     const w = t.trim().split(/\s+/);
     const last = (w[w.length - 1] || '').toLowerCase().replace(/[^a-z']/g, '');
@@ -751,6 +767,8 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
     } else if (endsHanging(c.text) && i + 1 < cues.length && !cues[i + 1].q
                && c.w[1] + 1 === cues[i + 1].w[0]) {
       groups.push([i, i + 1]);
+    } else if (dropsHonorific(c)) {
+      groups.push([i]);
     }
   }
   const merged: number[][] = [];
@@ -786,7 +804,7 @@ HARD REQUIREMENTS — a reply breaking any of these is discarded and the origina
 - The pieces must cover the given word range EXACTLY: the first starts at the range's first index, the last ends at its last index, each begins on the index right after the previous ends. No gaps, no overlaps, no reordering.
 - Every piece: at most 84 characters, at most 2 lines of 42, with the break given as \\n.
 - EVERY PIECE MUST READ AS A SENTENCE ON ITS OWN. None may open with a comma or a lowercase continuation of the piece before it, and none may END on a word that governs the next one (an article, preposition, conjunction, auxiliary or relative pronoun). Reword freely to achieve this — moving the boundary is not enough, and this is the main thing being asked for. Arabic chains clauses endlessly with و; English must not. Write separate sentences.
-- Keep all the meaning. Keep honorifics (Allah ﷻ, the Prophet ﷺ, RA/AS/RH) and transliterations (fiqh, Sharia, Tawhid).
+- Keep all the meaning. Where the Arabic says صلى الله عليه وسلم, سبحانه وتعالى, رضي الله عنه, رحمه الله or عليه السلام, the translation must carry it — as ﷺ, ﷻ, (RA), (RH), (AS) or spelled out. Keep transliterations (fiqh, Sharia, Tawhid).
 - Aim for at most 17 characters per second of each piece's own duration, readable from the word timings.
 - Prefer boundaries where the speaker pauses, which the timings show as a gap between words.
 No commentary, no code fences, JSONL only.` },
