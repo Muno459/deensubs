@@ -301,7 +301,33 @@ export async function publishScribeJob(env: PublishEnv, jobId: string, opts: Pub
         asrObj.json<any>(),
         cuesObj.json<any[]>(),
       ]);
-      const doc = buildTranscript(asr.words || [], cues as any, job.chapters || null, null);
+      // buildTranscript addresses cues by word range, which the video path does
+      // not keep on cues.json — so it crashed on `a.w[0]` of undefined. Rebuild
+      // the range from the timings: each cue owns the words that start inside it.
+      const clean = (asr.words || []).filter((w: any) => (w.type || 'word') === 'word' && (w.text || '').trim());
+      const withRanges = cues.map((cu: any) => {
+        if (Array.isArray(cu.w)) return cu;
+        let a = -1;
+        let b = -1;
+        for (let i = 0; i < clean.length; i++) {
+          const t = clean[i].start;
+          if (t >= cu.start - 0.001 && t < cu.end - 0.001) {
+            if (a < 0) a = i;
+            b = i;
+          }
+        }
+        // A cue with no word starting inside it (a very short one) still needs a
+        // range; give it the nearest word so ordering stays sane.
+        if (a < 0) {
+          let best = 0;
+          for (let i = 0; i < clean.length; i++) {
+            if (Math.abs(clean[i].start - cu.start) < Math.abs(clean[best].start - cu.start)) best = i;
+          }
+          a = b = best;
+        }
+        return { ...cu, w: [a, b] as [number, number] };
+      });
+      const doc = buildTranscript(asr.words || [], withRanges as any, job.chapters || null, null);
       await env.MEDIA_BUCKET.put(`scribe/${jobId}/transcript.json`, JSON.stringify(doc), {
         httpMetadata: { contentType: 'application/json' },
       });

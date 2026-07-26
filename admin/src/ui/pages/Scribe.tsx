@@ -383,7 +383,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
   if (!open || !form) return null;
 
   return (
-    <Modal open={open} onClose={onClose} title="Publish as video" wide>
+    <Modal open={open} onClose={onClose} title={isVideoFile ? 'Publish as video' : 'Publish as audiobook'} wide>
       {done ? (
         <div className="space-y-4 text-center">
           <p className="text-[15px] font-semibold text-cream">Published</p>
@@ -599,7 +599,7 @@ function PublishModal({ job, open, onClose }: { job: any; open: boolean; onClose
                 setPublishing(false);
               }}
             >
-              {publishing ? 'Publishing...' : 'Publish video'}
+              {publishing ? 'Publishing...' : isVideoFile ? 'Publish video' : 'Publish audiobook'}
             </Button>
           </div>
         </div>
