@@ -328,8 +328,15 @@ function parseCues(raw: string, win: CleanWord[]): { w: [number, number]; t: str
 }
 
 // Escalation + QA model: bulk runs on cheap gemini, sonnet handles the hard parts
-const STRONG_MODEL = 'ag/claude-sonnet-4-6';
-const QA_MODEL = 'ag/claude-opus-4-6-thinking'; // touch-ups deserve the best; plain opus-4-6 404s on the router
+// One model does everything in this pipeline. The repair and QA passes used to
+// reach for a slower, pricier one on the theory that touch-ups deserve the best;
+// measured, that is what turned a two-and-a-half minute translate step into
+// forty. Quality here is held by validation — a reply that does not tile the
+// word range, fit its own seconds or cut at his pauses is discarded whichever
+// model wrote it — so the fast model is the right one throughout.
+const FLASH = 'ag/gemini-3.6-flash-tiered';
+const STRONG_MODEL = FLASH;
+const QA_MODEL = FLASH;
 
 /** Uncovered index ranges within [lo,hi] given parsed cues. */
 function computeHoles(cues: { w: [number, number] }[], lo: number, hi: number): [number, number][] {
