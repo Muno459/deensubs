@@ -787,8 +787,21 @@ export async function refitCues<T extends Cue & { w: [number, number] }>(
     const body = batch.map((g) => {
       const first = cues[g[0]];
       const last = cues[g[g.length - 1]];
-      const ws = words.slice(first.w[0], last.w[1] + 1)
-        .map((w) => `${w.i}\t${w.start.toFixed(2)}-${w.end.toFixed(2)}\t${w.text}`).join('\n');
+      // Same markers the translation window carries, so a re-cut can respect the
+      // speaker changes and the pauses it is being asked to cut on.
+      const slice = words.slice(first.w[0], last.w[1] + 1);
+      let spk = slice[0]?.speaker || '';
+      const ws = slice.map((w, n) => {
+        const bits: string[] = [];
+        if (n > 0) {
+          const gap = w.start - slice[n - 1].end;
+          if (gap >= 0.6) bits.push(`[BREAK ${Math.round(gap * 1000)}ms]`);
+          else if (gap >= 0.15) bits.push(`[PAUSE ${Math.round(gap * 1000)}ms]`);
+        }
+        if (w.speaker && w.speaker !== spk) { bits.push(`[SPEAKER ${w.speaker}]`); spk = w.speaker; }
+        bits.push(`${w.i}\t${w.start.toFixed(2)}-${w.end.toFixed(2)}\t${w.text}`);
+        return bits.join('\n');
+      }).join('\n');
       const cur = g.map((i) => `  [${cues[i].text.replace(/\n/g, ' ').length} chars] ${cues[i].text.replace(/\n/g, ' ')}`).join('\n');
       const secs = (last.end - first.start).toFixed(1);
       return `### ${g[0]}\nCurrent ${g.length === 1 ? 'cue' : 'cues'} over ${secs}s (limit is ${MAX_CUE_CHARS} characters each):\n${cur}\nWords ${first.w[0]}-${last.w[1]}:\n${ws}`;
@@ -806,7 +819,7 @@ HARD REQUIREMENTS — a reply breaking any of these is discarded and the origina
 - EVERY PIECE MUST READ AS A SENTENCE ON ITS OWN. None may open with a comma or a lowercase continuation of the piece before it, and none may END on a word that governs the next one (an article, preposition, conjunction, auxiliary or relative pronoun). Reword freely to achieve this — moving the boundary is not enough, and this is the main thing being asked for. Arabic chains clauses endlessly with و; English must not. Write separate sentences.
 - Keep all the meaning. Where the Arabic says صلى الله عليه وسلم, سبحانه وتعالى, رضي الله عنه, رحمه الله or عليه السلام, the translation must carry it — as ﷺ, ﷻ, (RA), (RH), (AS) or spelled out. Keep transliterations (fiqh, Sharia, Tawhid).
 - Aim for at most 17 characters per second of each piece's own duration, readable from the word timings.
-- Prefer boundaries where the speaker pauses, which the timings show as a gap between words.
+- Prefer boundaries at [PAUSE] and [BREAK], which is where he actually stops. Never carry two speakers in one cue: always cut at [SPEAKER].
 No commentary, no code fences, JSONL only.` },
         { role: 'user', content: body },
       ], 8000, STRONG_MODEL);
