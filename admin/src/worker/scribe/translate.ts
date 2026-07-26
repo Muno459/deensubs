@@ -89,6 +89,8 @@ This is what separates a subtitle from a transcript chopped into boxes. Each cue
     RIGHT   "He was a beacon fire, a sun in broad daylight." / "The minbar was his confidant."
 - So before you emit a cue, read its text alone. If it does not stand up as a sentence by itself, you have cut a sentence into slices: either fold it into the cue before it, or give it its own subject and verb.
 - A cue may legitimately begin with And, But or So when it opens a real sentence \u2014 capitalised, standing on its own. That is different from a stranded fragment.
+- CONCRETELY: fewer than one cue in twelve should need the previous cue to make sense. Measured on the last version, nearly HALF of them did. Treat that as the main thing to get right.
+- A cue must also carry the words being spoken UNDER it. Do not translate a long chain early and leave its tail for the next cue: that puts one word on screen for three seconds while the speaker says a whole clause. The text of a cue and the audio of a cue must be the same content.
 - END where the grammar closes: a sentence, or a complete clause. Never end on a word that governs the next one — an article, preposition, conjunction, auxiliary verb, or relative pronoun.
 - Keep together what cannot be understood apart: a verb and its object, a name and its title, a number and its unit, a quotation and the verb introducing it.
 - When a thought is too long for one cue, break it where the sentence itself breathes — at a clause boundary, before a conjunction, after a completed statement — and make the next cue stand up on its own.
@@ -252,7 +254,9 @@ LISTEN FOR THESE, IN THIS ORDER
 - EMPHASIS. A word he stresses belongs with the phrase it is stressing. Never separate it from that phrase.
 - HESITATION. False starts, repeated words and filler are audible. Leave them out of the translation; their word indices still belong to the cue covering that span.
 - RECITATION is phrased by the reciter's stops, which do not follow English punctuation. Follow what you hear, not where a comma would go.
-- The [GAP] markers are a rough hint from the timings. Trust the audio over them, and trust both over the character count.`;
+- The [GAP] markers are a rough hint from the timings. Trust the audio over them, and trust both over the character count.
+- CONCRETELY: at least three cues in four should begin immediately after a pause of 0.15s or longer. Pauses that long are only about one word gap in five, so this means choosing your boundaries around his breathing rather than around the text. Measured on the last version, only 57% did.
+- Speaker changes are marked [SPEAKER]. Never carry two speakers in one cue \u2014 always start a new cue at the change.`;
 
 export async function llmChat(env: ScribeEnv, messages: any[], maxTokens = 4000, model?: string): Promise<string> {
   const base = (env.SCRIBE_LLM_URL || '').replace(/\/$/, '');

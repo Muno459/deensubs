@@ -56,6 +56,8 @@ LOITER_MAX = 2.0          # how long a cue may sit on screen after its last word
 OPENING_MAX = 8.0         # percent of cues allowed to open on a continuation
 PAUSE_MIN = 0.15          # an inter-word gap this long is a real break in delivery
 PAUSE_TARGET = 75.0       # percent of cues that must begin after one
+DRIFT_MAX = 2.0           # percent of cues whose text may not match their own audio
+SPEAKER_MAX = 2.0         # percent of cues that may span a change of speaker
 
 CLING = set(
     "a an the and or but nor so yet of in on at to for with from by as is was are were be been "
@@ -101,10 +103,11 @@ def main(srt_path, cues_path, asr_path):
     if len(srt) == len(cues):
         for s, c in zip(srt, cues):
             s["q"] = c.get("q")
+            s["source"] = c.get("source") or ""
     else:
-        qmap = {round(c["start"], 2): c.get("q") for c in cues}
+        qmap = {round(c["start"], 2): (c.get("q"), c.get("source") or "") for c in cues}
         for s in srt:
-            s["q"] = qmap.get(round(s["start"], 2))
+            s["q"], s["source"] = qmap.get(round(s["start"], 2), (None, ""))
 
     speech = [c for c in srt if not c["q"]]
     verses = [c for c in srt if c["q"]]
@@ -254,6 +257,50 @@ def main(srt_path, cues_path, asr_path):
     check("A1", f">={PAUSE_TARGET:.0f}% of cues begin after a pause of {PAUSE_MIN}s",
           pct(onpause, counted) >= PAUSE_TARGET,
           f"{onpause}/{counted} ({pct(onpause, counted):.1f}%)")
+
+    # Does the line on screen actually translate the words being said UNDER it?
+    # T1 only proves a cue starts on a word; it cannot tell that the English
+    # belongs to that word. When the model renders a long Arabic chain early and
+    # dribbles the tail, a cue ends up showing "Tawhid," for three seconds while
+    # the speaker says a whole clause — perfectly anchored, and completely out of
+    # step with his mouth. English runs a fairly steady length against its
+    # Arabic, so a cue far off that ratio is one whose content has drifted across
+    # a boundary. Arabic honorifics are collapsed first: صلى الله عليه وسلم is 18
+    # characters that render as one glyph, which would flag a clean cue.
+    HONORIFICS = [
+        "صلى الله عليه وسلم", "رضي الله عنهما", "رضي الله عنها", "رضي الله عنه",
+        "سبحانه وتعالى", "تبارك وتعالى", "عليه الصلاة والسلام", "عليه السلام",
+        "رحمه الله", "عز وجل", "جل جلاله",
+    ]
+
+    def ar_len(t):
+        for h in HONORIFICS:
+            t = t.replace(h, "*")
+        return len(t)
+
+    pairs = [(len(c["text"]) / max(1, ar_len(c.get("source", ""))), c)
+             for c in speech if (c.get("source") or "").strip()]
+    if pairs:
+        ratios = sorted(r for r, _ in pairs)
+        med = ratios[len(ratios) // 2]
+        drift = [c for r, c in pairs if r < med * 0.5 or r > med * 2.0]
+        check("L1", f"<={DRIFT_MAX}% of cues carry text that is not what is being said",
+              pct(len(drift), len(pairs)) <= DRIFT_MAX,
+              f"{len(drift)} ({pct(len(drift), len(pairs)):.1f}%), median ratio {med:.2f}")
+
+    # A cue that spans a change of speaker puts two people in one box. Splitting
+    # on diarisation is always allowed, so there is no excuse for it.
+    wstarts = [w["start"] for w in words]
+    spanning = 0
+    for c in speech:
+        i = bisect.bisect_left(wstarts, c["start"] - 1e-6)
+        j = bisect.bisect_left(wstarts, c["end"] - 1e-6)
+        who = {words[k].get("speaker_id") for k in range(i, min(j + 1, len(words)))}
+        if len(who) > 1:
+            spanning += 1
+    check("D1", f"<={SPEAKER_MAX}% of cues span a change of speaker",
+          pct(spanning, len(speech)) <= SPEAKER_MAX,
+          f"{spanning} ({pct(spanning, len(speech)):.1f}%)")
 
     # ---- sync, measured against the ASR ----------------------------------
     starts = word_starts
