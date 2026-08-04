@@ -32,6 +32,8 @@ import appleTouchIcon from '../artifacts/favicon/apple-touch-icon.png';
 import manifestIcon192 from '../artifacts/favicon/web-app-manifest-192x192.png';
 import manifestIcon512 from '../artifacts/favicon/web-app-manifest-512x512.png';
 import ogImage from '../artifacts/og-image.png';
+// "Download on the App Store" badge (SVG Repo), footer link to the iOS app
+import appStoreBadge from '../artifacts/app-store-badge.svg';
 
 const FONT_MAP = {
   'amiri-400-arabic': amiri400arabic,
@@ -75,6 +77,7 @@ feeds.get('/apple-touch-icon.png', (c) => new Response(appleTouchIcon, { headers
 feeds.get('/web-app-manifest-192x192.png', (c) => new Response(manifestIcon192, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
 feeds.get('/web-app-manifest-512x512.png', (c) => new Response(manifestIcon512, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
 feeds.get('/og-image.png', (c) => new Response(ogImage, { headers: { 'Content-Type': 'image/png', ...ICON_CACHE } }));
+feeds.get('/app-store-badge.svg', (c) => new Response(appStoreBadge, { headers: { 'Content-Type': 'image/svg+xml', ...ICON_CACHE } }));
 
 feeds.get('/robots.txt', (c) => new Response(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /auth/\nDisallow: /api/fingerprint\nDisallow: /api/watch-event\nSitemap: ${new URL(c.req.url).origin}/sitemap.xml\n`, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'public, max-age=86400' } }));
 

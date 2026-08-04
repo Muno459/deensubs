@@ -113,6 +113,7 @@ ${meta.pattern ? `<div class="bgp" aria-hidden="true"><img class="bgp-t" src="/b
     <div class="ft-col">
       <div class="ft-brand">${LOGO_SVG}</div>
       <p class="ft-tag">Arabic Islamic lectures with accurate English subtitles, powered by AI.</p>
+      <a href="https://apps.apple.com/app/deensubs/id6792392495" target="_blank" rel="noopener" class="ft-appstore"><img src="/app-store-badge.svg" alt="Download on the App Store" width="120" height="36" loading="lazy"></a>
     </div>
     <div class="ft-col">
       <h2>Browse</h2>
